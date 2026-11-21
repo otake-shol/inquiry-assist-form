@@ -104,6 +104,7 @@ public class OperatorService {
                 ? null
                 : new OperatorDetail.AnswerDetail(
                         Boolean.TRUE.equals(e.answerGrounded),
+                        Boolean.TRUE.equals(e.answerAnswered),
                         e.askerExplanation,
                         e.technicalMemo,
                         e.citations.stream()

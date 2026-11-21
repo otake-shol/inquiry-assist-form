@@ -38,14 +38,15 @@ class AnswerPipelineTest {
     private static class RecordingExplainer implements ExplainerSkill {
         final List<List<Finding>> received = new ArrayList<>();
         RuntimeException failure;
+        boolean answers = true;
 
         @Override
-        public AiResult<String> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings) {
+        public AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings) {
             received.add(confirmedFindings);
             if (failure != null) {
                 throw failure;
             }
-            return new AiResult<>("説明文", new Usage("exp-model", "v2", 20, 8, 0, false));
+            return new AiResult<>(new Explanation("説明文", answers), new Usage("exp-model", "v2", 20, 8, 0, false));
         }
     }
 
@@ -103,6 +104,24 @@ class AnswerPipelineTest {
     }
 
     @Test
+    void 説明の判定がそのままansweredになる_根拠なしでは常にfalse() {
+        var answering = new RecordingExplainer();
+        var offTopic = new RecordingExplainer();
+        offTopic.answers = false;
+
+        assertThat(pipeline(mixed(), answering, new ArrayList<>()).run(INQUIRY, SCOPE, m -> {}).answer().answered()).isTrue();
+        var notAnswered = pipeline(mixed(), offTopic, new ArrayList<>()).run(INQUIRY, SCOPE, m -> {}).answer();
+        assertThat(notAnswered.grounded()).isTrue();
+        assertThat(notAnswered.answered()).isFalse();
+        assertThat(notAnswered.askerExplanation()).isEqualTo("説明文");
+
+        var ghost = new Investigation(List.of(finding("幽霊", citation("ghost", "x"))), List.of(), List.of());
+        var ungrounded = pipeline(ghost, answering, new ArrayList<>()).run(INQUIRY, SCOPE, m -> {}).answer();
+        assertThat(ungrounded.grounded()).isFalse();
+        assertThat(ungrounded.answered()).isFalse();
+    }
+
+    @Test
     void 事実が1件もなくても説明を呼ばない() {
         var explainer = new RecordingExplainer();
 
@@ -128,7 +147,7 @@ class AnswerPipelineTest {
         List<String> events = new ArrayList<>();
         var explainer = new RecordingExplainer() {
             @Override
-            public AiResult<String> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings) {
+            public AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings) {
                 events.add("explain");
                 return super.explain(inquiry, confirmedFindings);
             }

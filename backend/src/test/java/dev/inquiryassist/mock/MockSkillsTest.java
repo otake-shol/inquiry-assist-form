@@ -178,6 +178,20 @@ class MockSkillsTest {
     }
 
     @Test
+    void 説明は通常は問いに答えていると判定し的外れタグでは答えていないと判定する() {
+        var normal = pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "期限"), scope, m -> {}).answer();
+        var offTopic = pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "[的外れ] 期限"), scope, m -> {}).answer();
+
+        assertThat(normal.grounded()).isTrue();
+        assertThat(normal.answered()).isTrue();
+        // 調査は通常の事実を返すので根拠はあるが、答えとしては見せない
+        assertThat(offTopic.grounded()).isTrue();
+        assertThat(offTopic.answered()).isFalse();
+        assertThat(offTopic.askerExplanation()).isNotBlank();
+        assertThat(offTopic.citations()).hasSize(2);
+    }
+
+    @Test
     void 一部幽霊タグは確かめられた事実だけから説明を書き落ちた事実は説明に現れない() {
         Investigation raw = investigator
                 .investigate(inquiry(InquiryCategory.SPEC_QUESTION, "[一部幽霊] 期限"), scope, m -> {})

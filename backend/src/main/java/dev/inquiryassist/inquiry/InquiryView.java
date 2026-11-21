@@ -82,10 +82,15 @@ public record InquiryView(
      * 0次回答。{@code citations} には照合できた出典だけを入れる。
      *
      * @param grounded 照合できた出典に根拠があるか
+     * @param answered 確かめられた事実が本人の問いに答えているか。grounded でなければ常に false
      * @param askerExplanation 本人向けの説明。根拠なしなら null
      * @param memo 担当者向けの技術メモ
      * @param citations 照合できた出典
      */
     public record AnswerView(
-            boolean grounded, String askerExplanation, TechnicalMemo memo, List<Citation> citations) {}
+            boolean grounded,
+            boolean answered,
+            String askerExplanation,
+            TechnicalMemo memo,
+            List<Citation> citations) {}
 }

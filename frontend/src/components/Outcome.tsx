@@ -77,14 +77,24 @@ export function Result({
   busy,
   onResolve,
 }: ResultProps) {
+  // 古い応答（answered が無い）では grounded と同じ値として扱う
+  const answered = answer.answered ?? answer.grounded;
   return (
     <div className="system result">
       <h2 tabIndex={-1} data-autofocus>
         {TEXT.resultTitle}
       </h2>
-      <p className="answer-body">
-        {answer.grounded ? answer.askerExplanation : TEXT.notFound}
-      </p>
+      {answer.grounded && answered && (
+        <p className="answer-body">{answer.askerExplanation}</p>
+      )}
+      {answer.grounded && !answered && (
+        <>
+          <p className="answer-body">{TEXT.notAnswered}</p>
+          <h3 className="related-title">{TEXT.relatedTitle}</h3>
+          <p className="answer-body related">{answer.askerExplanation}</p>
+        </>
+      )}
+      {!answer.grounded && <p className="answer-body">{TEXT.notFound}</p>}
       {answer.grounded && answer.citations.length > 0 && (
         <details>
           <summary>{TEXT.citationsTitle(answer.citations.length)}</summary>
@@ -109,7 +119,7 @@ export function Result({
       </details>
       {awaitingResolution && (
         <div className="actions">
-          {answer.grounded ? (
+          {answered ? (
             <>
               <button
                 type="button"

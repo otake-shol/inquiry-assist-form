@@ -156,6 +156,57 @@ class SkillFlowTest extends ApiSupport {
         mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.step").value("ANSWERING"));
     }
 
+    // ---- 問いに答えられたか ----
+
+    @Test
+    void answeredは根拠あり_答えている_と_根拠あり_的外れ_と_根拠なしの3通りで本人向けにもオペレータ詳細にも正しい() throws Exception {
+        String answers = toAnswering(SPEC, null);
+        String offTopic = toAnswering("[的外れ] " + SPEC, null);
+        String ungrounded = toAnswering("[根拠なし] " + SPEC, null);
+        String ghost = toAnswering("[幽霊出典] " + SPEC, null);
+
+        record Expected(String id, boolean grounded, boolean answered) {}
+        for (Expected e : List.of(
+                new Expected(answers, true, true),
+                new Expected(offTopic, true, false),
+                new Expected(ungrounded, false, false),
+                new Expected(ghost, false, false))) {
+            String done = doneOf(stream(e.id()));
+            assertThat((Boolean) JsonPath.read(done, "$.answer.grounded")).isEqualTo(e.grounded());
+            assertThat((Boolean) JsonPath.read(done, "$.answer.answered")).isEqualTo(e.answered());
+            String view = text(mvc.perform(get("/api/inquiries/" + e.id())).andExpect(status().isOk()));
+            assertThat((Boolean) JsonPath.read(view, "$.answer.answered")).isEqualTo(e.answered());
+
+            resolve(e.id(), false);
+            String detail = operatorDetail(e.id());
+            assertThat((Boolean) JsonPath.read(detail, "$.answer.grounded")).isEqualTo(e.grounded());
+            assertThat((Boolean) JsonPath.read(detail, "$.answer.answered")).isEqualTo(e.answered());
+        }
+    }
+
+    @Test
+    void 的外れでも根拠ありなら説明と出典と技術メモは従来どおり返す() throws Exception {
+        String id = toAnswering("[的外れ] " + SPEC, null);
+
+        String done = doneOf(stream(id));
+
+        assertThat((String) JsonPath.read(done, "$.answer.askerExplanation")).isNotBlank();
+        assertThat((List<?>) JsonPath.read(done, "$.answer.citations")).hasSize(2);
+        assertThat((List<?>) JsonPath.read(done, "$.answer.memo.findings")).hasSize(2);
+        // 種別ごとの終わり方は変わらない: 仕様確認は本人の判定を待つ
+        assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("ANSWERED");
+    }
+
+    @Test
+    void 不具合の疑いは的外れでも担当者に送られる() throws Exception {
+        String id = toAnswering("[的外れ] 表示がおかしい", null);
+
+        String done = doneOf(stream(id));
+
+        assertThat((String) JsonPath.read(done, "$.outcome")).isEqualTo("FILED");
+        assertThat((Boolean) JsonPath.read(done, "$.answer.answered")).isFalse();
+    }
+
     // ---- 聞き手 ----
 
     @Test

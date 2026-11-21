@@ -911,3 +911,17 @@ blockquote {
   border-radius: 6px;
   padding: 0 8px;
 }
+
+/* 問いに答えていない説明は、答えとして読まれないよう控えめに見せる */
+.related-title {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 16px 0 4px;
+}
+
+.answer-body.related {
+  font-size: 0.95rem;
+  color: var(--muted);
+  border-left: 3px solid var(--line);
+  padding-left: 12px;
+}

@@ -55,7 +55,7 @@ interface InvestigatorSkill {
 }
 
 interface ExplainerSkill {
-    AiResult<String> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings);
+    AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings);
 }
 ```
 
@@ -70,6 +70,7 @@ interface ExplainerSkill {
 | `Finding` | `statement`（事実の一文）、`evidence`（その事実の根拠となる出典） | `evidence` は1件以上。根拠を挙げられない内容は事実にせず、「見つからなかったこと」か「次に確認すること」に入れる |
 | `Investigation` | `findings`、`notFound`、`nextChecks` | — |
 | `VerifiedInvestigation` | `confirmed`、`unconfirmed`、`notFound`、`nextChecks`、出典ごとの照合結果 | `confirmed` の各事実の `evidence` は照合を通った出典だけ |
+| `Explanation` | `text`（本人向けの説明）、`answersQuestion`（確かめられた事実が本人の問いに答えているか） | `text` は空でない |
 
 `Finding` が事実と根拠を対にして持つことが、この構成の要になる。事実と出典を別々の一覧で持つと、ある出典が照合で落ちたときに、どの事実が根拠を失ったのかが分からない。対にしておけば、根拠を失った事実だけを機械的に外せる。
 
@@ -90,6 +91,7 @@ interface ExplainerSkill {
 | 項目 | 中身 |
 | --- | --- |
 | `grounded` | `confirmed` が1件以上あるか |
+| `answered` | `grounded` で、かつ説明のスキルが「問いに答えている」と判定したか。確かめられたが的外れな事実しか集まらなかった場合に、それを答えとして見せないために持つ。この判定は機械的に確かめられないため、モデルの判定に頼る。ただし判定が効くのは「答えとして見せない」方向だけで、誤って `true` になっても従来と同じ表示になるだけで済む |
 | `askerExplanation` | 説明のスキルの出力。`grounded` でなければ `null` |
 | `citations`（本人向け） | `confirmed` の事実の根拠（照合を通ったもの） |
 | `memo.findings` | `confirmed` の事実の文 |
@@ -165,15 +167,17 @@ Bedrock の利用承認を待つ間、実際のモデルでスキルを試すた
 | 設定（スキルごと） | 意味 | `local-ai` での値 |
 | --- | --- | --- |
 | `model` | モデルの名前 | `qwen3.6:35b` |
-| `temperature` | 出力のばらつき。0 で毎回同じ出力になる | すべて `0` |
+| `temperature` | 出力のばらつき。0 で最も小さくなる | すべて `0` |
 | `think` | 考える過程を出力させるか。質は上がるが、応答が数十倍遅くなる | 説明だけ `true` |
 | `timeout` | 1回の呼び出しの時間切れ | 受付・聞き手・言い直しは `60s`、説明は `120s` |
 
-共通の設定は `inquiry.ollama.base-url`（既定 `http://localhost:11434`）と `inquiry.ollama.keep-alive`（モデルをメモリに残す時間。既定 `30m`）。
+共通の設定は `inquiry.ollama.base-url`（既定 `http://localhost:11434`）、`inquiry.ollama.keep-alive`（モデルをメモリに残す時間。既定 `30m`）、`inquiry.ollama.seed`（乱数の種。既定 `42`。`options.seed` として必ず送る）。
 
 実測（Apple M5 Pro、64GB）: 考える過程なしで受付 0.3秒、聞き手 1秒、言い直し 1〜2秒、説明 0.5秒。考える過程ありで説明 16〜21秒、言い直し 20〜36秒。説明は調査の進捗表示の中で動くため、遅くても体験を損なわない。言い直しは本人の確認の場面なので、考える過程なしで使う。
 
-`temperature` は必ず指定する。このモデルの既定値は 1 で、同じ入力でも出力が大きく揺れる（同じ訂正の試行が、5回中0回から4回まで変わった）。評価で結果を比べるには、出力が再現することが要る。
+`temperature` と `seed` は必ず指定する。このモデルの `temperature` の既定値は 1 で、同じ入力でも出力が大きく揺れる（同じ訂正の試行が、5回中0回から4回まで変わった）。
+
+`temperature` を 0 にしても、出力は完全には再現しない。同じ条件で評価を2回実行すると、32件中14件で文面が変わり、1件は合否が入れ替わった。同じ入力を続けて呼ぶと揃うが、別の入力を間に挟むと揃わないことがある。`seed` を固定すると揃いやすくなるが、保証はない。評価では揺れを前提にし、繰り返して通った割合で比べる（`docs/evaluation.md`）。
 
 ### 出力の形
 

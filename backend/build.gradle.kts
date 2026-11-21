@@ -58,3 +58,17 @@ tasks.register<Test>("liveTest") {
 		showStandardStreams = true
 	}
 }
+
+// スキルの評価（docs/evaluation.md）。実際の Ollama を呼ぶため、check からは呼ばれない。
+// 例: bash scripts/gradle.sh evalRun -Pskill=restater -Psplit=dev -Plabel=baseline
+tasks.register<JavaExec>("evalRun") {
+	description = "スキルの評価を実行する（実際の Ollama を呼ぶ）"
+	group = "verification"
+	classpath = sourceSets.test.get().runtimeClasspath
+	mainClass = "dev.inquiryassist.eval.EvalMain"
+	// evals/ はリポジトリのルートにある
+	workingDir = layout.projectDirectory.dir("..").asFile
+	systemProperty("eval.root", workingDir.absolutePath)
+	val names = listOf("skill", "split", "cases", "promptVersion", "model", "think", "temperature", "repeat", "label", "compareWith")
+	args = names.filter { project.hasProperty(it) }.map { "--$it=${project.property(it)}" }
+}

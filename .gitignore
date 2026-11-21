@@ -3,3 +3,7 @@ node_modules/
 *.log
 .env
 .env.*
+
+# 評価: 実際の問い合わせから作った例と、実行結果は公開しない
+evals/private/
+evals/reports/

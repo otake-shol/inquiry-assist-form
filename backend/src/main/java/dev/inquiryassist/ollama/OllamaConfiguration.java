@@ -16,6 +16,6 @@ class OllamaConfiguration {
      */
     @Bean
     OllamaClient ollamaClient(InquiryProperties properties, JsonMapper json) {
-        return new OllamaClient(properties.ollama().baseUrl(), properties.ollama().keepAlive(), json);
+        return new OllamaClient(properties.ollama().baseUrl(), properties.ollama().keepAlive(), properties.ollama().seed(), json);
     }
 }

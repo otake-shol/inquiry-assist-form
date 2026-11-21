@@ -66,12 +66,17 @@ public record OperatorDetail(
      * 0次回答。
      *
      * @param grounded 照合できた出典に根拠があるか
+     * @param answered 確かめられた事実が本人の問いに答えているか。grounded でなければ常に false
      * @param askerExplanation 本人向けの説明
      * @param memo 技術メモ
      * @param citations 出典。照合結果つき
      */
     public record AnswerDetail(
-            boolean grounded, String askerExplanation, TechnicalMemo memo, List<CitationDetail> citations) {}
+            boolean grounded,
+            boolean answered,
+            String askerExplanation,
+            TechnicalMemo memo,
+            List<CitationDetail> citations) {}
 
     /**
      * 照合結果つきの出典。

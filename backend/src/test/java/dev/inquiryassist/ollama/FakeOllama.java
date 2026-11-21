@@ -81,6 +81,16 @@ public final class FakeOllama implements AutoCloseable {
     }
 
     /**
+     * 本文をそのまま返す応答を積む（{@code /api/tags} など）。
+     *
+     * @param json 応答の本文
+     * @return このサーバー
+     */
+    public FakeOllama raw(String json) {
+        return enqueue(200, json, 0);
+    }
+
+    /**
      * HTTP エラーの応答を積む。
      *
      * @param status ステータス

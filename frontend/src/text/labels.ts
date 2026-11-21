@@ -96,6 +96,8 @@ export const TEXT = {
   researching: "調べています",
   resultTitle: "調べた結果",
   notFound: "手元の資料からは答えを見つけられませんでした。",
+  notAnswered: "ご質問への答えは、手元の資料では確認できませんでした。",
+  relatedTitle: "関連して分かったこと",
   citationsTitle: (n: number) => `根拠にした資料（${n}件）`,
   memoTitle: "担当者向けの詳しい内容",
   memoFindings: "分かったこと",

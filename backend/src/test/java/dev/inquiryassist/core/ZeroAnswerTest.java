@@ -22,14 +22,29 @@ class ZeroAnswerTest {
     @Test
     void 根拠ありの回答は出典なしでは作れない() {
         assertThrows(
-                IllegalArgumentException.class, () -> new ZeroAnswer(true, "説明", MEMO, List.of()));
+                IllegalArgumentException.class, () -> new ZeroAnswer(true, true, "説明", MEMO, List.of()));
     }
 
     @Test
     void 根拠ありの回答は本人向けの説明なしでは作れない() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new ZeroAnswer(true, " ", MEMO, List.of(citation("A.java"))));
+                () -> new ZeroAnswer(true, true, " ", MEMO, List.of(citation("A.java"))));
+    }
+
+    @Test
+    void 根拠のない回答がanswered_trueになることはない() {
+        assertThrows(
+                IllegalArgumentException.class, () -> new ZeroAnswer(false, true, null, MEMO, List.of()));
+        assertFalse(ZeroAnswer.ungrounded(MEMO).answered());
+    }
+
+    @Test
+    void 根拠ありで問いに答えていない回答も作れる() {
+        ZeroAnswer answer = new ZeroAnswer(true, false, "関連する説明", MEMO, List.of(citation("A.java")));
+
+        assertTrue(answer.grounded());
+        assertFalse(answer.answered());
     }
 
     @Test

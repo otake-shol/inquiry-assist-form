@@ -75,6 +75,8 @@ export interface AnswerMemo {
 /** 0次回答。`grounded` が false のとき `askerExplanation` は null。 */
 export interface ZeroAnswer {
   grounded: boolean;
+  /** 確かめられた事実が本人の問いに答えているか。無い古い応答では `grounded` と同じ扱い */
+  answered?: boolean;
   askerExplanation: string | null;
   memo: AnswerMemo;
   citations: Citation[];
@@ -163,6 +165,8 @@ export interface OperatorCitation extends Citation {
 /** オペレータ向けの0次回答。出典は照合に落ちたものも含む。 */
 export interface OperatorAnswer {
   grounded: boolean;
+  /** 問いに答えているか。無い古い応答では `grounded` と同じ扱い */
+  answered?: boolean;
   askerExplanation: string | null;
   memo: AnswerMemo;
   citations: OperatorCitation[];

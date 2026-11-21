@@ -107,6 +107,9 @@ class InquiryEntity {
     @Column(name = "answer_grounded")
     Boolean answerGrounded;
 
+    @Column(name = "answer_answered")
+    Boolean answerAnswered;
+
     @Column(name = "asker_explanation")
     String askerExplanation;
 

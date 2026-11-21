@@ -14,13 +14,13 @@ import java.util.List;
 public interface ExplainerSkill {
 
     /**
-     * 本人向けの説明を書く。
+     * 本人向けの説明を書く。あわせて、確かめられた事実が本人の問いに答えているかを判定する。
      *
      * @param inquiry 本人が確認した整形後の問い
      * @param confirmedFindings 根拠を確かめられた事実。1件以上
-     * @return 本人向けの説明
+     * @return 本人向けの説明と、問いに答えているかの判定
      * @throws AiRefusalException モデルが回答を拒否した場合
      * @throws AiUnavailableException モデルを呼び出せなかった場合
      */
-    AiResult<String> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings);
+    AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings);
 }

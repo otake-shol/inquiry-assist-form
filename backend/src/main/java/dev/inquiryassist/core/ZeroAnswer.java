@@ -11,16 +11,20 @@ import java.util.List;
  * <p>根拠あり（{@code grounded}）の回答は出典を1つ以上持つ。出典のない回答は「わからない」として扱う。
  *
  * @param grounded 一次情報に根拠があるか
+ * @param answered 確かめられた事実が本人の問いに答えているか。{@code grounded} でなければ常に {@code false}
  * @param askerExplanation 本人向けの説明。業務の言葉で書く。根拠がない場合は {@code null}
  * @param memo 担当者向けの技術メモ
  * @param citations 出典
  */
 public record ZeroAnswer(
-        boolean grounded, String askerExplanation, TechnicalMemo memo, List<Citation> citations) {
+        boolean grounded, boolean answered, String askerExplanation, TechnicalMemo memo, List<Citation> citations) {
 
     public ZeroAnswer {
         memo = memo == null ? TechnicalMemo.empty() : memo;
         citations = citations == null ? List.of() : List.copyOf(citations);
+        if (!grounded && answered) {
+            throw new IllegalArgumentException("根拠のない回答が、問いに答えていることはない");
+        }
         if (grounded && citations.isEmpty()) {
             throw new IllegalArgumentException("根拠ありの回答には出典が必要");
         }
@@ -36,6 +40,6 @@ public record ZeroAnswer(
      * @return 根拠なしの回答
      */
     public static ZeroAnswer ungrounded(TechnicalMemo memo) {
-        return new ZeroAnswer(false, null, memo, List.of());
+        return new ZeroAnswer(false, false, null, memo, List.of());
     }
 }

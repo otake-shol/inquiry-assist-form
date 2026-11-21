@@ -3,6 +3,7 @@ package dev.inquiryassist.ollama;
 import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.skill.ExplainerSkill;
+import dev.inquiryassist.core.skill.Explanation;
 import dev.inquiryassist.core.skill.Finding;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.inquiry.InquiryProperties;
@@ -18,7 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
 public class OllamaExplainerSkill implements ExplainerSkill {
 
     private final JsonSkillCall call;
-    private final String system = Prompts.systemOf(Skill.EXPLAINER);
+    private final String system;
 
     /**
      * @param client Ollama のクライアント
@@ -26,18 +27,21 @@ public class OllamaExplainerSkill implements ExplainerSkill {
      * @param properties スキルの設定
      */
     public OllamaExplainerSkill(OllamaClient client, JsonMapper json, InquiryProperties properties) {
-        this.call = new JsonSkillCall(client, json, properties.skill(Skill.EXPLAINER), Prompts.VERSION);
+        InquiryProperties.SkillSettings settings = properties.skill(Skill.EXPLAINER);
+        this.system = Prompts.systemOf(Skill.EXPLAINER, settings.promptVersion());
+        this.call = new JsonSkillCall(client, json, settings, settings.promptVersion());
     }
 
     /**
-     * 確かめられた事実だけから説明を書く。出力は信用せず、説明が空でないことを確かめる。
+     * 確かめられた事実だけから説明を書く。出力は信用せず、説明が空でないことを確かめ、
+     * {@code answersQuestion} が欠けている・真偽値でない場合は false にする。
      *
      * @param inquiry 本人が確認した整形後の問い
      * @param confirmedFindings 根拠を確かめられた事実
-     * @return 本人向けの説明
+     * @return 本人向けの説明と、問いに答えているかの判定
      */
     @Override
-    public AiResult<String> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings) {
+    public AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings) {
         StringBuilder user = new StringBuilder("## 本人の問い\n")
                 .append(inquiry.summary())
                 .append("\n\n## 種別\n")
@@ -47,11 +51,13 @@ public class OllamaExplainerSkill implements ExplainerSkill {
         return call.call(system, user.toString().stripTrailing(), OllamaExplainerSkill::toExplanation);
     }
 
-    private static String toExplanation(JsonNode node) {
+    private static Explanation toExplanation(JsonNode node) {
         JsonNode explanation = node.path("explanation");
         if (!explanation.isString() || explanation.asString().isBlank()) {
             throw new IllegalArgumentException("explanation が空");
         }
-        return explanation.asString().strip();
+        // 迷ったら「答えとして見せない」側に倒す。欠けている、または真偽値でない場合は false
+        JsonNode answers = node.path("answersQuestion");
+        return new Explanation(explanation.asString().strip(), answers.isBoolean() && answers.asBoolean());
     }
 }

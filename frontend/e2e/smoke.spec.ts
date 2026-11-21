@@ -217,3 +217,46 @@ test("根拠を確かめられなかったことは本人には見せず担当�
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * `[的外れ]` では説明が「問いに答えていない」と判定する。
+ * 本人の画面では、答えを確認できなかったと先に示し、説明は「関連して分かったこと」として出す。
+ */
+test("問いに答えていない結果は関連して分かったこととして示す", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.goto("/");
+  await page
+    .getByLabel(INPUT_LABEL)
+    .fill("求人の掲載期限は、何日まで延長できますか？ [的外れ]");
+  await page.getByRole("button", { name: "送信する" }).click();
+
+  const confirm = page.getByRole("button", { name: "合っています" });
+  const unknown = page.getByRole("button", { name: "わからない", exact: true });
+  for (let i = 0; i < 5; i++) {
+    await expect(unknown.or(confirm)).toBeVisible();
+    if (await confirm.isVisible()) break;
+    await unknown.click();
+  }
+  await confirm.click();
+
+  await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(
+    page.getByText("ご質問への答えは、手元の資料では確認できませんでした。"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "関連して分かったこと" }),
+  ).toBeVisible();
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

@@ -40,18 +40,18 @@ class LiveOllamaTest {
     private static final String UTTERANCE = "求人管理画面で、掲載期限を過ぎた求人が応募者向けの一覧に出なくなった。仕様どおりなのか知りたい。";
 
     private static InquiryProperties properties() {
-        SkillSettings fast = new SkillSettings("ollama", MODEL, 0, false, Duration.ofSeconds(60));
-        SkillSettings thinking = new SkillSettings("ollama", MODEL, 0, true, Duration.ofSeconds(120));
+        SkillSettings fast = new SkillSettings("ollama", MODEL, 0, false, Duration.ofSeconds(60), "v1");
+        SkillSettings thinking = new SkillSettings("ollama", MODEL, 0, true, Duration.ofSeconds(120), "v1");
         return new InquiryProperties(
                 List.of(),
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
                 null,
                 Map.of("reception", fast, "interviewer", fast, "restater", fast, "explainer", thinking),
-                new InquiryProperties.Ollama("http://localhost:11434", "30m"));
+                new InquiryProperties.Ollama("http://localhost:11434", "30m", 42));
     }
 
     private static OllamaClient client() {
-        return new OllamaClient("http://localhost:11434", "30m", JSON);
+        return new OllamaClient("http://localhost:11434", "30m", 42, JSON);
     }
 
     private static void assertUsage(Usage usage) {
@@ -147,7 +147,7 @@ class LiveOllamaTest {
         var result = skill.explain(inquiry, findings);
 
         report("explainer", start, result);
-        assertThat(result.value()).isNotBlank();
+        assertThat(result.value().text()).isNotBlank();
         assertUsage(result.usage());
     }
 }

@@ -21,7 +21,7 @@ import tools.jackson.databind.json.JsonMapper;
 public class OllamaRestaterSkill implements RestaterSkill {
 
     private final JsonSkillCall call;
-    private final String system = Prompts.systemOf(Skill.RESTATER);
+    private final String system;
 
     /**
      * @param client Ollama のクライアント
@@ -29,7 +29,9 @@ public class OllamaRestaterSkill implements RestaterSkill {
      * @param properties スキルの設定
      */
     public OllamaRestaterSkill(OllamaClient client, JsonMapper json, InquiryProperties properties) {
-        this.call = new JsonSkillCall(client, json, properties.skill(Skill.RESTATER), Prompts.VERSION);
+        InquiryProperties.SkillSettings settings = properties.skill(Skill.RESTATER);
+        this.system = Prompts.systemOf(Skill.RESTATER, settings.promptVersion());
+        this.call = new JsonSkillCall(client, json, settings, settings.promptVersion());
     }
 
     /**

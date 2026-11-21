@@ -28,6 +28,8 @@ final class MockScenario {
     static final String TAG_REFUSED = "[拒否]";
     /** 説明が AI_UNAVAILABLE になる。 */
     static final String TAG_EXPLAIN_ERROR = "[説明エラー]";
+    /** 説明が「確かめられた事実は問いに答えていない」と判定する。 */
+    static final String TAG_OFF_TOPIC = "[的外れ]";
     /** 受付（種別の判定）が AI_UNAVAILABLE になる。 */
     static final String TAG_TRIAGE_ERROR = "[判定エラー]";
 
@@ -41,6 +43,7 @@ final class MockScenario {
             TAG_ERROR,
             TAG_REFUSED,
             TAG_EXPLAIN_ERROR,
+            TAG_OFF_TOPIC,
             TAG_TRIAGE_ERROR);
     private static final List<String> INCIDENT_WORDS = List.of("障害", "止まって", "落ちて", "つながらない");
     private static final List<String> WORK_REQUEST_WORDS = List.of("依頼", "してほしい", "お願いします", "してください");

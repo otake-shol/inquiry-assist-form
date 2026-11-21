@@ -19,7 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
  * Ollama の {@code POST /api/chat} を、ストリーミングなしで呼ぶ最小のクライアント（JDK 標準の HTTP クライアント）。
  *
  * <p>リクエストに {@code format} は付けない（対象のモデルの版では 501 になるため）。出力の形は、プロンプトでの指示と
- * 受け取った側の検証で守る。{@code think}、{@code options.temperature}、{@code keep_alive} は必ず送る。
+ * 受け取った側の検証で守る。{@code think}、{@code options.temperature}、{@code options.seed}、{@code keep_alive} は必ず送る。
  */
 public class OllamaClient {
 
@@ -42,17 +42,20 @@ public class OllamaClient {
 
     private final String baseUrl;
     private final String keepAlive;
+    private final int seed;
     private final JsonMapper json;
     private final HttpClient client;
 
     /**
      * @param baseUrl Ollama の URL（例: {@code http://localhost:11434}）
      * @param keepAlive モデルをメモリに残す時間（例: {@code 30m}）
+     * @param seed 乱数の種（{@code options.seed} として必ず送る）
      * @param json JSON の読み書き
      */
-    public OllamaClient(String baseUrl, String keepAlive, JsonMapper json) {
+    public OllamaClient(String baseUrl, String keepAlive, int seed, JsonMapper json) {
         this.baseUrl = baseUrl.replaceAll("/+$", "");
         this.keepAlive = keepAlive;
+        this.seed = seed;
         this.json = json;
         this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     }
@@ -77,7 +80,7 @@ public class OllamaClient {
         body.put("stream", false);
         body.put("think", think);
         body.put("keep_alive", keepAlive);
-        body.put("options", Map.of("temperature", temperature));
+        body.put("options", Map.of("temperature", temperature, "seed", seed));
 
         HttpResponse<String> response;
         try {

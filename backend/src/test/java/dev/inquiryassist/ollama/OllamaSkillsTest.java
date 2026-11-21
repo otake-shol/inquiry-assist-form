@@ -43,7 +43,7 @@ class OllamaSkillsTest {
     }
 
     private InquiryProperties properties(boolean think, Duration timeout) {
-        SkillSettings settings = new SkillSettings("ollama", "test-model", 0, think, timeout);
+        SkillSettings settings = new SkillSettings("ollama", "test-model", 0, think, timeout, "v1");
         return new InquiryProperties(
                 List.of(),
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
@@ -53,11 +53,11 @@ class OllamaSkillsTest {
                         "interviewer", settings,
                         "restater", settings,
                         "explainer", settings),
-                new InquiryProperties.Ollama(ollama.baseUrl(), "30m"));
+                new InquiryProperties.Ollama(ollama.baseUrl(), "30m", 42));
     }
 
     private OllamaClient client() {
-        return new OllamaClient(ollama.baseUrl(), "30m", JSON);
+        return new OllamaClient(ollama.baseUrl(), "30m", 42, JSON);
     }
 
     private OllamaReceptionSkill reception() {
@@ -108,11 +108,12 @@ class OllamaSkillsTest {
         assertThat(body.path("think").asBoolean(true)).isFalse();
         assertThat(body.path("options").path("temperature").asDouble(-1)).isEqualTo(0.0);
         assertThat(body.path("keep_alive").asString()).isEqualTo("30m");
+        assertThat(body.path("options").path("seed").asInt(-1)).isEqualTo(42);
         assertThat(body.path("stream").asBoolean(true)).isFalse();
         assertThat(body.path("model").asString()).isEqualTo("test-model");
         assertThat(body.path("messages").size()).isEqualTo(2);
         assertThat(body.path("messages").get(0).path("role").asString()).isEqualTo("system");
-        assertThat(body.path("messages").get(0).path("content").asString()).isEqualTo(Prompts.systemOf(Skill.RECEPTION));
+        assertThat(body.path("messages").get(0).path("content").asString()).isEqualTo(Prompts.systemOf(Skill.RECEPTION, "v1"));
         assertThat(body.path("messages").get(1).path("role").asString()).isEqualTo("user");
     }
 
@@ -125,7 +126,7 @@ class OllamaSkillsTest {
         assertThat(request(0).path("think").asBoolean(false)).isTrue();
         assertThat(request(0).has("format")).isFalse();
         assertThat(request(0).path("messages").get(0).path("content").asString())
-                .isEqualTo(Prompts.systemOf(Skill.EXPLAINER));
+                .isEqualTo(Prompts.systemOf(Skill.EXPLAINER, "v1"));
     }
 
     // ---- (b) 入力の組み立て ----
@@ -242,6 +243,33 @@ class OllamaSkillsTest {
         assertThat(ollama.requests()).hasSize(2); // 呼び直しは1回だけ
     }
 
+    @Test
+    void 二度とも読めなかったときは試行ごとの理由と生の出力を持ち生の出力はメッセージに入れない() {
+        ollama.reply("読めない出力その1", 1, 1).reply("{\"category\":\"NOPE\",\"systemId\":null}", 1, 1);
+
+        assertThatThrownBy(() -> reception().receive("期限の仕様", SYSTEMS, null))
+                .isInstanceOfSatisfying(UnreadableOutputException.class, e -> {
+                    assertThat(e.reasons()).containsExactly("JSON として読めない", "形が指定と違う");
+                    assertThat(e.rawOutputs())
+                            .containsExactly("読めない出力その1", "{\"category\":\"NOPE\",\"systemId\":null}");
+                    // 詳しい内容には、不正な値（モデルの出力の一部）が入る。調べるときに要る
+                    assertThat(e.details().get(1)).contains("NOPE");
+                    // メッセージは画面への応答やログに出ることがある。理由の種類は入れ、モデルの出力は
+                    // 生の形でも、不正な値の説明を通じても入れない
+                    assertThat(e.getMessage()).contains("1回目: JSON として読めない").contains("2回目: 形が指定と違う");
+                    assertThat(e.getMessage()).doesNotContain("読めない出力その1").doesNotContain("NOPE");
+                });
+    }
+
+    @Test
+    void 出力が空のときは理由に空であることが残る() {
+        ollama.reply("", 1, 0).reply("   ", 1, 0);
+
+        assertThatThrownBy(() -> reception().receive("期限の仕様", SYSTEMS, null))
+                .isInstanceOfSatisfying(UnreadableOutputException.class, e -> assertThat(e.reasons())
+                        .containsExactly("出力が空", "出力が空"));
+    }
+
     // ---- (e) 型の不変条件 ----
 
     @Test
@@ -263,10 +291,28 @@ class OllamaSkillsTest {
     }
 
     @Test
+    void 説明のanswersQuestionはtrueとfalseをそのまま読み_欠けているか真偽値でなければfalseにする() {
+        ollama.reply("{\"explanation\":\"答えです。\",\"answersQuestion\":true}", 1, 1)
+                .reply("{\"explanation\":\"確認できませんでした。\",\"answersQuestion\":false}", 1, 1)
+                .reply("{\"explanation\":\"欠けています。\"}", 1, 1)
+                .reply("{\"explanation\":\"文字列です。\",\"answersQuestion\":\"true\"}", 1, 1)
+                .reply("{\"explanation\":\"数値です。\",\"answersQuestion\":1}", 1, 1)
+                .reply("{\"explanation\":\"nullです。\",\"answersQuestion\":null}", 1, 1);
+
+        var results = new java.util.ArrayList<Boolean>();
+        for (int i = 0; i < 6; i++) {
+            results.add(explainer().explain(structured(), findings("事実")).value().answersQuestion());
+        }
+
+        assertThat(results).containsExactly(true, false, false, false, false, false);
+        assertThat(ollama.requests()).hasSize(6); // 判定の欠けは読めない出力とはせず、呼び直さない
+    }
+
+    @Test
     void 説明が空の出力も読めない場合と同じ扱い() {
         ollama.reply("{\"explanation\":\"\"}", 1, 1).reply("{\"explanation\":\"書き直しました。\"}", 1, 1);
 
-        assertThat(explainer().explain(structured(), findings("事実")).value()).isEqualTo("書き直しました。");
+        assertThat(explainer().explain(structured(), findings("事実")).value().text()).isEqualTo("書き直しました。");
     }
 
     @Test

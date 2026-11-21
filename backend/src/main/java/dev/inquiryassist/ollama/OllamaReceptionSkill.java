@@ -20,7 +20,7 @@ import tools.jackson.databind.json.JsonMapper;
 public class OllamaReceptionSkill implements ReceptionSkill {
 
     private final JsonSkillCall call;
-    private final String system = Prompts.systemOf(Skill.RECEPTION);
+    private final String system;
 
     /**
      * @param client Ollama のクライアント
@@ -28,7 +28,9 @@ public class OllamaReceptionSkill implements ReceptionSkill {
      * @param properties スキルの設定
      */
     public OllamaReceptionSkill(OllamaClient client, JsonMapper json, InquiryProperties properties) {
-        this.call = new JsonSkillCall(client, json, properties.skill(Skill.RECEPTION), Prompts.VERSION);
+        InquiryProperties.SkillSettings settings = properties.skill(Skill.RECEPTION);
+        this.system = Prompts.systemOf(Skill.RECEPTION, settings.promptVersion());
+        this.call = new JsonSkillCall(client, json, settings, settings.promptVersion());
     }
 
     /**

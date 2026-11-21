@@ -32,7 +32,7 @@ public record InquiryProperties(
      */
     public SkillSettings skill(Skill skill) {
         SkillSettings settings = skills.get(skill.id());
-        return settings != null ? settings : new SkillSettings("mock", null, 0, false, Duration.ofSeconds(60));
+        return settings != null ? settings : new SkillSettings("mock", null, 0, false, Duration.ofSeconds(60), "v1");
     }
 
     /**
@@ -43,22 +43,27 @@ public record InquiryProperties(
      * @param temperature 出力のばらつき。0 で毎回同じ出力になる
      * @param think 考える過程を出力させるか。質は上がるが、応答が遅くなる
      * @param timeout 1回の呼び出しの時間切れ
+     * @param promptVersion プロンプトの版（{@code skills/<識別子>/system-<版>.md}）。既定は {@code v1}
      */
     public record SkillSettings(
             @DefaultValue("mock") String provider,
             String model,
             @DefaultValue("0") double temperature,
             @DefaultValue("false") boolean think,
-            @DefaultValue("60s") Duration timeout) {}
+            @DefaultValue("60s") Duration timeout,
+            @DefaultValue("v1") String promptVersion) {}
 
     /**
      * Ollama の共通の設定。
      *
      * @param baseUrl Ollama の URL
      * @param keepAlive モデルをメモリに残す時間
+     * @param seed 乱数の種。{@code options.seed} として必ず送り、出力を揃いやすくする（保証はない）
      */
     public record Ollama(
-            @DefaultValue("http://localhost:11434") String baseUrl, @DefaultValue("30m") String keepAlive) {}
+            @DefaultValue("http://localhost:11434") String baseUrl,
+            @DefaultValue("30m") String keepAlive,
+            @DefaultValue("42") int seed) {}
 
     /**
      * 問い合わせの投稿先を決める。対象システムに個別の URL があればそれ、なければ既定の URL。

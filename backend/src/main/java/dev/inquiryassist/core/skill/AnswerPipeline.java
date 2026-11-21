@@ -78,7 +78,7 @@ public final class AnswerPipeline {
         }
 
         progress.onProgress(PROGRESS_EXPLAINING);
-        AiResult<String> explanation;
+        AiResult<Explanation> explanation;
         try {
             explanation = explainer.explain(inquiry, verified.confirmed());
         } catch (AiRefusalException | AiUnavailableException e) {
@@ -91,7 +91,7 @@ public final class AnswerPipeline {
         List<Citation> citations = new ArrayList<>(verified.confirmed().stream()
                 .flatMap(f -> f.evidence().stream())
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new)));
-        return new Result(new ZeroAnswer(true, explanation.value(), memo, citations), verified, usages);
+        return new Result(new ZeroAnswer(true, explanation.value().answersQuestion(), explanation.value().text(), memo, citations), verified, usages);
     }
 
     /**

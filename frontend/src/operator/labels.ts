@@ -50,6 +50,7 @@ export const OP_TEXT = {
   revisionNotes: "作り直しで伝えられた一言",
   result: "調べた結果",
   noResult: "調べた結果はありません（調査の前に送られました）",
+  offTopic: "問いに答えていないと判定（関連する内容のみ）",
   notGrounded: "一次情報から答えを特定できませんでした",
   findings: "分かったこと",
   notFound: "調べたが見つからなかったこと",

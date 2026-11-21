@@ -26,7 +26,7 @@ public class OllamaInterviewerSkill implements InterviewerSkill {
     private static final int MAX_OPTIONS = 4;
 
     private final JsonSkillCall call;
-    private final String system = Prompts.systemOf(Skill.INTERVIEWER);
+    private final String system;
 
     /**
      * @param client Ollama のクライアント
@@ -34,7 +34,9 @@ public class OllamaInterviewerSkill implements InterviewerSkill {
      * @param properties スキルの設定
      */
     public OllamaInterviewerSkill(OllamaClient client, JsonMapper json, InquiryProperties properties) {
-        this.call = new JsonSkillCall(client, json, properties.skill(Skill.INTERVIEWER), Prompts.VERSION);
+        InquiryProperties.SkillSettings settings = properties.skill(Skill.INTERVIEWER);
+        this.system = Prompts.systemOf(Skill.INTERVIEWER, settings.promptVersion());
+        this.call = new JsonSkillCall(client, json, settings, settings.promptVersion());
     }
 
     /**

@@ -53,6 +53,9 @@ final class JsonSkillCall {
 
         long input = 0;
         long output = 0;
+        List<String> reasons = new ArrayList<>();
+        List<String> details = new ArrayList<>();
+        List<String> rawOutputs = new ArrayList<>();
         for (int attempt = 1; attempt <= 2; attempt++) {
             OllamaClient.Reply reply;
             try {
@@ -63,14 +66,41 @@ final class JsonSkillCall {
             }
             input += reply.inputTokens();
             output += reply.outputTokens();
-            T parsed = tryParse(reply.content(), mapper);
-            if (parsed != null) {
-                return new AiResult<>(parsed, usage(input, output, null));
+            Parsed<T> parsed = tryParse(reply.content(), mapper);
+            if (parsed.value() != null) {
+                return new AiResult<>(parsed.value(), usage(input, output, null));
             }
+            // 理由を捨てると、なぜ読めなかったのかを後から調べられない。試行ごとに残す
+            reasons.add(parsed.reason());
+            details.add(parsed.detail());
+            rawOutputs.add(reply.content());
             messages.add(new OllamaClient.Message("assistant", reply.content()));
             messages.add(new OllamaClient.Message("user", RETRY_INSTRUCTION));
         }
-        throw new AiUnavailableException("モデルの出力を指定の形として読めませんでした", null, usage(input, output, null));
+        throw new UnreadableOutputException(reasons, details, rawOutputs, usage(input, output, null));
+    }
+
+    /**
+     * 読み取りの結果。読めた場合は {@code value}、読めなかった場合は {@code reason} と {@code detail} を持つ。
+     *
+     * @param value 型に入れた結果。読めなかった場合は null
+     * @param reason 読めなかった理由の種類。モデルの出力を含めない（例外のメッセージに入るため）
+     * @param detail 理由の詳しい内容。不正な値など、モデルの出力の一部を含むことがある
+     * @param <T> 結果の型
+     */
+    private record Parsed<T>(T value, String reason, String detail) {
+
+        static <T> Parsed<T> ok(T value) {
+            return new Parsed<>(value, null, null);
+        }
+
+        static <T> Parsed<T> unreadable(String reason) {
+            return new Parsed<>(null, reason, reason);
+        }
+
+        static <T> Parsed<T> unreadable(String reason, String detail) {
+            return new Parsed<>(null, reason, reason + "（" + detail + "）");
+        }
     }
 
     private Usage usage(long input, long output, AiUnavailableException cause) {
@@ -80,16 +110,26 @@ final class JsonSkillCall {
         return new Usage(settings.model(), promptVersion, input, output, 0, false);
     }
 
-    /** 読めて、型の不変条件も満たす場合だけ結果を返す。そうでなければ null。 */
-    private <T> T tryParse(String content, Function<JsonNode, T> mapper) {
+    /** 読めて、型の不変条件も満たす場合だけ結果を返す。そうでなければ、読めなかった理由を返す。 */
+    private <T> Parsed<T> tryParse(String content, Function<JsonNode, T> mapper) {
+        if (content == null || content.isBlank()) {
+            return Parsed.unreadable("出力が空");
+        }
         JsonNode node = readJson(content);
-        if (node == null || !node.isObject()) {
-            return null;
+        if (node == null) {
+            return Parsed.unreadable("JSON として読めない");
+        }
+        if (!node.isObject()) {
+            return Parsed.unreadable("JSON のオブジェクトでない");
         }
         try {
-            return mapper.apply(node);
+            T value = mapper.apply(node);
+            return value == null ? Parsed.unreadable("型に入れた結果が空") : Parsed.ok(value);
         } catch (RuntimeException e) {
-            return null;
+            // 例外のメッセージには、不正な値そのもの（モデルの出力の一部）が入ることがある。
+            // 理由の種類とは分けて持ち、例外のメッセージには入れない
+            String detail = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            return Parsed.unreadable("形が指定と違う", detail);
         }
     }
 

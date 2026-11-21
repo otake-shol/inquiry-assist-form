@@ -509,3 +509,43 @@ describe("調べた結果の区別と追加質問の状態", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("問いに答えていない判定の印", () => {
+  /** 指定の詳細を直接開く。 */
+  async function openDetail(detail: ReturnType<typeof makeDetail>) {
+    window.history.replaceState({}, "", "/operator/op-1");
+    installFakeFetch({
+      ...operatorRoutes([readItem]),
+      "GET /api/operator/inquiries/op-1": { body: detail },
+    });
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    const region = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+    await within(region).findByText("元の発話");
+    return region;
+  }
+
+  it("(d) 根拠ありで answered が false のときだけ印が出る", async () => {
+    const base = makeDetail({ read: true });
+    const off = await openDetail({
+      ...base,
+      answer: { ...base.answer!, answered: false },
+    });
+    expect(
+      within(off).getByText("問いに答えていないと判定（関連する内容のみ）"),
+    ).toBeInTheDocument();
+    cleanup();
+
+    for (const answered of [true, undefined]) {
+      const region = await openDetail({
+        ...base,
+        answer: { ...base.answer!, answered },
+      });
+      expect(
+        within(region).queryByText(/問いに答えていないと判定/),
+      ).not.toBeInTheDocument();
+      cleanup();
+    }
+  });
+});

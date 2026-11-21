@@ -373,6 +373,7 @@ public class InquiryService {
             } catch (ExplanationFailedException e) {
                 // 費用をかけた調査の結果は失わない。本人向けの回答は作らない（answerGrounded は null のまま）
                 inquiry.answerGrounded = null;
+                inquiry.answerAnswered = null;
                 inquiry.askerExplanation = null;
                 inquiry.technicalMemo = AnswerPipeline.memoOf(e.investigation());
                 inquiry.citations = storedCitations(e.investigation().citationResults());
@@ -382,6 +383,7 @@ public class InquiryService {
             }
             ZeroAnswer answer = result.answer();
             inquiry.answerGrounded = answer.grounded();
+            inquiry.answerAnswered = answer.answered();
             inquiry.askerExplanation = answer.askerExplanation();
             inquiry.technicalMemo = answer.memo();
             inquiry.citations = storedCitations(result.investigation().citationResults());
@@ -620,6 +622,7 @@ public class InquiryService {
                 ? null
                 : new InquiryView.AnswerView(
                         e.answerGrounded,
+                        Boolean.TRUE.equals(e.answerAnswered),
                         e.askerExplanation,
                         forAsker(e.technicalMemo),
                         e.citations.stream()

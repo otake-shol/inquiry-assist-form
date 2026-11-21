@@ -937,7 +937,7 @@ describe("入力とモック表示", () => {
       "求人の掲載期限は、何日まで延長できますか？ [根拠なし]",
     );
     const bar = screen.getByRole("region", { name: "モックのシナリオ" });
-    expect(within(bar).getAllByRole("button")).toHaveLength(14);
+    expect(within(bar).getAllByRole("button")).toHaveLength(15);
     expect(within(bar).queryByText("種別の例")).not.toBeInTheDocument();
   });
 
@@ -1361,5 +1361,173 @@ describe("調査の結果と説明の失敗", () => {
     expect(
       screen.queryByRole("button", { name: "解決しました" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("問いに答えられたか", () => {
+  const OFF_TOPIC = "ご質問への答えは、手元の資料では確認できませんでした。";
+  const bug = {
+    category: "SUSPECTED_BUG",
+    categoryByAi: "SUSPECTED_BUG",
+  } as const;
+
+  /** 調べている最中まで進め、届いた最後の応答で結果を出す。 */
+  async function showResult(
+    user: User,
+    done: ReturnType<typeof makeStructuredView>,
+    extra: Parameters<typeof makeView>[0] = {},
+  ) {
+    const stream = new FakeStream();
+    installFakeFetch({
+      ...restatementRoutes(makeStructuredView(extra)),
+      "PUT /api/inquiries/inq-1/structured": {
+        body: makeStructuredView({ ...extra, step: "ANSWERING" }),
+      },
+      "POST /api/inquiries/inq-1/resolution": {
+        body: makeStructuredView({
+          step: "CLOSED",
+          outcome: "FILED",
+          answer: done.answer,
+        }),
+      },
+    });
+    render(<App subscribe={stream.subscribe} />);
+    await send(user);
+    await user.click(
+      await screen.findByRole("button", { name: "合っています" }),
+    );
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
+    act(() => stream.latest.handlers.onDone(done));
+    await screen.findByRole("heading", { name: "調べた結果" });
+  }
+
+  const relatedAnswer = {
+    ...groundedAnswer,
+    answered: false,
+    askerExplanation: "掲載期限は最大90日まで延長できます。",
+  };
+
+  it("(a) 根拠ありで答えている場合は説明を主に出し、解決しましたが主のボタン", async () => {
+    const user = userEvent.setup();
+    await showResult(
+      user,
+      makeStructuredView({
+        step: "ANSWERED",
+        answer: { ...groundedAnswer, answered: true },
+      }),
+    );
+
+    expect(
+      screen.getByText("掲載期限は最大90日まで延長できます。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(OFF_TOPIC)).not.toBeInTheDocument();
+    expect(screen.queryByText("関連して分かったこと")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "解決しました" })).toHaveClass(
+      "primary",
+    );
+  });
+
+  it("(a) 根拠はあるが答えていない場合は、答えを確認できなかったと先に示し、説明は関連として控えめに出す", async () => {
+    const user = userEvent.setup();
+    const calls: RecordedCall[] = [];
+    await showResult(
+      user,
+      makeStructuredView({ step: "ANSWERED", answer: relatedAnswer }),
+    );
+    void calls;
+
+    const off = screen.getByText(OFF_TOPIC);
+    const related = screen.getByRole("heading", {
+      name: "関連して分かったこと",
+    });
+    const explanation = screen.getByText(
+      "掲載期限は最大90日まで延長できます。",
+    );
+    const follows = (a: Node, b: Node) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(off, related)).toBe(true);
+    expect(follows(related, explanation)).toBe(true);
+    expect(explanation).toHaveClass("related");
+    // 折りたたみは従来どおり
+    expect(
+      screen.getByText("根拠にした資料（1件）").closest("details"),
+    ).not.toHaveAttribute("open");
+    expect(
+      screen.getByText("担当者向けの詳しい内容").closest("details"),
+    ).not.toHaveAttribute("open");
+    expectNoInternalWords();
+
+    // 担当者に送るが主、解決しましたが副（根拠なしの場合と同じ並び）
+    const send1 = screen.getByRole("button", { name: "担当者に送る" });
+    const solved = screen.getByRole("button", { name: "解決しました" });
+    expect(send1).toHaveClass("primary");
+    expect(solved).not.toHaveClass("primary");
+    expect(follows(send1, solved)).toBe(true);
+
+    await user.click(send1);
+    expect(
+      await screen.findByText(/担当者に送りました。ここまでの内容と調べた結果/),
+    ).toBeInTheDocument();
+  });
+
+  it("(a) 根拠なしの場合は見つからなかったと示し、関連の見出しは出ない", async () => {
+    const user = userEvent.setup();
+    await showResult(
+      user,
+      makeStructuredView({
+        step: "ANSWERED",
+        answer: { ...ungroundedAnswer, answered: false },
+      }),
+    );
+
+    expect(
+      screen.getByText("手元の資料からは答えを見つけられませんでした。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(OFF_TOPIC)).not.toBeInTheDocument();
+    expect(screen.queryByText("関連して分かったこと")).not.toBeInTheDocument();
+  });
+
+  it("(b) answered が無い古い応答は grounded と同じ値として従来どおりに表示する", async () => {
+    const user = userEvent.setup();
+    await showResult(
+      user,
+      makeStructuredView({ step: "ANSWERED", answer: groundedAnswer }),
+    );
+
+    expect(groundedAnswer).not.toHaveProperty("answered");
+    expect(screen.queryByText(OFF_TOPIC)).not.toBeInTheDocument();
+    expect(screen.queryByText("関連して分かったこと")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "解決しました" })).toHaveClass(
+      "primary",
+    );
+  });
+
+  it("(c) 不具合かもしれない件でも、答えていないときは同じ見せ方で、担当者に送ったことも示す", async () => {
+    const user = userEvent.setup();
+    await showResult(
+      user,
+      makeStructuredView({
+        ...bug,
+        step: "CLOSED",
+        outcome: "FILED",
+        answer: relatedAnswer,
+      }),
+      bug,
+    );
+
+    expect(
+      screen.getByText(
+        "いまの動きを調べました。この内容を添えて担当者に送りました。",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(OFF_TOPIC)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "関連して分かったこと" }),
+    ).toBeInTheDocument();
+    // 解決の判定は求めない
+    expect(
+      screen.queryByRole("button", { name: "解決しました" }),
+    ).not.toBeInTheDocument();
+    expectNoInternalWords();
   });
 });

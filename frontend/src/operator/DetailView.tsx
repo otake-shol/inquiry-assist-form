@@ -119,6 +119,12 @@ export function DetailView({ detail }: { detail: OperatorDetail }) {
           <p className="op-muted">{OP_TEXT.noResult}</p>
         ) : (
           <>
+            {answer.grounded &&
+              (answer.answered ?? answer.grounded) === false && (
+                <p>
+                  <span className="op-badge warn">{OP_TEXT.offTopic}</span>
+                </p>
+              )}
             <p className="op-pre">
               {answer.grounded ? answer.askerExplanation : OP_TEXT.notGrounded}
             </p>
