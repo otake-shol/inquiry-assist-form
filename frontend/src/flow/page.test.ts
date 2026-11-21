@@ -165,3 +165,15 @@ describe("readTextParam", () => {
     expect(readTextParam(`?text=${"a".repeat(5000)}`)).toHaveLength(4000);
   });
 });
+
+describe("pageSections の説明失敗", () => {
+  it("ANSWERING の間は answer があっても結果を並べず、調べている表示を保つ", () => {
+    const view = makeStructuredView({
+      step: "ANSWERING",
+      answer: groundedAnswer,
+    });
+    const list = kinds(pageSections(view, 0));
+    expect(list).toContain("researching");
+    expect(list).not.toContain("result");
+  });
+});

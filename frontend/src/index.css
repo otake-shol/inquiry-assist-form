@@ -893,3 +893,28 @@ blockquote {
   margin: 0 4px 8px;
   font-size: 0.9rem;
 }
+
+/* 根拠を確かめられなかったこと（事実として読まれないよう、分かったこととは見た目も分ける） */
+.memo-unconfirmed,
+.op-unconfirmed {
+  margin-top: 12px;
+  padding: 2px 12px 8px;
+  border-left: 3px dashed var(--warn-line);
+  background: var(--warn-bg);
+  border-radius: 0 8px 8px 0;
+}
+
+.memo-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.op-a.not-answered {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 0 8px;
+}

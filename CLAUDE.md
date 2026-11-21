@@ -9,18 +9,24 @@
 | 場所 | 内容 |
 | --- | --- |
 | `backend/` | Spring Boot（Java 21、Gradle Kotlin DSL） |
-| `backend/src/main/java/dev/inquiryassist/core/` | AI処理の境界と型。画面・HTTP・Spring に依存させない |
-| `backend/src/main/resources/db/migration/` | 保存スキーマ（Flyway。接続はフェーズ3で追加） |
-| `frontend/` | React + TypeScript + Vite（SPA） |
+| `backend/src/main/java/dev/inquiryassist/core/` | AI処理の型。画面・HTTP・Spring に依存させない |
+| `backend/src/main/java/dev/inquiryassist/core/skill/` | 5つのスキルの境界、受け渡す型、調査から説明までの流れ（`AnswerPipeline`） |
+| `backend/src/main/java/dev/inquiryassist/mock/` | スキルと一次情報の検索のモック実装 |
+| `backend/src/main/resources/db/migration/` | 保存スキーマ（Flyway）。適用済みの版は書き換えず、新しい版を足す |
+| `frontend/` | React + TypeScript + Vite（SPA）。`/` が本人向け、`/operator` が担当者向け |
+| `site/` | 業務フローとスキル設計の図解ページ（GitHub Pages で公開） |
 
 ## 設計上の決まり
 
-- AI処理は `InquiryAssistant` と `KnowledgeSearch` の2つの境界で差し替える。モック実装と Bedrock 実装を Spring のプロファイル（`mock` / `bedrock`）で切り替える。
+- AIに任せる仕事は5つのスキル（受付、聞き手、言い直し、調査、説明）に分ける。境界、受け渡す型、呼ぶ順序、失敗時の扱いは `docs/skill-architecture.md` が正。スキルを呼ぶ順序は通常のコード（`InquiryService` と `AnswerPipeline`）が決め、スキル同士に相談させない。
+- スキルは、品質の基準、使える道具、失敗のしかたのどれかが違う単位で分ける。どれも変わらない分割はしない。
+- 調査は事実と根拠を対（`Finding`）で返す。照合（`InvestigationVerifier`）で根拠がすべて落ちた事実は説明に渡さず、「根拠を確かめられなかったこと」として区別して残す。説明は照合の後に、確かめられた事実だけから書く。確かめられた事実が1つもなければ「わからない」として扱う。
+- 機械的に確かめられること（根拠の照合、閲覧権限、回数の上限）はAIに任せず、通常のコードで行う。
 - `core` パッケージは Spring にも HTTP にも依存させない。Slack の入口や評価の自動実行からも同じ処理を呼ぶため。
-- 0次回答の出典はサーバー側で実在を照合する。照合できた出典が1つもなければ「わからない」として扱う（`ZeroAnswer#withVerifiedCitations`）。
 - 閲覧権限はプロンプトではなく検索の時点で適用する（`AccessScope`）。
 - 種別ごとの経路は `InquiryCategory` に集約する。経路表を変えるときはテストも直す。
-- 本番環境ではモックを有効にできないようにする（フェーズ3で起動時検査を追加）。
+- 本番環境ではモックを有効にできない（`ProductionMockGuard` が起動時に検査する）。
+- 秘密情報（Slack の Webhook の URL など）は設定ファイルに書かず、環境変数で与える。このリポジトリは公開されている。
 
 ## Quality Gate / Definition of Done
 
@@ -49,9 +55,11 @@ Gradle は必ず `scripts/gradle.sh` 経由で実行する。asdf の遅延初�
 
 ## 現在の状態
 
-フェーズ3（モック、フォーム画面、保存と起票）まで。既定のプロファイルは `mock` で、AWS に接続せずに全経路が動く。
+モックで全経路が動く段階。既定のプロファイルは `mock` で、外部のAIに接続しない。
 
-- 起票の通知はログ出力だけ（`LoggingFilingNotifier`）。起票先が決まったら `FilingNotifier` の実装を足す。
-- 投稿者は固定ユーザー（`FixedCurrentUserProvider`）。SSO はフェーズ7。
-- `bedrock` プロファイルは未実装（フェーズ4〜5）。
+- スキルの実装はモックだけ。実際のモデル（手元のモデル、のちに Bedrock）を呼ぶ実装は未着手。プロンプトもまだない。
+- 一次情報の検索はモックだけ（`mock-knowledge/` の見本のファイルを読む）。実際のリポジトリを調べる実装は未着手。
+- 担当者への通知は、ツール内（`/operator` の一覧と即時通知）と Slack（Incoming Webhook。投稿先が未設定なら投稿しない）。対応状況の管理（対応中、完了など）はまだない。
+- 投稿者は固定ユーザー（`FixedCurrentUserProvider`）。担当者向けの API にも認証がない。SSO は後の段階で加える。
 - 結果の `ABANDONED`（離脱）は自動では設定していない。
+- 失敗したAIの呼び出しの利用量は、モデル名とトークン数を記録できていない（`unknown`、0 で残る）。実際のモデルをつなぐ段階で、失敗した呼び出しからも利用量を受け取れるようにする。

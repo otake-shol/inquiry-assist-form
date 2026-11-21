@@ -164,3 +164,45 @@ test("/operator/{id} を直接開くとその問い合わせの詳細が見え�
   expect(consoleErrors.join("\n")).toMatch(/400/);
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * `[一部幽霊]` では事実の一部だけ根拠を確かめられず、
+ * 結果の「担当者向けの詳しい内容」に「根拠を確かめられなかったこと」が出る。
+ */
+test("一部の事実の根拠を確かめられなかったことが詳しい内容に出る", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.goto("/");
+  await page
+    .getByLabel(INPUT_LABEL)
+    .fill("求人の掲載期限は、何日まで延長できますか？ [一部幽霊]");
+  await page.getByRole("button", { name: "送信する" }).click();
+
+  const confirm = page.getByRole("button", { name: "合っています" });
+  const unknown = page.getByRole("button", { name: "わからない", exact: true });
+  for (let i = 0; i < 5; i++) {
+    await expect(unknown.or(confirm)).toBeVisible();
+    if (await confirm.isVisible()) break;
+    await unknown.click();
+  }
+  await confirm.click();
+
+  await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByText("担当者向けの詳しい内容").click();
+  await expect(page.getByText("根拠を確かめられなかったこと")).toBeVisible();
+  await expect(
+    page.getByText("調査で挙がりましたが、資料で裏づけを取れていません。"),
+  ).toBeVisible();
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

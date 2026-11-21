@@ -33,26 +33,12 @@ class ZeroAnswerTest {
     }
 
     @Test
-    void 照合できた出典だけが残る() {
-        ZeroAnswer answer =
-                new ZeroAnswer(true, "説明", MEMO, List.of(citation("A.java"), citation("Ghost.java")));
+    void 根拠なしの回答は説明と出典を持たず技術メモは残る() {
+        ZeroAnswer answer = ZeroAnswer.ungrounded(MEMO);
 
-        ZeroAnswer verified = answer.withVerifiedCitations(List.of(citation("A.java")));
-
-        assertTrue(verified.grounded());
-        assertEquals(List.of(citation("A.java")), verified.citations());
-        assertEquals("説明", verified.askerExplanation());
-    }
-
-    @Test
-    void 照合できた出典がなければ根拠なしに落ち技術メモは残る() {
-        ZeroAnswer answer = new ZeroAnswer(true, "説明", MEMO, List.of(citation("Ghost.java")));
-
-        ZeroAnswer verified = answer.withVerifiedCitations(List.of());
-
-        assertFalse(verified.grounded());
-        assertNull(verified.askerExplanation());
-        assertTrue(verified.citations().isEmpty());
-        assertEquals(MEMO, verified.memo());
+        assertFalse(answer.grounded());
+        assertNull(answer.askerExplanation());
+        assertTrue(answer.citations().isEmpty());
+        assertEquals(MEMO, answer.memo());
     }
 }

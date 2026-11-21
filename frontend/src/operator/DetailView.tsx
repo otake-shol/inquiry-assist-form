@@ -87,9 +87,15 @@ export function DetailView({ detail }: { detail: OperatorDetail }) {
             {detail.followUps.map((f) => (
               <li key={f.text}>
                 <span className="op-q">{f.text}</span>
-                <span className="op-a">
-                  {f.answer ?? OP_TEXT.unknownAnswer}
-                </span>
+                {f.status === "NOT_ANSWERED" ? (
+                  <span className="op-a not-answered">
+                    {OP_TEXT.notAnswered}
+                  </span>
+                ) : (
+                  <span className="op-a">
+                    {f.answer ?? OP_TEXT.unknownAnswer}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -117,6 +123,15 @@ export function DetailView({ detail }: { detail: OperatorDetail }) {
               {answer.grounded ? answer.askerExplanation : OP_TEXT.notGrounded}
             </p>
             <List title={OP_TEXT.findings} items={answer.memo.findings} />
+            {(answer.memo.unconfirmed ?? []).length > 0 && (
+              <div className="op-unconfirmed">
+                <List
+                  title={OP_TEXT.unconfirmed}
+                  items={answer.memo.unconfirmed ?? []}
+                />
+                <p className="op-muted">{OP_TEXT.unconfirmedNote}</p>
+              </div>
+            )}
             <List title={OP_TEXT.notFound} items={answer.memo.notFound} />
             <List title={OP_TEXT.nextChecks} items={answer.memo.nextChecks} />
             {answer.citations.length > 0 && (

@@ -232,13 +232,13 @@ class InquiryApiTest {
         assertThat(row.get("step")).isEqualTo("CLOSED");
         assertThat(row.get("mock")).isEqualTo(true);
         assertThat(row.get("asker_id")).isEqualTo("local-user");
-        // triage / structure / answer の3回分を追記している
+        // 受付、聞き手、言い直し、調査、説明の5回分を、スキルの識別子で追記している
         assertThat(jdbc.queryForObject(
-                        "select jsonb_array_length(usages) from inquiries where id = ?::uuid", Integer.class, id))
-                .isEqualTo(3);
-        assertThat(jdbc.queryForObject(
-                        "select usages->2->>'step' from inquiries where id = ?::uuid", String.class, id))
-                .isEqualTo("answer");
+                        "select string_agg(u->>'step', ',' order by ord) from inquiries,"
+                                + " jsonb_array_elements(usages) with ordinality as t(u, ord) where id = ?::uuid",
+                        String.class,
+                        id))
+                .isEqualTo("reception,interviewer,restater,investigator,explainer");
     }
 
     @Test
@@ -335,10 +335,24 @@ class InquiryApiTest {
     }
 
     @Test
-    void AIの判定が作業依頼なら仕様確認へ変えても質問は空になる() throws Exception {
+    void 作業依頼と判定された問い合わせを仕様確認へ変えると聞き手が呼ばれて質問が返る() throws Exception {
         String id = idOf(create(WORK));
+        assertThat(jdbc.queryForObject(
+                        "select count(*) from inquiries, jsonb_array_elements(usages) u"
+                                + " where id = ?::uuid and u->>'step' = 'interviewer'",
+                        Integer.class,
+                        id))
+                .isZero();
 
-        changeCategory(id, "SPEC_QUESTION").andExpect(jsonPath("$.questions").isEmpty());
+        changeCategory(id, "SPEC_QUESTION")
+                .andExpect(jsonPath("$.questions[*].id").value(org.hamcrest.Matchers.contains("q1", "q2")));
+
+        assertThat(jdbc.queryForObject(
+                        "select count(*) from inquiries, jsonb_array_elements(usages) u"
+                                + " where id = ?::uuid and u->>'step' = 'interviewer'",
+                        Integer.class,
+                        id))
+                .isEqualTo(1);
     }
 
     private ResultActions changeCategory(String id, String category) throws Exception {
@@ -460,7 +474,9 @@ class InquiryApiTest {
         assertThat((Boolean) JsonPath.read(done, "$.answer.grounded")).isFalse();
         assertThat((Object) JsonPath.read(done, "$.answer.askerExplanation")).isNull();
         assertThat((List<?>) JsonPath.read(done, "$.answer.citations")).isEmpty();
-        assertThat((List<?>) JsonPath.read(done, "$.answer.memo.findings")).isNotEmpty();
+        // 事実は確かめられなかったものとして残り、分かったことには入らない
+        assertThat((List<?>) JsonPath.read(done, "$.answer.memo.findings")).isEmpty();
+        assertThat((List<?>) JsonPath.read(done, "$.answer.memo.unconfirmed")).hasSize(2);
         // 画面には出さないが、記録には照合失敗として残す
         assertThat(jdbc.queryForObject(
                         "select citations->0->>'verified' from inquiries where id = ?::uuid", String.class, id))
@@ -716,10 +732,10 @@ class InquiryApiTest {
         assertThat(row(id).get("revisions_left")).isEqualTo(0);
         assertThat(jdbc.queryForObject(
                         "select count(*) from inquiries, jsonb_array_elements(usages) u"
-                                + " where id = ?::uuid and u->>'step' = 'revise'",
+                                + " where id = ?::uuid and u->>'step' = 'restater'",
                         Integer.class,
                         id))
-                .isEqualTo(2);
+                .isEqualTo(3); // 言い直し1回と作り直し2回
         // 使い切っても、そのまま確定して先へ進める
         confirm(id).andExpect(jsonPath("$.step").value("ANSWERING"));
     }
@@ -793,11 +809,11 @@ class InquiryApiTest {
 
         var events = events(body);
         assertThat(events.stream().map(Map.Entry::getKey).toList())
-                .startsWith("progress", "progress", "progress")
-                .endsWith("done");
+                .containsExactly("progress", "progress", "progress", "progress", "progress", "done");
         assertThat(events.stream().filter(e -> e.getKey().equals("done")).count()).isEqualTo(1);
-        assertThat(events.stream().filter(e -> e.getKey().equals("progress")).count()).isBetween(3L, 4L);
-        assertThat((String) JsonPath.read(events.get(0).getValue(), "$.message")).isNotBlank();
+        // 調査の進捗3件に続けて、根拠の確認と説明のまとめ
+        assertThat(events.subList(0, 5).stream().map(e -> (String) JsonPath.read(e.getValue(), "$.message")).toList())
+                .endsWith("根拠を確かめています", "答えをまとめています");
         assertThat((String) JsonPath.read(events.get(events.size() - 1).getValue(), "$.step")).isEqualTo("ANSWERED");
     }
 }

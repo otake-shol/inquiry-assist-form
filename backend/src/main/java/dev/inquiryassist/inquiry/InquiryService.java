@@ -8,13 +8,22 @@ import dev.inquiryassist.core.AnsweredQuestion;
 import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.CitationVerifier;
 import dev.inquiryassist.core.FollowUpQuestion;
-import dev.inquiryassist.core.InquiryAssistant;
 import dev.inquiryassist.core.InquiryCategory;
-import dev.inquiryassist.core.KnowledgeSearch;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
-import dev.inquiryassist.core.TriageResult;
+import dev.inquiryassist.core.TechnicalMemo;
+import dev.inquiryassist.core.Usage;
 import dev.inquiryassist.core.ZeroAnswer;
+import dev.inquiryassist.core.skill.AnswerPipeline;
+import dev.inquiryassist.core.skill.ExplanationFailedException;
+import dev.inquiryassist.core.skill.Interview;
+import dev.inquiryassist.core.skill.InterviewerSkill;
+import dev.inquiryassist.core.skill.ProgressListener;
+import dev.inquiryassist.core.skill.Reception;
+import dev.inquiryassist.core.skill.ReceptionSkill;
+import dev.inquiryassist.core.skill.RestaterSkill;
+import dev.inquiryassist.core.skill.Skill;
+import dev.inquiryassist.core.skill.SkillUsage;
 import dev.inquiryassist.inquiry.InquiryEntity.StoredCitation;
 import dev.inquiryassist.inquiry.InquiryEntity.StoredQuestion;
 import java.time.Instant;
@@ -73,8 +82,10 @@ public class InquiryService {
      */
     public record AnswerInput(String questionId, String answer) {}
 
-    private final InquiryAssistant assistant;
-    private final CitationVerifier verifier;
+    private final ReceptionSkill reception;
+    private final InterviewerSkill interviewer;
+    private final RestaterSkill restater;
+    private final AnswerPipeline pipeline;
     private final InquiryRepository repository;
     private final CurrentUserProvider users;
     private final FilingNotifier notifier;
@@ -86,8 +97,10 @@ public class InquiryService {
     private final Set<UUID> generating = ConcurrentHashMap.newKeySet();
 
     /**
-     * @param assistant AI 処理の境界
-     * @param knowledgeSearch 出典の照合に使う一次情報の読み取り
+     * @param reception 受付
+     * @param interviewer 聞き手
+     * @param restater 言い直し
+     * @param pipeline 調査、照合、説明の流れ
      * @param repository 問い合わせ記録の保存先
      * @param users 現在の投稿者
      * @param notifier 起票の通知先
@@ -98,8 +111,10 @@ public class InquiryService {
      * @param events 起票の確定後にイベントを発行する
      */
     public InquiryService(
-            InquiryAssistant assistant,
-            KnowledgeSearch knowledgeSearch,
+            ReceptionSkill reception,
+            InterviewerSkill interviewer,
+            RestaterSkill restater,
+            AnswerPipeline pipeline,
             InquiryRepository repository,
             CurrentUserProvider users,
             FilingNotifier notifier,
@@ -108,8 +123,10 @@ public class InquiryService {
             Environment environment,
             InquiryProperties properties,
             ApplicationEventPublisher events) {
-        this.assistant = assistant;
-        this.verifier = new CitationVerifier(knowledgeSearch);
+        this.reception = reception;
+        this.interviewer = interviewer;
+        this.restater = restater;
+        this.pipeline = pipeline;
         this.repository = repository;
         this.users = users;
         this.notifier = notifier;
@@ -137,20 +154,20 @@ public class InquiryService {
             inquiry.systemId = selected.id();
             inquiry.systemLabel = selected.label();
         }
-        AiResult<TriageResult> triage;
+        AiResult<Reception> received;
         try {
-            triage = assistant.triage(utterance, candidates(), selected == null ? null : option(selected));
+            received = reception.receive(utterance, candidates(), selected == null ? null : option(selected));
         } catch (AiRefusalException | AiUnavailableException e) {
             // 失敗しても発話は失わない。種別なし・質問なしで保存し、「今すぐ送る」だけを可能にする
             inquiry.mock = environment.acceptsProfiles(Profiles.of("mock"));
             commit(inquiry, null);
             throw new TriageFailedException(inquiry.id, e);
         }
-        InquiryCategory category = triage.value().category();
-        if (selected == null && triage.value().guessedSystemId() != null) {
+        InquiryCategory category = received.value().category();
+        if (selected == null && received.value().guessedSystemId() != null) {
             // 一覧にない id を返された場合は推測なしとして扱う
             properties.systems().stream()
-                    .filter(s -> s.id().equals(triage.value().guessedSystemId()))
+                    .filter(s -> s.id().equals(received.value().guessedSystemId()))
                     .findFirst()
                     .ifPresent(s -> {
                         inquiry.systemId = s.id();
@@ -160,11 +177,9 @@ public class InquiryService {
         }
         inquiry.categoryByAi = category;
         inquiry.categoryConfirmed = category;
-        inquiry.addUsage("triage", triage.usage());
+        inquiry.addUsage(Skill.RECEPTION, received.usage());
         if (category.receivesZeroAnswer()) {
-            inquiry.aiQuestions = new ArrayList<>(triage.value().questions().stream()
-                    .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), null))
-                    .toList());
+            inquiry.aiQuestions = askInterviewer(inquiry, category, scope);
         }
         inquiry.followUps = questionsFor(inquiry, category);
         return toView(commit(inquiry, null));
@@ -192,6 +207,7 @@ public class InquiryService {
 
     /**
      * 本人が種別を変更する。追加質問は変更後の種別に合わせて差し替える。
+     * 仕様確認・不具合の疑いに変更し、聞き手の質問がまだなければ、この時点で聞き手を呼ぶ。
      *
      * @param id 問い合わせの識別子
      * @param category 変更後の種別
@@ -203,6 +219,10 @@ public class InquiryService {
         requireStep(inquiry, InquiryStep.TRIAGED);
         requireTriaged(inquiry);
         inquiry.categoryConfirmed = category;
+        // 作業依頼や障害と判定されて聞き手が呼ばれていない（または失敗した）場合は、この時点で呼ぶ
+        if (category.receivesZeroAnswer() && !interviewerAsked(inquiry)) {
+            inquiry.aiQuestions = askInterviewer(inquiry, category, users.currentScope());
+        }
         inquiry.followUps = questionsFor(inquiry, category);
         return toView(commit(inquiry, null));
     }
@@ -230,6 +250,7 @@ public class InquiryService {
         inquiry.followUps = new ArrayList<>(inquiry.followUps.stream()
                 .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), byId.get(q.id())))
                 .toList());
+        inquiry.answersSubmitted = true;
 
         if (inquiry.category() == InquiryCategory.INCIDENT) {
             String check = byId.get(INCIDENT_CHECK);
@@ -286,11 +307,11 @@ public class InquiryService {
         if (inquiry.revisionsLeft <= 0) {
             throw new InvalidStateException("言い直しを作り直せる回数を使い切りました");
         }
-        AiResult<StructuredInquiry> result = assistant.revise(inquiry.utterance, inquiry.structuredByAi, note);
+        AiResult<StructuredInquiry> result = restater.revise(inquiry.utterance, inquiry.structuredByAi, note);
         inquiry.structuredByAi = result.value();
         inquiry.revisionNotes.add(note);
         inquiry.revisionsLeft--;
-        inquiry.addUsage("revise", result.usage());
+        inquiry.addUsage(Skill.RESTATER, result.usage());
         return toView(commit(inquiry, null));
     }
 
@@ -306,13 +327,21 @@ public class InquiryService {
         requireStep(inquiry, InquiryStep.STRUCTURED);
         inquiry.structuredByAi = null;
         inquiry.structuredConfirmed = null;
+        // 戻った後に答えずに送られた場合、未回答として区別できるようにする
+        inquiry.answersSubmitted = false;
+        inquiry.followUps = new ArrayList<>(inquiry.followUps.stream()
+                .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), null))
+                .toList());
         inquiry.step = InquiryStep.TRIAGED;
         return toView(commit(inquiry, null));
     }
 
     /**
-     * 0次回答を生成する。出典は一次情報に当たって照合し、照合できたものだけを回答に残す。
+     * 0次回答を生成する。調査、照合、説明の順に進め、照合できた事実だけから本人向けの説明を作る。
      * 不具合の疑いは完了と同時に起票する。同じ問い合わせの生成は同時に1つだけ走らせる。
+     *
+     * <p>説明だけが失敗した場合は、調査と照合の結果（技術メモ、出典と照合結果、利用量）を保存したうえで
+     * 失敗を投げる。段階は {@code ANSWERING} のままで、本人向けの回答は返さない。
      *
      * @param id 問い合わせの識別子
      * @param progress 進捗の通知先
@@ -321,7 +350,7 @@ public class InquiryService {
      * @throws dev.inquiryassist.core.AiRefusalException モデルが回答を拒否した場合
      * @throws dev.inquiryassist.core.AiUnavailableException モデルを呼び出せなかった場合
      */
-    public InquiryView generateAnswer(UUID id, InquiryAssistant.ProgressListener progress) {
+    public InquiryView generateAnswer(UUID id, ProgressListener progress) {
         if (!generating.add(id)) {
             throw new InvalidStateException("0次回答を生成中です");
         }
@@ -329,15 +358,25 @@ public class InquiryService {
             InquiryEntity inquiry = load(id);
             requireStep(inquiry, InquiryStep.ANSWERING);
             AccessScope scope = users.currentScope();
-            AiResult<ZeroAnswer> result = assistant.answer(inquiry.structured(), scope, progress);
-
-            List<CitationVerifier.Result> verified = verifier.verify(result.value().citations(), scope);
-            ZeroAnswer answer = result.value().withVerifiedCitations(CitationVerifier.verifiedOnly(verified));
+            AnswerPipeline.Result result;
+            try {
+                result = pipeline.run(inquiry.structured(), scope, progress);
+            } catch (ExplanationFailedException e) {
+                // 費用をかけた調査の結果は失わない。本人向けの回答は作らない（answerGrounded は null のまま）
+                inquiry.answerGrounded = null;
+                inquiry.askerExplanation = null;
+                inquiry.technicalMemo = AnswerPipeline.memoOf(e.investigation());
+                inquiry.citations = storedCitations(e.investigation().citationResults());
+                e.usages().forEach(inquiry::addUsage);
+                commit(inquiry, null);
+                throw (RuntimeException) e.getCause();
+            }
+            ZeroAnswer answer = result.answer();
             inquiry.answerGrounded = answer.grounded();
             inquiry.askerExplanation = answer.askerExplanation();
             inquiry.technicalMemo = answer.memo();
-            inquiry.citations = new ArrayList<>(verified.stream().map(InquiryService::toStored).toList());
-            inquiry.addUsage("answer", result.usage());
+            inquiry.citations = storedCitations(result.investigation().citationResults());
+            result.usages().forEach(inquiry::addUsage);
 
             if (inquiry.category().alwaysFiled()) {
                 return toView(commit(inquiry, file(inquiry, false)));
@@ -409,17 +448,53 @@ public class InquiryService {
         return new SystemOption(entry.id(), entry.label());
     }
 
+    private SystemOption systemOf(InquiryEntity inquiry) {
+        return inquiry.systemId == null ? null : new SystemOption(inquiry.systemId, inquiry.systemLabel);
+    }
+
+    /** 聞き手を呼んだことがあり、成功しているか。 */
+    private static boolean interviewerAsked(InquiryEntity inquiry) {
+        return inquiry.usages.stream()
+                .anyMatch(u -> u.step().equals(Skill.INTERVIEWER.id()) && !u.failed());
+    }
+
+    /**
+     * 聞き手に追加質問を作らせる。失敗しても本人を止めず、質問なしで続行する。
+     * 失敗はログと利用量（失敗した呼び出しとして）に残す。
+     */
+    private List<StoredQuestion> askInterviewer(InquiryEntity inquiry, InquiryCategory category, AccessScope scope) {
+        try {
+            AiResult<Interview> result =
+                    interviewer.ask(inquiry.utterance, category, systemOf(inquiry), scope);
+            inquiry.addUsage(Skill.INTERVIEWER, result.usage());
+            return new ArrayList<>(result.value().questions().stream()
+                    .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), null))
+                    .toList());
+        } catch (AiRefusalException | AiUnavailableException e) {
+            log.warn("聞き手が失敗したため、質問なしで続行します id={}", inquiry.id, e);
+            inquiry.addUsage(new SkillUsage(
+                    Skill.INTERVIEWER,
+                    new Usage("unknown", "unknown", 0, 0, 0, environment.acceptsProfiles(Profiles.of("mock"))),
+                    true));
+            return new ArrayList<>();
+        }
+    }
+
+    private static List<StoredCitation> storedCitations(List<CitationVerifier.Result> results) {
+        return new ArrayList<>(results.stream().map(InquiryService::toStored).toList());
+    }
+
     private void structure(InquiryEntity inquiry) {
         List<AnsweredQuestion> answered = inquiry.followUps.stream()
                 .map(q -> new AnsweredQuestion(new FollowUpQuestion(q.id(), q.text(), q.options()), q.answer()))
                 .toList();
-        AiResult<StructuredInquiry> result = assistant.structure(
+        AiResult<StructuredInquiry> result = restater.restate(
                 inquiry.utterance,
                 inquiry.category(),
                 answered,
-                inquiry.systemId == null ? null : new SystemOption(inquiry.systemId, inquiry.systemLabel));
+                systemOf(inquiry));
         inquiry.structuredByAi = result.value();
-        inquiry.addUsage("structure", result.usage());
+        inquiry.addUsage(Skill.RESTATER, result.usage());
         inquiry.step = InquiryStep.STRUCTURED;
     }
 

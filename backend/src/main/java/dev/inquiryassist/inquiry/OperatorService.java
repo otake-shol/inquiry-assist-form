@@ -99,10 +99,11 @@ public class OperatorService {
 
     private OperatorDetail toDetail(InquiryEntity e) {
         StructuredInquiry s = e.structured();
-        OperatorDetail.AnswerDetail answer = e.answerGrounded == null
+        // 説明だけが失敗した場合も、保存済みの調査の内容（技術メモ・出典）を出す。このとき grounded は false
+        OperatorDetail.AnswerDetail answer = e.answerGrounded == null && e.technicalMemo == null
                 ? null
                 : new OperatorDetail.AnswerDetail(
-                        e.answerGrounded,
+                        Boolean.TRUE.equals(e.answerGrounded),
                         e.askerExplanation,
                         e.technicalMemo,
                         e.citations.stream()
@@ -126,7 +127,7 @@ public class OperatorService {
                 e.systemId == null ? null : new InquiryView.SystemView(e.systemId, e.systemLabel),
                 e.systemGuessed,
                 e.followUps.stream()
-                        .map(q -> new OperatorDetail.FollowUpDetail(q.text(), q.answer()))
+                        .map(q -> followUp(e, q))
                         .toList(),
                 s == null
                         ? null
@@ -142,6 +143,17 @@ public class OperatorService {
                 e.sentImmediately,
                 e.readAt != null,
                 slackStatus(e));
+    }
+
+    private static OperatorDetail.FollowUpDetail followUp(InquiryEntity e, InquiryEntity.StoredQuestion q) {
+        if (!e.answersSubmitted) {
+            return new OperatorDetail.FollowUpDetail(q.text(), null, OperatorDetail.FollowUpStatus.NOT_ANSWERED);
+        }
+        boolean unknown = q.answer() == null || q.answer().isBlank();
+        return new OperatorDetail.FollowUpDetail(
+                q.text(),
+                unknown ? null : q.answer(),
+                unknown ? OperatorDetail.FollowUpStatus.UNKNOWN : OperatorDetail.FollowUpStatus.ANSWERED);
     }
 
     /**

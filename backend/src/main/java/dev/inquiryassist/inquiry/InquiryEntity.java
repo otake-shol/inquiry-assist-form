@@ -5,6 +5,8 @@ import dev.inquiryassist.core.InquiryCategory;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.TechnicalMemo;
 import dev.inquiryassist.core.Usage;
+import dev.inquiryassist.core.skill.Skill;
+import dev.inquiryassist.core.skill.SkillUsage;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -50,7 +52,8 @@ class InquiryEntity {
             long inputTokens,
             long outputTokens,
             long cacheReadTokens,
-            boolean mock) {}
+            boolean mock,
+            boolean failed) {}
 
     /** 言い直しを作り直せる回数の初期値。 */
     static final int INITIAL_REVISIONS = 2;
@@ -122,6 +125,9 @@ class InquiryEntity {
     @Column(name = "sent_immediately", nullable = false)
     boolean sentImmediately;
 
+    @Column(name = "answers_submitted", nullable = false)
+    boolean answersSubmitted;
+
     @Column(name = "revisions_left", nullable = false)
     int revisionsLeft = INITIAL_REVISIONS;
 
@@ -177,21 +183,32 @@ class InquiryEntity {
     }
 
     /**
-     * AI 処理の利用量を追記する。モック由来なら記録全体を mock とする。
+     * スキル1回の利用量を追記する。モック由来なら記録全体を mock とする。
      *
-     * @param stepName 処理の名前（triage / structure / answer）
+     * @param usage スキルごとの利用量
+     */
+    void addUsage(SkillUsage usage) {
+        Usage u = usage.usage();
+        usages.add(new StoredUsage(
+                usage.skill().id(),
+                u.model(),
+                u.promptVersion(),
+                u.inputTokens(),
+                u.outputTokens(),
+                u.cacheReadTokens(),
+                u.mock(),
+                usage.failed()));
+        mock = mock || u.mock();
+    }
+
+    /**
+     * 成功したスキルの利用量を追記する。
+     *
+     * @param skill 呼んだスキル
      * @param usage 利用量
      */
-    void addUsage(String stepName, Usage usage) {
-        usages.add(new StoredUsage(
-                stepName,
-                usage.model(),
-                usage.promptVersion(),
-                usage.inputTokens(),
-                usage.outputTokens(),
-                usage.cacheReadTokens(),
-                usage.mock()));
-        mock = mock || usage.mock();
+    void addUsage(Skill skill, Usage usage) {
+        addUsage(new SkillUsage(skill, usage));
     }
 
     /**

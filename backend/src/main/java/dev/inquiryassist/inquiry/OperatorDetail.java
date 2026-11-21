@@ -47,9 +47,20 @@ public record OperatorDetail(
      * 追加質問と回答。
      *
      * @param text 質問文
-     * @param answer 回答。「わからない」は null
+     * @param answer 回答。「わからない」と未回答は null
+     * @param status 本人の対応（回答あり、わからない、答える前に送られた）
      */
-    public record FollowUpDetail(String text, String answer) {}
+    public record FollowUpDetail(String text, String answer, FollowUpStatus status) {}
+
+    /** 追加質問への本人の対応。 */
+    public enum FollowUpStatus {
+        /** 本人が答えた。 */
+        ANSWERED,
+        /** 本人が「わからない」を選んだ。 */
+        UNKNOWN,
+        /** 本人が答える前に担当者へ送られた。 */
+        NOT_ANSWERED
+    }
 
     /**
      * 0次回答。

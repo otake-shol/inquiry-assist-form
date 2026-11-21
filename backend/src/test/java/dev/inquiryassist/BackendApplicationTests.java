@@ -8,8 +8,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
-import dev.inquiryassist.core.InquiryAssistant;
-import dev.inquiryassist.mock.MockInquiryAssistant;
+import dev.inquiryassist.core.skill.AnswerPipeline;
+import dev.inquiryassist.core.skill.ReceptionSkill;
+import dev.inquiryassist.mock.MockReceptionSkill;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -19,11 +20,15 @@ class BackendApplicationTests {
     Environment environment;
 
     @Autowired
-    InquiryAssistant assistant;
+    ReceptionSkill reception;
+
+    @Autowired
+    AnswerPipeline pipeline;
 
     @Test
     void プロファイルを指定しなければモックが有効になる() {
         assertThat(environment.acceptsProfiles(Profiles.of("mock"))).isTrue();
-        assertThat(assistant).isInstanceOf(MockInquiryAssistant.class);
+        assertThat(reception).isInstanceOf(MockReceptionSkill.class);
+        assertThat(pipeline).isNotNull();
     }
 }

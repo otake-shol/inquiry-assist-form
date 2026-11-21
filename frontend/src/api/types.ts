@@ -63,6 +63,8 @@ export interface Citation {
 /** 担当者向けメモ。 */
 export interface AnswerMemo {
   findings: string[];
+  /** 調査が挙げたが、根拠の実在を確かめられなかった事実。古い応答では無い */
+  unconfirmed?: string[];
   notFound: string[];
   nextChecks: string[];
 }
@@ -138,6 +140,16 @@ export interface OperatorList {
   items: OperatorItem[];
 }
 
+/** 追加質問への本人の対応。 */
+export type FollowUpStatus = "ANSWERED" | "UNKNOWN" | "NOT_ANSWERED";
+
+/** 追加質問と回答（オペレータ向け）。`status` が無い古い応答では従来の表示にする。 */
+export interface FollowUp {
+  text: string;
+  answer: string | null;
+  status?: FollowUpStatus;
+}
+
 /** 照合の結果つきの出典。 */
 export interface OperatorCitation extends Citation {
   verified: boolean;
@@ -164,7 +176,7 @@ export interface OperatorDetail {
   category: InquiryCategory | null;
   system: SystemOption | null;
   systemGuessed: boolean;
-  followUps: { text: string; answer: string | null }[];
+  followUps: FollowUp[];
   structured: StructuredInquiry | null;
   revisionNotes: string[];
   answer: OperatorAnswer | null;

@@ -53,7 +53,8 @@ export function pageSections(
 
   if (view.step === "ANSWERING") sections.push({ kind: "researching" });
 
-  if (view.answer !== null) {
+  // 説明が失敗して ANSWERING のままの間は、answer があっても結果として描かない
+  if (view.answer !== null && view.step !== "ANSWERING") {
     const bugFiled =
       view.step === "CLOSED" &&
       view.outcome === "FILED" &&

@@ -87,31 +87,4 @@ class CitationVerifierTest {
         assertThat(results.get(0).verified()).isFalse();
         assertThat(search.reads).isEmpty();
     }
-
-    @Test
-    void 照合できた出典が1件もなければ回答は根拠なしに落ちて技術メモは残る() {
-        FakeSearch search = new FakeSearch("return a;", null);
-        TechnicalMemo memo = new TechnicalMemo(List.of("調べたこと"), List.of(), List.of());
-        ZeroAnswer answer = new ZeroAnswer(true, "説明", memo, List.of(citation("repo", "return b;")));
-
-        ZeroAnswer applied = new CitationVerifier(search).apply(answer, SCOPE);
-
-        assertThat(applied.grounded()).isFalse();
-        assertThat(applied.askerExplanation()).isNull();
-        assertThat(applied.citations()).isEmpty();
-        assertThat(applied.memo()).isEqualTo(memo);
-    }
-
-    @Test
-    void 照合できた出典だけが回答に残る() {
-        FakeSearch search = new FakeSearch("return a;", null);
-        Citation ok = citation("repo", "return a;");
-        Citation ng = citation("repo", "return b;");
-        ZeroAnswer answer = new ZeroAnswer(true, "説明", null, List.of(ok, ng));
-
-        ZeroAnswer applied = new CitationVerifier(search).apply(answer, SCOPE);
-
-        assertThat(applied.grounded()).isTrue();
-        assertThat(applied.citations()).containsExactly(ok);
-    }
 }

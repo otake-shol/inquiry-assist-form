@@ -9,7 +9,7 @@ import static org.mockito.Mockito.doThrow;
 import dev.inquiryassist.TestcontainersConfiguration;
 import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiUnavailableException;
-import dev.inquiryassist.core.InquiryAssistant;
+import dev.inquiryassist.core.skill.RestaterSkill;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,7 +30,7 @@ class RevisionFailureTest {
     JdbcTemplate jdbc;
 
     @MockitoSpyBean
-    InquiryAssistant assistant;
+    RestaterSkill assistant;
 
     @Test
     void AIが失敗した作り直しは残り回数を減らさず一言も残さない() {

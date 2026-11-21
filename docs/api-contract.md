@@ -276,7 +276,17 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 
 ### `GET /api/operator/inquiries/{id}`
 
-`200` 問い合わせの全内容。`id`、`filedAt`、`askerId`、`utterance`、`categoryByAi`、`category`、`system`、`systemGuessed`、`followUps`（`[{ "text", "answer" }]`）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`。担当者に送られていない問い合わせは `NOT_FOUND`。
+`200` 問い合わせの全内容。`id`、`filedAt`、`askerId`、`utterance`、`categoryByAi`、`category`、`system`、`systemGuessed`、`followUps`（`[{ "text", "answer", "status" }]`）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`。担当者に送られていない問い合わせは `NOT_FOUND`。
+
+`followUps[].status` は追加質問への本人の対応で、次の3つのいずれか。回答の `null` だけでは「わからないを選んだ」と「答える前に送った」を区別できず、担当者が本人の認識を誤解するため、状態を分ける。
+
+| 値 | 意味 | `answer` | 画面での扱い |
+| --- | --- | --- | --- |
+| `ANSWERED` | 本人が答えた | 回答の文字列 | 回答を示す |
+| `UNKNOWN` | 本人が「わからない」を選んだ | `null` | 「わからない」と示す |
+| `NOT_ANSWERED` | 本人が答える前に担当者へ送られた | `null` | 「未回答（答える前に送られました）」と、回答とは区別して示す |
+
+本人が回答を送信した（4の操作を行った）問い合わせでは `ANSWERED` か `UNKNOWN`、送信していない問い合わせではすべて `NOT_ANSWERED` になる。追加質問へ戻った（5b）後に答えずに送った場合も `NOT_ANSWERED`。
 
 `slackStatus` は Slack への投稿の状態で、次の4つのいずれか。真偽値ひとつでは「投稿先が未設定」と「投稿に失敗」を区別できず、未設定の環境ですべての問い合わせが失敗に見えるため、状態を分ける。
 

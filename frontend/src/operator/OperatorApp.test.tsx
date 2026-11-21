@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -419,5 +426,86 @@ describe("オペレータ画面の URL", () => {
       );
       unmount();
     }
+  });
+});
+
+describe("調べた結果の区別と追加質問の状態", () => {
+  /** 指定の詳細を直接開く。 */
+  async function openDetail(detail: ReturnType<typeof makeDetail>) {
+    window.history.replaceState({}, "", "/operator/op-1");
+    installFakeFetch({
+      ...operatorRoutes([readItem]),
+      "GET /api/operator/inquiries/op-1": { body: detail },
+    });
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    const region = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+    await within(region).findByText("元の発話");
+    return region;
+  }
+
+  it("(a) unconfirmed があるときだけ、分かったこととは別の見出しで出る", async () => {
+    const base = makeDetail({ read: true });
+    const withUnconfirmed = await openDetail({
+      ...base,
+      answer: {
+        ...base.answer!,
+        memo: { ...base.answer!.memo, unconfirmed: ["他の画面でも同じ"] },
+      },
+    });
+    expect(
+      within(withUnconfirmed).getByText("根拠を確かめられなかったこと"),
+    ).toBeInTheDocument();
+    expect(
+      within(withUnconfirmed).getByText("他の画面でも同じ"),
+    ).toBeInTheDocument();
+    expect(
+      within(withUnconfirmed).getByText("分かったこと"),
+    ).toBeInTheDocument();
+    cleanup();
+
+    const { unconfirmed: _drop, ...memo } = base.answer!.memo;
+    void _drop;
+    const without = await openDetail({
+      ...base,
+      answer: { ...base.answer!, memo },
+    });
+    expect(
+      within(without).queryByText("根拠を確かめられなかったこと"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("(b) 追加質問は回答・わからない・未回答を区別して示し、status が無ければ従来の表示", async () => {
+    const detail = await openDetail(
+      makeDetail({
+        read: true,
+        followUps: [
+          { text: "どの画面ですか", answer: "一覧", status: "ANSWERED" },
+          { text: "いつからですか", answer: null, status: "UNKNOWN" },
+          { text: "状態はどれですか", answer: null, status: "NOT_ANSWERED" },
+          { text: "旧形式の質問", answer: null },
+        ],
+      }),
+    );
+    const row = (text: string) => within(detail).getByText(text).closest("li")!;
+
+    expect(within(row("どの画面ですか")).getByText("一覧")).toBeInTheDocument();
+    expect(
+      within(row("いつからですか")).getByText("わからない"),
+    ).toBeInTheDocument();
+    const notAnswered = row("状態はどれですか");
+    expect(
+      within(notAnswered).getByText("未回答（答える前に送られました）"),
+    ).toHaveClass("not-answered");
+    expect(
+      within(notAnswered).queryByText("わからない"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(row("いつからですか")).getByText("わからない"),
+    ).not.toHaveClass("not-answered");
+    expect(
+      within(row("旧形式の質問")).getByText("わからない"),
+    ).toBeInTheDocument();
   });
 });

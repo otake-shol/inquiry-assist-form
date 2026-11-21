@@ -39,6 +39,10 @@ abstract class ApiSupport {
     @Autowired
     RecordingFilingNotifier notifier;
 
+    java.util.Map<String, Object> row(String id) {
+        return jdbc.queryForMap("select * from inquiries where id = ?::uuid", id);
+    }
+
     static String idOf(String body) {
         return JsonPath.read(body, "$.id");
     }

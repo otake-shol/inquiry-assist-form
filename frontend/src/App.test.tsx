@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App.tsx";
@@ -937,7 +944,7 @@ describe("入力とモック表示", () => {
       "求人の掲載期限は、何日まで延長できますか？ [根拠なし]",
     );
     const bar = screen.getByRole("region", { name: "モックのシナリオ" });
-    expect(within(bar).getAllByRole("button")).toHaveLength(11);
+    expect(within(bar).getAllByRole("button")).toHaveLength(14);
     expect(within(bar).queryByText("種別の例")).not.toBeInTheDocument();
   });
 
@@ -1145,5 +1152,142 @@ describe("対象システム", () => {
     expect(
       await screen.findByText("不具合かもしれない件として受け取りました"),
     ).toBeInTheDocument();
+  });
+});
+
+describe("調査の結果と説明の失敗", () => {
+  /** 確定して調べている最中まで進める。`researching` はそのときの PUT の応答。 */
+  async function reachResearching(
+    user: User,
+    stream: FakeStream,
+    researching = makeStructuredView({ step: "ANSWERING" }),
+  ) {
+    installFakeFetch({
+      ...restatementRoutes(),
+      "PUT /api/inquiries/inq-1/structured": { body: researching },
+    });
+    render(<App subscribe={stream.subscribe} />);
+    await send(user);
+    await user.click(
+      await screen.findByRole("button", { name: "合っています" }),
+    );
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
+  }
+
+  /** 結果まで進めて詳しい内容を返す。 */
+  async function showResult(answer: typeof groundedAnswer) {
+    const user = userEvent.setup();
+    const stream = new FakeStream();
+    await reachResearching(user, stream);
+    act(() =>
+      stream.latest.handlers.onDone(
+        makeStructuredView({ step: "ANSWERED", answer }),
+      ),
+    );
+    await screen.findByRole("heading", { name: "調べた結果" });
+    return screen.getByText("担当者向けの詳しい内容").closest("details")!;
+  }
+
+  it("(a) 根拠を確かめられなかったことは、あるときだけ分かったこととは別の見出しで出る", async () => {
+    const memo = await showResult({
+      ...groundedAnswer,
+      memo: {
+        ...groundedAnswer.memo,
+        unconfirmed: ["別の画面でも同じ制限がかかっている"],
+      },
+    });
+
+    expect(within(memo).getByText("分かったこと")).toBeInTheDocument();
+    expect(
+      within(memo).getByText("根拠を確かめられなかったこと"),
+    ).toBeInTheDocument();
+    expect(
+      within(memo).getByText("別の画面でも同じ制限がかかっている"),
+    ).toBeInTheDocument();
+    expect(
+      within(memo).getByText(
+        "調査で挙がりましたが、資料で裏づけを取れていません。",
+      ),
+    ).toBeInTheDocument();
+    // 主の説明には影響しない
+    expect(
+      screen.getByText("掲載期限は最大90日まで延長できます。"),
+    ).toBeInTheDocument();
+    expect(memo).not.toHaveAttribute("open");
+    expectNoInternalWords();
+  });
+
+  it("(a) unconfirmed が空でも、無い古い応答でも見出しは出ない", async () => {
+    for (const unconfirmed of [[], undefined]) {
+      const { unconfirmed: _drop, ...rest } = groundedAnswer.memo;
+      void _drop;
+      const memo = await showResult({
+        ...groundedAnswer,
+        memo: unconfirmed === undefined ? rest : { ...rest, unconfirmed },
+      });
+      expect(
+        within(memo).queryByText("根拠を確かめられなかったこと"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(memo).queryByText(/裏づけを取れていません/),
+      ).not.toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it("(d) 説明だけが失敗しても failed で再試行と今すぐ担当者に送るが出る", async () => {
+    const user = userEvent.setup();
+    const stream = new FakeStream();
+    await reachResearching(user, stream);
+    act(() => stream.latest.handlers.onProgress("根拠を確かめています"));
+    act(() => stream.latest.handlers.onProgress("答えをまとめています"));
+    act(() =>
+      stream.latest.handlers.onFailed({
+        code: "AI_UNAVAILABLE",
+        message: "説明に失敗",
+      }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "いま自動の調査を使えません。担当者に直接送れます。",
+    );
+    // 届いた進捗は残り、結果は描かない
+    const progress = screen.getByRole("list", { name: "調べている内容" });
+    expect(
+      within(progress)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["根拠を確かめています", "答えをまとめています"]);
+    expect(
+      screen.queryByRole("heading", { name: "調べた結果" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "今すぐ担当者に送る" }),
+    ).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "もう一度調べる" }));
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(2));
+  });
+
+  it("(e) ANSWERING の間は answer が入った応答でも調べている表示を保ち、結果を描かない", async () => {
+    const user = userEvent.setup();
+    const stream = new FakeStream();
+    await reachResearching(
+      user,
+      stream,
+      makeStructuredView({ step: "ANSWERING", answer: groundedAnswer }),
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "調べています" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "調べた結果" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("掲載期限は最大90日まで延長できます。"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "解決しました" }),
+    ).not.toBeInTheDocument();
   });
 });

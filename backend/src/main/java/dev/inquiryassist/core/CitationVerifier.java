@@ -47,17 +47,6 @@ public final class CitationVerifier {
     }
 
     /**
-     * 回答の出典を照合し、照合できたものだけを残した回答を返す。
-     *
-     * @param answer 未照合の回答
-     * @param scope 投稿者の閲覧範囲
-     * @return 照合できた出典だけを持つ回答。1件もなければ根拠なし
-     */
-    public ZeroAnswer apply(ZeroAnswer answer, AccessScope scope) {
-        return answer.withVerifiedCitations(verifiedOnly(verify(answer.citations(), scope)));
-    }
-
-    /**
      * 照合結果から、照合できた出典だけを取り出す。
      *
      * @param results 照合結果

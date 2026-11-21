@@ -3,7 +3,10 @@ package dev.inquiryassist.core;
 import java.util.List;
 
 /**
- * 0次回答。1回の調査から本人向けの説明と担当者向けの技術メモを出す。
+ * 0次回答。本人向けの説明と担当者向けの技術メモを持つ。
+ *
+ * <p>調査・照合・説明の結果から {@code AnswerPipeline} が組み立てる。照合で出典が減った回答を、
+ * 説明の文章を残したまま作り直す手段は持たせない（説明は照合の後に、確かめられた事実だけから書く）。
  *
  * <p>根拠あり（{@code grounded}）の回答は出典を1つ以上持つ。出典のない回答は「わからない」として扱う。
  *
@@ -34,20 +37,5 @@ public record ZeroAnswer(
      */
     public static ZeroAnswer ungrounded(TechnicalMemo memo) {
         return new ZeroAnswer(false, null, memo, List.of());
-    }
-
-    /**
-     * 照合できた出典だけを残した回答を返す。
-     *
-     * <p>照合できた出典が1つもなければ、回答文の内容にかかわらず根拠なしに落とす。
-     *
-     * @param verified 実在を照合できた出典
-     * @return 出典を差し替えた回答
-     */
-    public ZeroAnswer withVerifiedCitations(List<Citation> verified) {
-        if (verified == null || verified.isEmpty()) {
-            return ungrounded(memo);
-        }
-        return new ZeroAnswer(grounded, askerExplanation, memo, verified);
     }
 }
