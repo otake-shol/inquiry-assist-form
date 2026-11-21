@@ -75,7 +75,7 @@ test("今すぐ担当者に送った問い合わせがオペレータ画面に�
   const utterance = `スモーク確認 ${Date.now()} 掲載期限の延長日数を知りたい`;
 
   await page.goto("/");
-  await page.getByRole("button", { name: "求人管理画面" }).click();
+  await page.getByRole("button", { name: "システムA" }).click();
   await page.getByLabel(INPUT_LABEL).fill(utterance);
   await page.getByRole("button", { name: "送信する" }).click();
   await expect(page.getByText(/として受け取りました/)).toBeVisible();
@@ -93,7 +93,7 @@ test("今すぐ担当者に送った問い合わせがオペレータ画面に�
   ).toBeVisible();
   const row = page.getByRole("button", { name: new RegExp(utterance) });
   await expect(row).toBeVisible();
-  await expect(row).toContainText("求人管理画面");
+  await expect(row).toContainText("システムA");
   await expect(row).toContainText("今すぐ送る");
   await row.click();
   const detail = page.getByRole("region", { name: "問い合わせの詳細" });

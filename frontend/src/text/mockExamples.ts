@@ -15,7 +15,7 @@ export const CATEGORY_EXAMPLES: Record<InquiryCategory, string> = {
   SPEC_QUESTION: "求人の掲載期限は、何日まで延長できますか？",
   SUSPECTED_BUG: "応募者一覧の件数が実際と合わず、不具合かもしれません。",
   WORK_REQUEST: "掲載期限を一括で延長してほしいです。",
-  INCIDENT: "求人管理画面が落ちていて、応募者を確認できません。",
+  INCIDENT: "システムAが落ちていて、応募者を確認できません。",
 };
 
 /** タグの例文に使うベース（正常系になる仕様確認の例文）。 */

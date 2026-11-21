@@ -30,13 +30,14 @@ inquiry:
     slow-step-delay: 2s
   # 対象システムの一覧。slack-webhook-url は Webhook の URL を含む秘密情報のため、
   # ここには書かず、環境変数（例: INQUIRY_SYSTEMS_0_SLACK_WEBHOOK_URL）などで与える
+  # 既定は、骨組みであることが分かる仮の名前。実際のシステムの一覧は、環境ごとの設定で差し替える
   systems:
-    - id: job-admin
-      label: 求人管理画面
-    - id: applicant-list
-      label: 応募者向けの一覧
-    - id: billing
-      label: 請求管理
+    - id: system-a
+      label: システムA
+    - id: system-b
+      label: システムB
+    - id: feature-c
+      label: 機能C
   # Slack の既定の投稿先は INQUIRY_SLACK_DEFAULT_WEBHOOK_URL で、リンクの基点は INQUIRY_PUBLIC_BASE_URL で与える
   # 障害の案内文。案内先が決まったら差し替える
   incident-guidance: 障害の連絡先は、社内の案内をご確認ください。

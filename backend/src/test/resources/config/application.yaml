@@ -1,0 +1,11 @@
+# テスト用の設定。本体の application.yaml に重ねて読まれる（一覧は丸ごと置き換わる）。
+# 本体の既定は仮の名前（システムA など）だが、テストでは業務らしい名前の一覧を使う。
+# 発話に含まれる名前から対象システムを推測する動きを、意味のある名前で確かめるため。
+inquiry:
+  systems:
+    - id: job-admin
+      label: 求人管理画面
+    - id: applicant-list
+      label: 応募者向けの一覧
+    - id: billing
+      label: 請求管理
