@@ -115,7 +115,7 @@ final class JsonSkillCall {
         if (content == null || content.isBlank()) {
             return Parsed.unreadable("出力が空");
         }
-        JsonNode node = readJson(content);
+        JsonNode node = readJson(json, content);
         if (node == null) {
             return Parsed.unreadable("JSON として読めない");
         }
@@ -133,7 +133,14 @@ final class JsonSkillCall {
         }
     }
 
-    private JsonNode readJson(String content) {
+    /**
+     * 出力を JSON として読む。そのまま読めなければ、最初の {@code {} から最後の {@code }} までを取り出して読む。
+     *
+     * @param json JSON の読み書き
+     * @param content モデルの出力
+     * @return 読めた JSON。読めなければ null
+     */
+    static JsonNode readJson(JsonMapper json, String content) {
         String text = content.strip();
         try {
             return json.readTree(text);

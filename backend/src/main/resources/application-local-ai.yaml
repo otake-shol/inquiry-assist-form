@@ -1,4 +1,4 @@
-# 手元のモデル（Ollama）で、受付・聞き手・言い直し・説明を動かす。調査は道具を繰り返し使うため、まだモック。
+# 手元のモデル（Ollama）で、5つのスキルをすべて動かす。一次情報の検索はモックのまま（見本の資料を調べる）。
 # 使い方: npm run dev:backend:local-ai（Ollama とモデルが手元で動いていること）
 inquiry:
   skills:
@@ -21,7 +21,12 @@ inquiry:
       think: false
       timeout: 60s
     investigator:
-      provider: mock
+      provider: ollama
+      model: qwen3.6:35b
+      temperature: 0
+      think: false
+      # 1回の呼び出しの時間切れ。調査は最大で9回呼ぶ
+      timeout: 120s
     explainer:
       provider: ollama
       model: qwen3.6:35b
