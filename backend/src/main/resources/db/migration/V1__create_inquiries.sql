@@ -1,5 +1,4 @@
 -- 問い合わせ記録。自己解決・起票・障害の案内・離脱のいずれの場合も1件ずつ残す。
--- Flyway と PostgreSQL の接続はフェーズ3で追加する。それまでこのファイルは実行されない。
 
 CREATE TABLE inquiries (
     id                    UUID PRIMARY KEY,
@@ -9,6 +8,12 @@ CREATE TABLE inquiries (
     -- 投稿者（SSOで特定した識別子）
     asker_id              TEXT NOT NULL,
 
+    -- 進行位置。契約書の段階（TRIAGED / STRUCTURED / ANSWERING / ANSWERED / CLOSED）
+    step                  TEXT NOT NULL
+        CHECK (step IN ('TRIAGED', 'STRUCTURED', 'ANSWERING', 'ANSWERED', 'CLOSED')),
+    -- 楽観ロック。並行した更新（生成中の「今すぐ送る」など）を検出する
+    version               BIGINT NOT NULL DEFAULT 0,
+
     -- 元の発話。本人が最初に書いた文章をそのまま残す
     utterance             TEXT NOT NULL,
 
@@ -16,8 +21,10 @@ CREATE TABLE inquiries (
     category_by_ai        TEXT CHECK (category_by_ai IN ('SPEC_QUESTION', 'SUSPECTED_BUG', 'WORK_REQUEST', 'INCIDENT')),
     category_confirmed    TEXT CHECK (category_confirmed IN ('SPEC_QUESTION', 'SUSPECTED_BUG', 'WORK_REQUEST', 'INCIDENT')),
 
-    -- 追加質問と回答: [{ "id", "text", "options", "answer" }]
+    -- 現在の追加質問と回答: [{ "id", "text", "options", "answer" }]
     follow_ups            JSONB NOT NULL DEFAULT '[]',
+    -- AIが作った追加質問。本人が種別を変えても元に戻せるように残す: [{ "id", "text", "options" }]
+    ai_questions          JSONB NOT NULL DEFAULT '[]',
 
     -- 整形後の問い。AIの出力と、本人が修正した後の値
     structured_by_ai      JSONB,
@@ -35,8 +42,10 @@ CREATE TABLE inquiries (
         CHECK (outcome IN ('IN_PROGRESS', 'SELF_RESOLVED', 'FILED', 'INCIDENT_REDIRECTED', 'ABANDONED')),
     -- 「今すぐ担当者に送る」による起票か
     sent_immediately      BOOLEAN NOT NULL DEFAULT false,
+    -- 起票した時刻（担当者への通知を出した時刻）
+    filed_at              TIMESTAMPTZ,
 
-    -- 実行条件と利用量: [{ "step", "model", "promptVersion", "inputTokens", "outputTokens", "cacheReadTokens" }]
+    -- 実行条件と利用量: [{ "step", "model", "promptVersion", "inputTokens", "outputTokens", "cacheReadTokens", "mock" }]
     usages                JSONB NOT NULL DEFAULT '[]',
     -- モック実装による記録か
     mock                  BOOLEAN NOT NULL DEFAULT false,

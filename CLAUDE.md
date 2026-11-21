@@ -29,8 +29,27 @@
 - `npm run verify:backend`: `./gradlew check`（コンパイルと JUnit）
 - `npm run verify:frontend`: 型チェック、oxlint、Prettier、Vitest
 
-画面に触れたら UI スモーク（Playwright、フェーズ2で追加）も通す。純粋関数や型の不変条件を変えたら対応するテストを追加・更新する。
+画面か API の契約に触れたら `npm run smoke`（Playwright）も通す。純粋関数や型の不変条件を変えたら対応するテストを追加・更新する。
+
+## ローカルでの起動
+
+Docker を起動したうえで、ルートで次を実行する。
+
+```bash
+npm run dev:backend    # API（8080）。PostgreSQL のコンテナも自動で起動する
+npm run dev:frontend   # 画面（5173）
+npm run smoke          # 実ブラウザのスモーク。API と画面を自動で起動する
+```
+
+Gradle は必ず `scripts/gradle.sh` 経由で実行する。asdf の遅延初期化と OrbStack の環境で、`JAVA_HOME` と `DOCKER_HOST` を補うため。
+
+画面と API の間の仕様は `docs/api-contract.md` が正。変更するときは両方の実装とテストを同時に直す。
 
 ## 現在の状態
 
-フェーズ1（土台）まで。モック実装とフォーム画面はフェーズ2で作る。
+フェーズ3（モック、フォーム画面、保存と起票）まで。既定のプロファイルは `mock` で、AWS に接続せずに全経路が動く。
+
+- 起票の通知はログ出力だけ（`LoggingFilingNotifier`）。起票先が決まったら `FilingNotifier` の実装を足す。
+- 投稿者は固定ユーザー（`FixedCurrentUserProvider`）。SSO はフェーズ7。
+- `bedrock` プロファイルは未実装（フェーズ4〜5）。
+- 結果の `ABANDONED`（離脱）は自動では設定していない。

@@ -8,7 +8,10 @@
   },
   "scripts": {
     "verify": "npm run verify:backend && npm run verify:frontend",
-    "verify:backend": "cd backend && ./gradlew check --console=plain",
-    "verify:frontend": "npm --prefix frontend run verify"
+    "verify:backend": "bash scripts/gradle.sh check --console=plain",
+    "verify:frontend": "npm --prefix frontend run verify",
+    "dev:backend": "bash scripts/gradle.sh bootRun --console=plain",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "smoke": "npm --prefix frontend run smoke"
   }
 }

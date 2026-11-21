@@ -1,0 +1,444 @@
+package dev.inquiryassist.inquiry;
+
+import dev.inquiryassist.core.AccessScope;
+import dev.inquiryassist.core.AiRefusalException;
+import dev.inquiryassist.core.AiResult;
+import dev.inquiryassist.core.AiUnavailableException;
+import dev.inquiryassist.core.AnsweredQuestion;
+import dev.inquiryassist.core.Citation;
+import dev.inquiryassist.core.CitationVerifier;
+import dev.inquiryassist.core.FollowUpQuestion;
+import dev.inquiryassist.core.InquiryAssistant;
+import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.KnowledgeSearch;
+import dev.inquiryassist.core.StructuredInquiry;
+import dev.inquiryassist.core.TriageResult;
+import dev.inquiryassist.core.ZeroAnswer;
+import dev.inquiryassist.inquiry.InquiryEntity.StoredCitation;
+import dev.inquiryassist.inquiry.InquiryEntity.StoredQuestion;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+
+/**
+ * 問い合わせの段階遷移と、種別ごとの経路を実装するアプリケーション層（契約書「段階の遷移」）。
+ *
+ * <p>AI の呼び出しの間は DB トランザクションを持たない。保存時の競合は楽観ロックで検出し、
+ * {@link InvalidStateException} として返す。
+ */
+@Service
+public class InquiryService {
+
+    /** 作業依頼の固定質問の識別子。 */
+    public static final String WR_WHAT = "wr-what";
+
+    public static final String WR_WHEN = "wr-when";
+    public static final String WR_TARGET = "wr-target";
+    /** 障害の固定質問の識別子。 */
+    public static final String INCIDENT_CHECK = "incident-check";
+
+    private static final String INCIDENT_NOT_STOPPED = "いいえ";
+
+    private static final List<StoredQuestion> WORK_REQUEST_QUESTIONS = List.of(
+            new StoredQuestion(WR_WHAT, "何をしてほしいですか", List.of(), null),
+            new StoredQuestion(WR_WHEN, "いつまでに必要ですか", List.of(), null),
+            new StoredQuestion(WR_TARGET, "対象は何ですか", List.of(), null));
+    private static final List<StoredQuestion> INCIDENT_QUESTIONS =
+            List.of(new StoredQuestion(INCIDENT_CHECK, "いま業務やサービスが止まっていますか", List.of("はい", "いいえ"), null));
+
+    /**
+     * 追加質問への回答1件。
+     *
+     * @param questionId 質問の識別子
+     * @param answer 回答。「わからない」は null
+     */
+    public record AnswerInput(String questionId, String answer) {}
+
+    /**
+     * 本人が確認・修正した整形結果。
+     *
+     * @param targetSystem 対象システム
+     * @param goal やりたいこと・知りたいこと。必須
+     * @param whatHappened 起きたこと
+     * @param expectedResult 期待した結果
+     * @param urgency 緊急度。null なら NORMAL
+     */
+    public record StructuredInput(
+            String targetSystem,
+            String goal,
+            String whatHappened,
+            String expectedResult,
+            StructuredInquiry.Urgency urgency) {}
+
+    private final InquiryAssistant assistant;
+    private final CitationVerifier verifier;
+    private final InquiryRepository repository;
+    private final CurrentUserProvider users;
+    private final FilingNotifier notifier;
+    private final TransactionTemplate transaction;
+    private final String incidentGuidance;
+    private final Environment environment;
+    private final Set<UUID> generating = ConcurrentHashMap.newKeySet();
+
+    /**
+     * @param assistant AI 処理の境界
+     * @param knowledgeSearch 出典の照合に使う一次情報の読み取り
+     * @param repository 問い合わせ記録の保存先
+     * @param users 現在の投稿者
+     * @param notifier 起票の通知先
+     * @param transaction 保存時のトランザクション
+     * @param incidentGuidance 障害の案内文
+     * @param environment モック動作中かの判定に使う
+     */
+    public InquiryService(
+            InquiryAssistant assistant,
+            KnowledgeSearch knowledgeSearch,
+            InquiryRepository repository,
+            CurrentUserProvider users,
+            FilingNotifier notifier,
+            TransactionTemplate transaction,
+            @Value("${inquiry.incident-guidance}") String incidentGuidance,
+            Environment environment) {
+        this.assistant = assistant;
+        this.verifier = new CitationVerifier(knowledgeSearch);
+        this.repository = repository;
+        this.users = users;
+        this.notifier = notifier;
+        this.transaction = transaction;
+        this.incidentGuidance = incidentGuidance;
+        this.environment = environment;
+    }
+
+    /**
+     * 種別を判定して追加質問を作り、問い合わせを新規に保存する。
+     *
+     * @param utterance 本人が書いた元の発話
+     * @return {@code TRIAGED} の問い合わせ
+     * @throws TriageFailedException 種別の判定でAIが失敗した場合。元の発話は種別なしで保存済み
+     */
+    public InquiryView create(String utterance) {
+        AccessScope scope = users.currentScope();
+        InquiryEntity inquiry = new InquiryEntity(scope.userId(), utterance, Instant.now());
+        AiResult<TriageResult> triage;
+        try {
+            triage = assistant.triage(utterance);
+        } catch (AiRefusalException | AiUnavailableException e) {
+            // 失敗しても発話は失わない。種別なし・質問なしで保存し、「今すぐ送る」だけを可能にする
+            inquiry.mock = environment.acceptsProfiles(Profiles.of("mock"));
+            commit(inquiry, null);
+            throw new TriageFailedException(inquiry.id, e);
+        }
+        InquiryCategory category = triage.value().category();
+        inquiry.categoryByAi = category;
+        inquiry.categoryConfirmed = category;
+        inquiry.addUsage("triage", triage.usage());
+        if (category.receivesZeroAnswer()) {
+            inquiry.aiQuestions = new ArrayList<>(triage.value().questions().stream()
+                    .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), null))
+                    .toList());
+        }
+        inquiry.followUps = questionsFor(inquiry, category);
+        return toView(commit(inquiry, null));
+    }
+
+    /**
+     * 本人が種別を変更する。追加質問は変更後の種別に合わせて差し替える。
+     *
+     * @param id 問い合わせの識別子
+     * @param category 変更後の種別
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code TRIAGED} でない場合
+     */
+    public InquiryView changeCategory(UUID id, InquiryCategory category) {
+        InquiryEntity inquiry = load(id);
+        requireStep(inquiry, InquiryStep.TRIAGED);
+        requireTriaged(inquiry);
+        inquiry.categoryConfirmed = category;
+        inquiry.followUps = questionsFor(inquiry, category);
+        return toView(commit(inquiry, null));
+    }
+
+    /**
+     * 追加質問への回答を受け取り、整形する。障害は固定質問の回答で案内か続行かが決まる。
+     *
+     * @param id 問い合わせの識別子
+     * @param answers 回答。回答のない質問は「わからない」として扱う
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code TRIAGED} でない場合
+     * @throws IllegalArgumentException 存在しない質問への回答を含む場合
+     */
+    public InquiryView answerQuestions(UUID id, List<AnswerInput> answers) {
+        InquiryEntity inquiry = load(id);
+        requireStep(inquiry, InquiryStep.TRIAGED);
+        requireTriaged(inquiry);
+        Map<String, String> byId = new HashMap<>();
+        for (AnswerInput input : answers) {
+            if (inquiry.followUps.stream().noneMatch(q -> q.id().equals(input.questionId()))) {
+                throw new IllegalArgumentException("存在しない質問です: " + input.questionId());
+            }
+            byId.put(input.questionId(), input.answer());
+        }
+        inquiry.followUps = new ArrayList<>(inquiry.followUps.stream()
+                .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), byId.get(q.id())))
+                .toList());
+
+        if (inquiry.category() == InquiryCategory.INCIDENT) {
+            String check = byId.get(INCIDENT_CHECK);
+            if (check == null || !INCIDENT_NOT_STOPPED.equals(check.trim())) {
+                inquiry.step = InquiryStep.CLOSED;
+                inquiry.outcome = InquiryOutcome.INCIDENT_REDIRECTED;
+                return toView(commit(inquiry, null));
+            }
+            inquiry.categoryConfirmed = InquiryCategory.SUSPECTED_BUG;
+        }
+        structure(inquiry);
+        return toView(commit(inquiry, null));
+    }
+
+    /**
+     * 本人が確認・修正した整形結果を確定する。作業依頼はここで起票し、それ以外は0次回答の生成待ちになる。
+     *
+     * @param id 問い合わせの識別子
+     * @param input 確定する整形結果
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code STRUCTURED} でない場合
+     * @throws IllegalArgumentException goal が空の場合
+     */
+    public InquiryView confirmStructured(UUID id, StructuredInput input) {
+        InquiryEntity inquiry = load(id);
+        requireStep(inquiry, InquiryStep.STRUCTURED);
+        inquiry.structuredConfirmed = new StructuredInquiry(
+                inquiry.category(),
+                input.targetSystem(),
+                input.goal(),
+                input.whatHappened(),
+                input.expectedResult(),
+                input.urgency());
+        if (inquiry.category() == InquiryCategory.WORK_REQUEST) {
+            return toView(commit(inquiry, file(inquiry, false)));
+        }
+        inquiry.step = InquiryStep.ANSWERING;
+        return toView(commit(inquiry, null));
+    }
+
+    /**
+     * 0次回答を生成する。出典は一次情報に当たって照合し、照合できたものだけを回答に残す。
+     * 不具合の疑いは完了と同時に起票する。同じ問い合わせの生成は同時に1つだけ走らせる。
+     *
+     * @param id 問い合わせの識別子
+     * @param progress 進捗の通知先
+     * @return 完了後の問い合わせ
+     * @throws InvalidStateException {@code ANSWERING} でない、または同じ問い合わせの生成が進行中の場合
+     * @throws dev.inquiryassist.core.AiRefusalException モデルが回答を拒否した場合
+     * @throws dev.inquiryassist.core.AiUnavailableException モデルを呼び出せなかった場合
+     */
+    public InquiryView generateAnswer(UUID id, InquiryAssistant.ProgressListener progress) {
+        if (!generating.add(id)) {
+            throw new InvalidStateException("0次回答を生成中です");
+        }
+        try {
+            InquiryEntity inquiry = load(id);
+            requireStep(inquiry, InquiryStep.ANSWERING);
+            AccessScope scope = users.currentScope();
+            AiResult<ZeroAnswer> result = assistant.answer(inquiry.structured(), scope, progress);
+
+            List<CitationVerifier.Result> verified = verifier.verify(result.value().citations(), scope);
+            ZeroAnswer answer = result.value().withVerifiedCitations(CitationVerifier.verifiedOnly(verified));
+            inquiry.answerGrounded = answer.grounded();
+            inquiry.askerExplanation = answer.askerExplanation();
+            inquiry.technicalMemo = answer.memo();
+            inquiry.citations = new ArrayList<>(verified.stream().map(InquiryService::toStored).toList());
+            inquiry.addUsage("answer", result.usage());
+
+            if (inquiry.category().alwaysFiled()) {
+                return toView(commit(inquiry, file(inquiry, false)));
+            }
+            inquiry.step = InquiryStep.ANSWERED;
+            return toView(commit(inquiry, null));
+        } finally {
+            generating.remove(id);
+        }
+    }
+
+    /**
+     * 本人の解決判定で問い合わせを終える。
+     *
+     * @param id 問い合わせの識別子
+     * @param resolved 解決したか。false なら起票する
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code ANSWERED} でない場合
+     */
+    public InquiryView resolve(UUID id, boolean resolved) {
+        InquiryEntity inquiry = load(id);
+        requireStep(inquiry, InquiryStep.ANSWERED);
+        if (resolved) {
+            inquiry.step = InquiryStep.CLOSED;
+            inquiry.outcome = InquiryOutcome.SELF_RESOLVED;
+            return toView(commit(inquiry, null));
+        }
+        return toView(commit(inquiry, file(inquiry, false)));
+    }
+
+    /**
+     * その時点の内容で、今すぐ担当者に送る。
+     *
+     * @param id 問い合わせの識別子
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code CLOSED} の場合
+     */
+    public InquiryView sendNow(UUID id) {
+        InquiryEntity inquiry = load(id);
+        if (inquiry.step == InquiryStep.CLOSED) {
+            throw new InvalidStateException("終了した問い合わせは送れません");
+        }
+        return toView(commit(inquiry, file(inquiry, true)));
+    }
+
+    /**
+     * 問い合わせを1件取得する。
+     *
+     * @param id 問い合わせの識別子
+     * @return 問い合わせ
+     * @throws InquiryNotFoundException 存在しない場合
+     */
+    public InquiryView get(UUID id) {
+        return toView(load(id));
+    }
+
+    private void structure(InquiryEntity inquiry) {
+        List<AnsweredQuestion> answered = inquiry.followUps.stream()
+                .map(q -> new AnsweredQuestion(new FollowUpQuestion(q.id(), q.text(), q.options()), q.answer()))
+                .toList();
+        AiResult<StructuredInquiry> result = assistant.structure(inquiry.utterance, inquiry.category(), answered);
+        inquiry.structuredByAi = result.value();
+        inquiry.addUsage("structure", result.usage());
+        inquiry.step = InquiryStep.STRUCTURED;
+    }
+
+    /** 起票の状態にし、通知の内容を返す。通知は保存と同じトランザクションで {@link #commit} が出す。 */
+    private FilingNotifier.FilingNotice file(InquiryEntity inquiry, boolean immediately) {
+        inquiry.step = InquiryStep.CLOSED;
+        inquiry.outcome = InquiryOutcome.FILED;
+        inquiry.sentImmediately = immediately;
+        inquiry.filedAt = Instant.now();
+        return new FilingNotifier.FilingNotice(
+                inquiry.id, inquiry.category(), inquiry.utterance, inquiry.structured(), inquiry.technicalMemo, immediately);
+    }
+
+    /**
+     * 保存する。起票があれば保存の確定前に通知し、通知が失敗したら保存も取り消す。
+     * 他の操作との競合は {@link InvalidStateException} にする。
+     */
+    private InquiryEntity commit(InquiryEntity inquiry, FilingNotifier.FilingNotice notice) {
+        inquiry.updatedAt = Instant.now();
+        try {
+            return transaction.execute(status -> {
+                InquiryEntity saved = repository.saveAndFlush(inquiry);
+                if (notice != null) {
+                    notifier.notifyFiled(notice);
+                }
+                return saved;
+            });
+        } catch (OptimisticLockingFailureException e) {
+            throw new InvalidStateException("他の操作と競合しました。最新の状態を取得し直してください");
+        }
+    }
+
+    private InquiryEntity load(UUID id) {
+        String userId = users.currentScope().userId();
+        return repository
+                .findById(id)
+                .filter(i -> i.askerId.equals(userId))
+                .orElseThrow(() -> new InquiryNotFoundException(id));
+    }
+
+    private static void requireStep(InquiryEntity inquiry, InquiryStep expected) {
+        if (inquiry.step != expected) {
+            throw new InvalidStateException(
+                    "この操作は " + expected + " でのみ実行できます（現在: " + inquiry.step + "）");
+        }
+    }
+
+    /** 種別の判定に失敗した問い合わせ（種別なし）は、種別の変更も回答も受け付けない。 */
+    private static void requireTriaged(InquiryEntity inquiry) {
+        if (inquiry.categoryConfirmed == null) {
+            throw new InvalidStateException("種別の判定に失敗した問い合わせです。今すぐ担当者に送ってください");
+        }
+    }
+
+    private static List<StoredQuestion> questionsFor(InquiryEntity inquiry, InquiryCategory category) {
+        return new ArrayList<>(switch (category) {
+            case WORK_REQUEST -> WORK_REQUEST_QUESTIONS;
+            case INCIDENT -> INCIDENT_QUESTIONS;
+            // AI の質問は AI の判定が仕様確認か不具合のときだけ保存している。それ以外は空になる
+            case SPEC_QUESTION, SUSPECTED_BUG -> inquiry.aiQuestions;
+        });
+    }
+
+    private static StoredCitation toStored(CitationVerifier.Result result) {
+        Citation c = result.citation();
+        return new StoredCitation(
+                c.sourceType(),
+                c.repository(),
+                c.path(),
+                c.startLine(),
+                c.endLine(),
+                c.quote(),
+                c.revision(),
+                result.verified());
+    }
+
+    private InquiryView toView(InquiryEntity e) {
+        StructuredInquiry structured = e.structured();
+        InquiryView.AnswerView answer = e.answerGrounded == null
+                ? null
+                : new InquiryView.AnswerView(
+                        e.answerGrounded,
+                        e.askerExplanation,
+                        e.technicalMemo,
+                        e.citations.stream()
+                                .filter(StoredCitation::verified)
+                                .map(c -> new Citation(
+                                        c.sourceType(),
+                                        c.repository(),
+                                        c.path(),
+                                        c.startLine(),
+                                        c.endLine(),
+                                        c.quote(),
+                                        c.revision()))
+                                .toList());
+        return new InquiryView(
+                e.id,
+                e.step,
+                e.outcome,
+                e.utterance,
+                e.categoryByAi,
+                e.categoryConfirmed,
+                e.followUps.stream()
+                        .map(q -> new InquiryView.QuestionView(q.id(), q.text(), q.options()))
+                        .toList(),
+                structured == null
+                        ? null
+                        : new InquiryView.StructuredView(
+                                structured.targetSystem(),
+                                structured.goal(),
+                                structured.whatHappened(),
+                                structured.expectedResult(),
+                                structured.urgency()),
+                answer,
+                e.outcome == InquiryOutcome.INCIDENT_REDIRECTED ? incidentGuidance : null,
+                e.sentImmediately,
+                e.mock);
+    }
+}

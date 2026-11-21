@@ -1,0 +1,75 @@
+package dev.inquiryassist.inquiry;
+
+import dev.inquiryassist.core.Citation;
+import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.StructuredInquiry;
+import dev.inquiryassist.core.TechnicalMemo;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * 問い合わせ1件の表現（契約書の InquiryView）。
+ *
+ * @param id 識別子
+ * @param step 段階
+ * @param outcome 結果
+ * @param utterance 本人が書いた元の発話
+ * @param categoryByAi AI が判定した種別
+ * @param category 本人が確認・変更した後の種別
+ * @param questions 現在の追加質問
+ * @param structured 整形後の問い。{@code STRUCTURED} 以降で非 null
+ * @param answer 0次回答。完了後に非 null
+ * @param incidentGuidance 障害の案内文。{@code INCIDENT_REDIRECTED} のときだけ非 null
+ * @param sentImmediately 「今すぐ担当者に送る」による起票か
+ * @param mock モック実装による記録か
+ */
+public record InquiryView(
+        UUID id,
+        InquiryStep step,
+        InquiryOutcome outcome,
+        String utterance,
+        InquiryCategory categoryByAi,
+        InquiryCategory category,
+        List<QuestionView> questions,
+        StructuredView structured,
+        AnswerView answer,
+        String incidentGuidance,
+        boolean sentImmediately,
+        boolean mock) {
+
+    /**
+     * 追加質問。
+     *
+     * @param id 質問の識別子
+     * @param text 質問文
+     * @param options 選択肢。空なら自由記述
+     */
+    public record QuestionView(String id, String text, List<String> options) {}
+
+    /**
+     * 整形後の問い。
+     *
+     * @param targetSystem 対象システム。不明なら null
+     * @param goal やりたいこと・知りたいこと
+     * @param whatHappened 起きたこと
+     * @param expectedResult 期待した結果
+     * @param urgency 緊急度
+     */
+    public record StructuredView(
+            String targetSystem,
+            String goal,
+            String whatHappened,
+            String expectedResult,
+            StructuredInquiry.Urgency urgency) {}
+
+    /**
+     * 0次回答。{@code citations} には照合できた出典だけを入れる。
+     *
+     * @param grounded 照合できた出典に根拠があるか
+     * @param askerExplanation 本人向けの説明。根拠なしなら null
+     * @param memo 担当者向けの技術メモ
+     * @param citations 照合できた出典
+     */
+    public record AnswerView(
+            boolean grounded, String askerExplanation, TechnicalMemo memo, List<Citation> citations) {}
+}
