@@ -1,9 +1,24 @@
-import type { OperatorDetail, OperatorItem } from "../api/types.ts";
+import type {
+  HandlingCounts,
+  HandlingStatus,
+  OperatorDetail,
+  OperatorItem,
+} from "../api/types.ts";
 import { OP_TEXT } from "./labels.ts";
+
+/** 対応状況のタブ。`ALL` は「すべて」。 */
+export type StatusTab = "ALL" | HandlingStatus;
+
+/** タブの並び順。 */
+export const STATUS_TABS: StatusTab[] = ["OPEN", "IN_PROGRESS", "DONE", "ALL"];
 
 /** オペレータ画面の状態。 */
 export interface OperatorState {
   items: OperatorItem[];
+  /** 開いている対応状況のタブ（既定は「すべて」） */
+  tab: StatusTab;
+  /** 対応状況ごとの件数（取得できていなければ null） */
+  counts: HandlingCounts | null;
   loaded: boolean;
   onlyUnread: boolean;
   selectedId: string | null;
@@ -18,8 +33,14 @@ export interface OperatorState {
 
 /** 状態を変える操作。 */
 export type OperatorAction =
-  | { type: "listLoaded"; items: OperatorItem[] }
+  | {
+      type: "listLoaded";
+      items: OperatorItem[];
+      counts?: HandlingCounts | null;
+    }
   | { type: "filed"; item: OperatorItem }
+  | { type: "updated"; item: OperatorItem }
+  | { type: "tabChanged"; tab: StatusTab }
   | { type: "selected"; id: string }
   | { type: "detailLoaded"; detail: OperatorDetail }
   | { type: "detailFailed" }
@@ -32,6 +53,8 @@ export type OperatorAction =
 /** 最初の状態。 */
 export const initialOperatorState: OperatorState = {
   items: [],
+  tab: "ALL",
+  counts: null,
   loaded: false,
   onlyUnread: false,
   selectedId: null,
@@ -68,10 +91,76 @@ export function visibleItems(
   items: OperatorItem[],
   onlyUnread: boolean,
   selectedId: string | null,
+  tab: StatusTab = "ALL",
 ): OperatorItem[] {
-  return onlyUnread
-    ? items.filter((item) => !item.read || item.id === selectedId)
-    : items;
+  return items.filter(
+    (item) =>
+      item.id === selectedId ||
+      ((!onlyUnread || !item.read) &&
+        (tab === "ALL" ||
+          item.handlingStatus == null ||
+          item.handlingStatus === tab)),
+  );
+}
+
+/**
+ * 件数を、1件の対応状況が変わったぶんだけ直す。件数が取得できていなければ何もしない。
+ * @param counts 対応状況ごとの件数
+ * @param before 変わる前の対応状況（新しく現れた件なら null / undefined）
+ * @param after 変わった後の対応状況
+ */
+export function adjustCounts(
+  counts: HandlingCounts | null,
+  before: HandlingStatus | null | undefined,
+  after: HandlingStatus | null | undefined,
+): HandlingCounts | null {
+  if (counts === null || before === after) return counts;
+  const next = { ...counts };
+  if (before != null) next[before] = Math.max(0, (next[before] ?? 0) - 1);
+  if (after != null) next[after] = (next[after] ?? 0) + 1;
+  return next;
+}
+
+/**
+ * 「すべて」の件数。対応状況ごとの件数の合計。
+ * @param counts 対応状況ごとの件数
+ */
+export function totalCount(counts: HandlingCounts): number {
+  return (counts.OPEN ?? 0) + (counts.IN_PROGRESS ?? 0) + (counts.DONE ?? 0);
+}
+
+/**
+ * 更新された1件を一覧に反映する。開いているタブの対応状況から外れたら一覧から除き、
+ * 一覧にあれば更新し（未読なら先頭へ動かし）、なければ先頭に足す。
+ * 件数は、一覧に前の状態がある場合と、「すべて」のタブで新しく現れた場合だけ直す。
+ * @param state 現在の状態
+ * @param item 更新された1件
+ */
+function applyUpdate(state: OperatorState, item: OperatorItem): OperatorState {
+  const previous = state.items.find((existing) => existing.id === item.id);
+  const counts =
+    previous !== undefined || state.tab === "ALL"
+      ? adjustCounts(
+          state.counts,
+          previous?.handlingStatus,
+          item.handlingStatus,
+        )
+      : state.counts;
+  const outOfTab =
+    state.tab !== "ALL" &&
+    item.handlingStatus != null &&
+    item.handlingStatus !== state.tab;
+  let items: OperatorItem[];
+  if (outOfTab) {
+    items = state.items.filter((existing) => existing.id !== item.id);
+  } else if (previous === undefined || !item.read) {
+    items = mergeFiled(state.items, item);
+  } else {
+    items = state.items.map((existing) =>
+      existing.id === item.id ? item : existing,
+    );
+  }
+  return { ...state, items, counts };
 }
 
 /**
@@ -106,17 +195,18 @@ export function operatorReducer(
                 item.id === state.detail?.id ? { ...item, read: true } : item,
               )
             : action.items,
+        counts: action.counts ?? state.counts,
         loaded: true,
         failed: false,
       };
+    case "tabChanged":
+      return { ...state, tab: action.tab, loaded: false, failed: false };
+    case "updated":
+      return applyUpdate(state, action.item);
     case "listFailed":
       return { ...state, loaded: true, failed: true };
     case "filed":
-      return {
-        ...state,
-        items: mergeFiled(state.items, action.item),
-        banner: action.item,
-      };
+      return { ...applyUpdate(state, action.item), banner: action.item };
     case "selected":
       return {
         ...state,
@@ -127,17 +217,34 @@ export function operatorReducer(
         notFound: false,
         banner: state.banner?.id === action.id ? null : state.banner,
       };
-    case "detailLoaded":
+    case "detailLoaded": {
+      const { detail } = action;
+      const previous = state.items.find((item) => item.id === detail.id);
       return {
         ...state,
-        detail: action.detail,
+        detail,
         detailLoading: false,
-        items: action.detail.read
-          ? state.items.map((item) =>
-              item.id === action.detail.id ? { ...item, read: true } : item,
-            )
-          : state.items,
+        // 対応状況ややり取りの数は、詳細で変わったぶんを一覧の1件にも反映する
+        items: state.items.map((item) =>
+          item.id === detail.id
+            ? {
+                ...item,
+                read: detail.read ? true : item.read,
+                handlingStatus: detail.handlingStatus ?? item.handlingStatus,
+                messageCount: detail.messages?.length ?? item.messageCount,
+              }
+            : item,
+        ),
+        counts:
+          detail.handlingStatus == null || previous === undefined
+            ? state.counts
+            : adjustCounts(
+                state.counts,
+                previous?.handlingStatus,
+                detail.handlingStatus,
+              ),
       };
+    }
     case "detailFailed":
       return { ...state, detailLoading: false, failed: true };
     case "detailNotFound":

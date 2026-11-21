@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { makeDetail, makeItem } from "../test/fakes.ts";
 import {
+  adjustCounts,
   initialOperatorState,
   mergeFiled,
   operatorReducer,
   tabTitleOf,
+  totalCount,
   unreadCountOf,
   visibleItems,
 } from "./state.ts";
@@ -56,5 +58,84 @@ describe("オペレータ画面の純粋関数", () => {
     });
     expect(state.items.find((i) => i.id === "a")?.read).toBe(true);
     expect(unreadCountOf(state.items)).toBe(1);
+  });
+});
+
+describe("対応状況のタブと更新の反映", () => {
+  const open = makeItem({ id: "o", read: true, handlingStatus: "OPEN" });
+  const done = makeItem({ id: "d", read: true, handlingStatus: "DONE" });
+
+  it("タブの絞り込みでも、開いている1件は残る", () => {
+    expect(visibleItems([open, done], false, null, "DONE")).toEqual([done]);
+    expect(visibleItems([open, done], false, "o", "DONE")).toEqual([
+      open,
+      done,
+    ]);
+    expect(visibleItems([open, done], false, null, "ALL")).toEqual([
+      open,
+      done,
+    ]);
+  });
+
+  it("対応状況が変わった件数だけを直し、取得できていなければ何もしない", () => {
+    const counts = { OPEN: 2, IN_PROGRESS: 1, DONE: 5 };
+    expect(adjustCounts(counts, "OPEN", "DONE")).toEqual({
+      OPEN: 1,
+      IN_PROGRESS: 1,
+      DONE: 6,
+    });
+    expect(adjustCounts(counts, undefined, "OPEN")).toEqual({
+      ...counts,
+      OPEN: 3,
+    });
+    expect(adjustCounts(counts, "DONE", "DONE")).toBe(counts);
+    expect(adjustCounts(null, "OPEN", "DONE")).toBeNull();
+    expect(totalCount(counts)).toBe(8);
+  });
+
+  it("updated は一覧のその件を更新し、未読なら先頭へ動かす。既読なら位置を保つ", () => {
+    const base = {
+      ...initialOperatorState,
+      items: [open, makeItem({ id: "x", read: true }), done],
+      counts: { OPEN: 1, IN_PROGRESS: 0, DONE: 1 },
+    };
+    const unreadUpdate = operatorReducer(base, {
+      type: "updated",
+      item: { ...done, read: false, messageCount: 1 },
+    });
+    expect(unreadUpdate.items.map((i) => i.id)).toEqual(["d", "o", "x"]);
+    expect(unreadUpdate.items[0]).toMatchObject({
+      read: false,
+      messageCount: 1,
+    });
+
+    const readUpdate = operatorReducer(base, {
+      type: "updated",
+      item: { ...open, handlingStatus: "IN_PROGRESS" },
+    });
+    expect(readUpdate.items.map((i) => i.id)).toEqual(["o", "x", "d"]);
+    expect(readUpdate.items[0].handlingStatus).toBe("IN_PROGRESS");
+    expect(readUpdate.counts).toEqual({ OPEN: 0, IN_PROGRESS: 1, DONE: 1 });
+  });
+
+  it("updated で開いているタブの対応状況から外れた件は一覧から除く", () => {
+    const base = {
+      ...initialOperatorState,
+      tab: "OPEN" as const,
+      items: [open],
+    };
+    const moved = operatorReducer(base, {
+      type: "updated",
+      item: { ...open, handlingStatus: "DONE" },
+    });
+    expect(moved.items).toEqual([]);
+  });
+
+  it("タブを切り替えると読み込み中に戻る", () => {
+    const next = operatorReducer(
+      { ...initialOperatorState, loaded: true },
+      { type: "tabChanged", tab: "DONE" },
+    );
+    expect(next).toMatchObject({ tab: "DONE", loaded: false });
   });
 });

@@ -1,6 +1,7 @@
 package dev.inquiryassist.notification;
 
 import dev.inquiryassist.inquiry.InquiryFiledEvent;
+import dev.inquiryassist.inquiry.InquiryUpdatedEvent;
 import java.io.IOException;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -13,7 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * オペレータ画面への、ツール内の通知。接続中の購読者へ問い合わせの送付を SSE の {@code filed} で配る（プロセス内の配信）。
+ * オペレータ画面への、ツール内の通知。接続中の購読者へ問い合わせの送付を SSE の {@code filed}、送付後の更新を {@code updated} で配る（プロセス内の配信）。
  *
  * <p>接続を保つためコメント行を定期的に送り、送信に失敗した（切断済みの）購読者はそのとき取り除く。
  */
@@ -60,6 +61,18 @@ public class OperatorStreamHub {
     public void onFiled(InquiryFiledEvent event) {
         for (SseEmitter emitter : subscribers) {
             send(emitter, SseEmitter.event().name("filed").data(event.item(), MediaType.APPLICATION_JSON));
+        }
+    }
+
+    /**
+     * 送付後の問い合わせの更新（本人の追記、対応状況の変更、担当者の返信）を全購読者へ配る。別の担当者の画面を揃えるため。
+     *
+     * @param event 更新のイベント
+     */
+    @EventListener
+    public void onUpdated(InquiryUpdatedEvent event) {
+        for (SseEmitter emitter : subscribers) {
+            send(emitter, SseEmitter.event().name("updated").data(event.item(), MediaType.APPLICATION_JSON));
         }
     }
 

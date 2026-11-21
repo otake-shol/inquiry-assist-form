@@ -39,6 +39,11 @@ inquiry:
       label: 請求管理
   # Slack の既定の投稿先は INQUIRY_SLACK_DEFAULT_WEBHOOK_URL で、リンクの基点は INQUIRY_PUBLIC_BASE_URL で与える
   # 障害の案内文。案内先が決まったら差し替える
-  incident-guidance: 障害の連絡は専用の経路へお願いします（案内先は未設定）
+  incident-guidance: 障害の連絡先は、社内の案内をご確認ください。
   # 担当者に送った後に画面が見せる案内文。連絡方法が決まったら差し替える
-  filed-guidance: 担当者が内容を確認して連絡します。（連絡方法は未設定）
+  filed-guidance: 担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。
+  # スキルの実行記録（trace）を画面に見せるか。本番では false にする（内部の言葉とモデルの名前を本人に見せないため）
+  trace:
+    enabled: true
+  # 認証を加えるまでの、利用者と担当者の表示名（inquiry.dev.user-name / inquiry.dev.operator-name で変える。
+  # 既定は「開発用ユーザー」と「担当者（開発用）」）

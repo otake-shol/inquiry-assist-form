@@ -1,4 +1,4 @@
-import type { InquiryCategory } from "../api/types.ts";
+import type { HandlingStatus, InquiryCategory } from "../api/types.ts";
 
 /**
  * オペレータ画面の文言。担当者は開発チームなので、内部の言葉（種別・出典・技術メモ）を使ってよい。
@@ -19,6 +19,13 @@ export const OP_CATEGORY_LABELS: Record<InquiryCategory, string> = {
 export function opCategoryLabel(category: InquiryCategory | null): string {
   return category === null ? "種別未判定" : OP_CATEGORY_LABELS[category];
 }
+
+/** 担当者の画面での、対応状況の呼び名。 */
+export const HANDLING_LABELS: Record<HandlingStatus, string> = {
+  OPEN: "未対応",
+  IN_PROGRESS: "対応中",
+  DONE: "完了",
+};
 
 /** 画面の固定文言。 */
 export const OP_TEXT = {
@@ -59,6 +66,15 @@ export const OP_TEXT = {
   verified: "照合済み",
   unverified: "照合できず",
   loadFailed: "読み込めませんでした。時間をおいて開き直してください。",
+  tabsLabel: "対応状況で絞り込む",
+  tabAll: "すべて",
+  statusSwitchLabel: "対応状況を切り替える",
+  exchange: "やり取り",
+  noMessages: "やり取りはまだありません。",
+  replyLabel: "本人に返信する",
+  replySubmit: "返信を送る",
+  actionFailed:
+    "うまく処理できませんでした。時間をおいてもう一度お試しください。",
 } as const;
 
 /**

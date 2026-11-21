@@ -174,13 +174,20 @@ interface ClosingProps {
   view: InquiryView;
   filedGuidance: string | null;
   onRestart: () => void;
+  /** 「新しい問い合わせを書く」をここに出すか。やり取りが続く場合は、やり取りの下に出すので false */
+  showRestart?: boolean;
 }
 
 /**
  * 結果ごとの終わりの文言と、送った後の案内。
  * @param props 終了した問い合わせと「新しい問い合わせ」の受け口
  */
-export function Closing({ view, filedGuidance, onRestart }: ClosingProps) {
+export function Closing({
+  view,
+  filedGuidance,
+  onRestart,
+  showRestart = true,
+}: ClosingProps) {
   const text = closingText(view, filedGuidance);
   return (
     <div className="system closing">
@@ -193,11 +200,13 @@ export function Closing({ view, filedGuidance, onRestart }: ClosingProps) {
         )}
         {text.guidance !== null && <p>{text.guidance}</p>}
       </div>
-      <div className="actions">
-        <button type="button" className="primary" onClick={onRestart}>
-          {TEXT.restart}
-        </button>
-      </div>
+      {showRestart && (
+        <div className="actions">
+          <button type="button" className="primary" onClick={onRestart}>
+            {TEXT.restart}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

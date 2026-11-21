@@ -65,6 +65,8 @@ export const subscribeAnswerStream: SubscribeAnswerStream = (id, handlers) => {
 export interface OperatorStreamHandlers {
   /** 担当者に送られた問い合わせが届いた */
   onFiled: (item: OperatorItem) => void;
+  /** 本人の追記、対応状況の変更、担当者の返信などで、問い合わせが更新された */
+  onUpdated: (item: OperatorItem) => void;
   /** 切断から再接続できた（一覧を取り直す合図） */
   onReconnected: () => void;
 }
@@ -102,6 +104,9 @@ export const subscribeOperatorStream: SubscribeOperatorStream = (handlers) => {
     });
     source.addEventListener("filed", (event) => {
       handlers.onFiled(JSON.parse((event as MessageEvent<string>).data));
+    });
+    source.addEventListener("updated", (event) => {
+      handlers.onUpdated(JSON.parse((event as MessageEvent<string>).data));
     });
     source.addEventListener("error", () => {
       if (stopped) return;

@@ -37,3 +37,48 @@ export function isOperatorPath(pathname: string): boolean {
 export function operatorPathOf(id: string | null): string {
   return id === null ? "/operator" : `/operator/${encodeURIComponent(id)}`;
 }
+
+/** パスから読み取った画面の指定。 */
+export type Route =
+  /** 新しい問い合わせの入力（`/`、および下記のどれにも当たらないパス） */
+  | { kind: "new" }
+  /** 送った問い合わせの一覧 */
+  | { kind: "inquiries" }
+  /** 1件の問い合わせ。id が null なら形式が崩れている（見つからない扱い） */
+  | { kind: "inquiry"; id: string | null }
+  /** 担当者の画面。id が null なら一覧だけ */
+  | { kind: "operator"; id: string | null };
+
+/**
+ * `location.pathname` から開く画面を決める。
+ * `/inquiries` と `/inquiries/{id}` は本人向けの一覧と1件、`/operator` 系は担当者の画面。
+ * それ以外（`/inquiriesx` や `/inquiries/a/b` を含む）は新しい問い合わせの入力。
+ * `{id}` を復元できないときは、API を呼ばずに「見つからない」と示せるよう id を null にする。
+ * @param pathname `location.pathname` の値
+ */
+export function parseRoute(pathname: string): Route {
+  const operator = parseOperatorPath(pathname);
+  if (operator.operator) return { kind: "operator", id: operator.id };
+  const match = /^\/inquiries(?:\/([^/]+))?\/?$/.exec(pathname);
+  if (match === null) return { kind: "new" };
+  if (match[1] === undefined) return { kind: "inquiries" };
+  try {
+    return { kind: "inquiry", id: decodeURIComponent(match[1]) };
+  } catch {
+    return { kind: "inquiry", id: null };
+  }
+}
+
+/** 新しい問い合わせの入力のパス。 */
+export const NEW_INQUIRY_PATH = "/";
+
+/** 送った問い合わせの一覧のパス。 */
+export const INQUIRIES_PATH = "/inquiries";
+
+/**
+ * 1件の問い合わせのパスを作る。
+ * @param id 問い合わせの id
+ */
+export function inquiryPathOf(id: string): string {
+  return `/inquiries/${encodeURIComponent(id)}`;
+}

@@ -4,9 +4,12 @@ import type {
   OperatorStreamHandlers,
 } from "../api/stream.ts";
 import type {
+  InquiryListItem,
+  InquiryMessage,
   InquiryView,
   OperatorDetail,
   OperatorItem,
+  TraceEntry,
   ZeroAnswer,
 } from "../api/types.ts";
 
@@ -30,6 +33,68 @@ export function makeView(overrides: Partial<InquiryView> = {}): InquiryView {
     mock: true,
     ...overrides,
   };
+}
+
+/** テスト用にやり取りの1通を作る。省略した項目は担当者の返信。 */
+export function makeMessage(
+  overrides: Partial<InquiryMessage> = {},
+): InquiryMessage {
+  return {
+    id: "msg-1",
+    from: "OPERATOR",
+    authorName: "担当者（開発用）",
+    body: "確認します。少しお待ちください。",
+    createdAt: "2026-11-21T06:00:00Z",
+    ...overrides,
+  };
+}
+
+/** テスト用に、送った問い合わせの一覧の1件を作る。省略した項目は担当者の確認待ち。 */
+export function makeListItem(
+  overrides: Partial<InquiryListItem> = {},
+): InquiryListItem {
+  return {
+    id: "inq-1",
+    createdAt: "2026-11-21T05:00:00Z",
+    summary: "求人の掲載期限を、何日まで延ばせるかを知りたい。",
+    step: "CLOSED",
+    outcome: "FILED",
+    handlingStatus: "OPEN",
+    unreadReply: false,
+    messageCount: 0,
+    ...overrides,
+  };
+}
+
+/** テスト用にスキルの実行記録の1件を作る。省略した項目は手元のモデルの調査。 */
+export function makeTraceEntry(
+  overrides: Partial<TraceEntry> = {},
+): TraceEntry {
+  return {
+    skill: "investigator",
+    provider: "ollama",
+    model: "qwen3.6:35b",
+    promptVersion: "v1",
+    inputTokens: 2663,
+    outputTokens: 197,
+    durationMillis: 2921,
+    failed: false,
+    ...overrides,
+  };
+}
+
+/** 担当者に送られて終わった問い合わせを作る。 */
+export function makeFiledView(
+  overrides: Partial<InquiryView> = {},
+): InquiryView {
+  return makeView({
+    step: "CLOSED",
+    outcome: "FILED",
+    sentImmediately: true,
+    handlingStatus: "OPEN",
+    messages: [],
+    ...overrides,
+  });
 }
 
 /** 整形結果つきの STRUCTURED 状態を作る。 */

@@ -82,6 +82,43 @@ export interface ZeroAnswer {
   citations: Citation[];
 }
 
+/** 担当者に送られた問い合わせの対応状況。 */
+export type HandlingStatus = "OPEN" | "IN_PROGRESS" | "DONE";
+
+/** やり取りの書き手。担当者の返信か、本人の追記。 */
+export type MessageAuthor = "OPERATOR" | "ASKER";
+
+/** やり取りの1通。 */
+export interface InquiryMessage {
+  id: string;
+  from: MessageAuthor;
+  /** 表示用の名前 */
+  authorName: string;
+  body: string;
+  createdAt: string;
+}
+
+/** 本人が送信した追加質問への回答。「わからない」は `answer` が null。 */
+export interface SubmittedAnswer {
+  questionId: string;
+  answer: string | null;
+}
+
+/** スキルの実行記録の1件（呼び出し1回分）。開発者向け。 */
+export interface TraceEntry {
+  /** スキルの識別子（`reception` など） */
+  skill: string;
+  /** 実装の名前（`mock` / `ollama` など） */
+  provider: string;
+  model?: string | null;
+  promptVersion?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  /** 呼び出しにかかった時間。記録を加える前の問い合わせでは null */
+  durationMillis?: number | null;
+  failed: boolean;
+}
+
 /** 問い合わせ1件の表現。 */
 export interface InquiryView {
   id: string;
@@ -103,6 +140,16 @@ export interface InquiryView {
   incidentGuidance: string | null;
   sentImmediately: boolean;
   mock: boolean;
+  /** 作成日時。無い古い応答では欠ける */
+  createdAt?: string;
+  /** 対応状況。担当者に送られていなければ null。無い古い応答では欠ける */
+  handlingStatus?: HandlingStatus | null;
+  /** やり取り（古い順）。無い古い応答では欠け、なしとして扱う */
+  messages?: InquiryMessage[];
+  /** 送信した回答。まだ送信していなければ null。無い古い応答では欠ける */
+  submittedAnswers?: SubmittedAnswer[] | null;
+  /** スキルの実行記録。無効なら null。無い古い応答では欠ける */
+  trace?: TraceEntry[] | null;
 }
 
 /** 追加質問への回答。「わからない」は null。 */
@@ -120,6 +167,12 @@ export interface AppConfig {
   systems?: SystemOption[];
   /** スキルの識別子から、動いている実装（`mock` / `ollama`）への対応。古い API では無い */
   skills?: Record<string, string>;
+  /** 利用者。認証を加えるまでは設定の固定値。古い API では無い */
+  user?: { id: string; name: string };
+  /** 担当者の表示名。古い API では無い */
+  operatorName?: string;
+  /** スキルの実行記録を見せるか。古い API では無く、false と同じ扱い */
+  trace?: boolean;
 }
 
 /** エラー本文。通信失敗など HTTP 外の失敗は code が `NETWORK`。 */
@@ -139,12 +192,39 @@ export interface OperatorItem {
   summary: string;
   sentImmediately: boolean;
   read: boolean;
+  /** 対応状況。無い古い応答では欠ける */
+  handlingStatus?: HandlingStatus | null;
+  /** やり取りの数。無い古い応答では欠ける */
+  messageCount?: number;
 }
+
+/** 対応状況ごとの件数。 */
+export type HandlingCounts = Partial<Record<HandlingStatus, number>>;
 
 /** `GET /api/operator/inquiries` の応答。 */
 export interface OperatorList {
   unreadCount: number;
   items: OperatorItem[];
+  /** 対応状況ごとの件数（絞り込みの影響を受けない）。無い古い応答では欠ける */
+  counts?: HandlingCounts;
+}
+
+/** 本人向けの一覧の1件。 */
+export interface InquiryListItem {
+  id: string;
+  createdAt: string;
+  summary: string;
+  step: InquiryStep;
+  outcome: InquiryOutcome;
+  handlingStatus: HandlingStatus | null;
+  unreadReply: boolean;
+  messageCount: number;
+}
+
+/** `GET /api/inquiries` の応答。 */
+export interface InquiryList {
+  unreadReplyCount: number;
+  items: InquiryListItem[];
 }
 
 /** 追加質問への本人の対応。 */
@@ -180,6 +260,8 @@ export interface OperatorDetail {
   id: string;
   filedAt: string;
   askerId: string;
+  /** 投稿者の表示用の名前（古い応答では欠ける） */
+  askerName?: string;
   utterance: string;
   categoryByAi: InquiryCategory | null;
   category: InquiryCategory | null;
@@ -193,4 +275,10 @@ export interface OperatorDetail {
   read: boolean;
   /** Slack への投稿の状態 */
   slackStatus: SlackStatus;
+  /** 対応状況。無い古い応答では欠ける */
+  handlingStatus?: HandlingStatus | null;
+  /** やり取り（古い順）。無い古い応答では欠け、なしとして扱う */
+  messages?: InquiryMessage[];
+  /** スキルの実行記録。無効なら null。無い古い応答では欠ける */
+  trace?: TraceEntry[] | null;
 }

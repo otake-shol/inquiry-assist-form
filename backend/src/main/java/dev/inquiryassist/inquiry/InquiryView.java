@@ -4,6 +4,7 @@ import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.InquiryCategory;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.TechnicalMemo;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,6 +26,11 @@ import java.util.UUID;
  * @param incidentGuidance 障害の案内文。{@code INCIDENT_REDIRECTED} のときだけ非 null
  * @param sentImmediately 「今すぐ担当者に送る」による起票か
  * @param mock モック実装による記録か
+ * @param createdAt 作成日時
+ * @param handlingStatus 対応状況。担当者に送られていなければ null
+ * @param messages 担当者の返信と本人の追記（古い順）。なければ空
+ * @param submittedAnswers 本人が送信した追加質問への回答。まだ送信していなければ null
+ * @param trace スキルの実行記録。無効にしている場合は null
  */
 public record InquiryView(
         UUID id,
@@ -41,7 +47,20 @@ public record InquiryView(
         AnswerView answer,
         String incidentGuidance,
         boolean sentImmediately,
-        boolean mock) {
+        boolean mock,
+        Instant createdAt,
+        HandlingStatus handlingStatus,
+        List<MessageView> messages,
+        List<SubmittedAnswer> submittedAnswers,
+        List<TraceEntry> trace) {
+
+    /**
+     * 本人が送信した追加質問への回答1件。
+     *
+     * @param questionId 質問の識別子
+     * @param answer 回答。「わからない」は null
+     */
+    public record SubmittedAnswer(String questionId, String answer) {}
 
     /**
      * 対象システム。

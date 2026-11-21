@@ -340,3 +340,115 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
   - オペレータの詳細の `answer` にも `answered` を含める。
   - モックの説明は `answered: true` を返す。タグ `[的外れ]` を付けた場合だけ `false` を返す（調査は通常の事実を返し、説明のスキルが「問いに答えていない」と判定した場合を再現する）。
 - **スキルごとの実装**: `GET /api/config` に `skills` を加える。スキルの識別子から、動いている実装の名前（`mock` または `ollama`）への対応。例: `{ "reception": "ollama", "interviewer": "ollama", "restater": "ollama", "investigator": "mock", "explainer": "ollama" }`。`mock` は、スキルか一次情報の検索に1つでもモックがあれば `true`。画面はモックの案内枠に、どのスキルがモックかを示す。モックのシナリオのタグは、モックで動いているスキルにだけ効く（たとえば受付が実際のモデルなら、`[判定エラー]` を書いても失敗しない）。
+
+## 送った後のやり取り（往復）
+
+問い合わせは、担当者に届いて終わりではない。担当者が返信し、本人がそれを読み、必要なら追記する。やり取りは問い合わせ1件に結びつく。対象は、担当者に送られた問い合わせ（`outcome: FILED`）だけ。
+
+### 対応状況（handlingStatus）
+
+担当者に送られた問い合わせが持つ、担当者側の進み具合。`step`（本人の入力の進行位置）とは別に持つ。
+
+| 値 | 意味 | 本人向けの画面の言葉 |
+| --- | --- | --- |
+| `OPEN` | 未対応。担当者に送られた時点の値 | 担当者の確認を待っています |
+| `IN_PROGRESS` | 対応中 | 担当者が対応しています |
+| `DONE` | 完了 | 対応が完了しました |
+
+- 担当者に送られていない問い合わせでは `null`。
+- 担当者が返信すると、`OPEN` は自動で `IN_PROGRESS` になる（`IN_PROGRESS` と `DONE` は変えない）。
+- 本人が追記すると、`DONE` は自動で `IN_PROGRESS` に戻る（終わった件に追記があったことを、担当者が見落とさないため）。
+
+### メッセージ（messages）
+
+担当者の返信と本人の追記を、1本の時系列として持つ。
+
+```json
+{ "id": "UUID", "from": "OPERATOR", "authorName": "担当者（開発用）", "body": "本文", "createdAt": "2026-11-21T12:00:00Z" }
+```
+
+- `from` は `OPERATOR`（担当者の返信）か `ASKER`（本人の追記）。
+- `authorName` は表示用の名前。認証を加えるまでは、設定の固定値（`inquiry.dev.operator-name`、`inquiry.dev.user-name`）。
+- 古い順に並べる。編集と削除はできない。
+
+### 未読
+
+- **担当者側**（既存の `read`）: 本人が追記すると `read` を `false` に戻す。
+- **本人側**（`unreadReply`）: 担当者が返信すると `true`、本人がその問い合わせを取得（9）すると `false` になる。
+
+### InquiryView への追加
+
+| 項目 | 内容 |
+| --- | --- |
+| `createdAt` | 作成日時 |
+| `handlingStatus` | 上の表の値、または `null` |
+| `messages` | メッセージの配列。なければ空配列 |
+| `submittedAnswers` | 本人が送信した追加質問への回答（`[{ "questionId", "answer" }]`、「わからない」は `answer: null`）。まだ送信していなければ `null`。開き直したときに、答えた質問を「質問 → 回答」の形で再現するために使う |
+| `trace` | スキルの実行記録（下記「スキルの実行記録」）。無効なら `null` |
+
+### 10. `GET /api/inquiries`
+
+自分（現在の利用者）が作った問い合わせの一覧（新しい順、最大50件）。
+
+`200` `{ "unreadReplyCount": 1, "items": [{ "id", "createdAt", "summary", "step", "outcome", "handlingStatus", "unreadReply", "messageCount" }] }`。`summary` は言い直しの文章、なければ元の発話の先頭80文字。
+
+### 11. `POST /api/inquiries/{id}/messages`
+
+リクエスト `{ "body": "1〜4000文字" }`。本人が追記する。`outcome` が `FILED` のときだけ有効（それ以外は `INVALID_STATE`）。
+
+`200` InquiryView。担当者側の `read` を `false` に戻し、オペレータのストリームに event `updated` を流す。
+
+### 9（変更）. `GET /api/inquiries/{id}`
+
+他人の問い合わせは `NOT_FOUND`。取得すると、その問い合わせの `unreadReply` を `false` にする。
+
+### オペレータ向けの追加
+
+- 一覧（`GET /api/operator/inquiries`）の各件に `handlingStatus`、`messageCount` を加える。クエリ `status=OPEN|IN_PROGRESS|DONE` で絞れる（`unreadOnly` と併用できる）。応答に `counts`（`{ "OPEN": 2, "IN_PROGRESS": 1, "DONE": 5 }`）を加える。
+- 詳細（`GET /api/operator/inquiries/{id}`）に `handlingStatus`、`messages`、`trace`、`askerName`（投稿者の表示用の名前）を加える。
+- `PUT /api/operator/inquiries/{id}/status`: リクエスト `{ "status": "DONE" }`。`200` 詳細と同じ全内容。
+- `POST /api/operator/inquiries/{id}/replies`: リクエスト `{ "body": "1〜4000文字" }`。担当者が返信する。`200` 詳細と同じ全内容。本人側の `unreadReply` を `true` にする。
+- ストリーム（`GET /api/operator/stream`）に event `updated` を加える。data は一覧の1件と同じ形。本人の追記、対応状況の変更、担当者の返信で流す（別の担当者の画面を揃えるため）。
+
+担当者に送られていない問い合わせへの操作は、従来どおり `NOT_FOUND`。
+
+### 本人向けの画面の URL
+
+| パス | 画面 |
+| --- | --- |
+| `/` | 新しい問い合わせの入力 |
+| `/inquiries` | 自分が送った問い合わせの一覧 |
+| `/inquiries/{id}` | その問い合わせ。途中ならその段階から再開し、終わっていれば経過とやり取りを示す |
+
+問い合わせを作成したら、URL を `/inquiries/{id}` に変える（ページを開き直しても続きから再開できる）。`{id}` が存在しない、形式が崩れている、他人の問い合わせの場合は、「この問い合わせは見つかりませんでした」と示し、新しい問い合わせを書けるようにする。「新しい問い合わせを書く」は `/` に移る。
+
+開き直したときの再開:
+
+| `step` | 画面 |
+| --- | --- |
+| `TRIAGED` | 受け取りの表示と、追加質問の1問目から（途中まで選んだ回答は保存していないため、最初から） |
+| `STRUCTURED` | 答えた質問（`submittedAnswers`）の要約と、言い直しの確認 |
+| `ANSWERING` | 進捗ストリームを購読し直す（調査をやり直す） |
+| `ANSWERED` | 調べた結果と、解決したかの選択 |
+| `CLOSED` | 経過の要約、終わりの文言、`FILED` なら対応状況とやり取り |
+
+## スキルの実行記録（trace）
+
+問い合わせの流れのどこで、どのスキルが、どの実装で動いたかを見せるための、開発者向けの情報。設定 `inquiry.trace.enabled`（既定 `true`）で有効にする。本番では `false` にする（内部の言葉とモデルの名前を、本人に見せないため）。`GET /api/config` に `trace`（真偽値）を加える。
+
+`trace` は、スキルの呼び出しを実行した順に並べた配列。
+
+```json
+{ "skill": "investigator", "provider": "ollama", "model": "qwen3.6:35b", "promptVersion": "v1",
+  "inputTokens": 2663, "outputTokens": 197, "durationMillis": 2921, "failed": false }
+```
+
+- `provider` は、その呼び出しがモックなら `mock`、そうでなければ設定上の実装名（`ollama`）。
+- `durationMillis` は、呼び出しにかかった時間。この項目を加える前の記録では `null`。
+- 照合（根拠の実在の確認）は通常のコードで、スキルではないため、記録には現れない。画面は、調査と説明の間に「照合（コード）」を固定で描く。
+
+## 利用者の表示と仮の文言
+
+- `GET /api/config` に `user`（`{ "id": "local-user", "name": "開発用ユーザー" }`）と `operatorName` を加える。認証を加えるまでは設定の固定値。
+- `filedGuidance` の既定を「担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。」にする（往復ができたため、連絡方法が決まった）。
+- `incidentGuidance` の既定を「障害の連絡先は、社内の案内をご確認ください。」にする（実際の連絡先は環境ごとに設定で差し替える）。

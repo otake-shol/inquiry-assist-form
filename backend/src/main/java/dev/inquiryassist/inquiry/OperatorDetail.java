@@ -13,6 +13,7 @@ import java.util.UUID;
  * @param id 識別子
  * @param filedAt 担当者に送られた時刻
  * @param askerId 投稿者
+ * @param askerName 投稿者の表示用の名前。認証を加えるまでは設定の固定値
  * @param utterance 元の発話
  * @param categoryByAi AI が判定した種別
  * @param category 確認済みの種別
@@ -25,11 +26,15 @@ import java.util.UUID;
  * @param sentImmediately 「今すぐ送る」による送付か
  * @param read 既読か
  * @param slackStatus Slack への投稿の状態
+ * @param handlingStatus 対応状況
+ * @param messages 担当者の返信と本人の追記（古い順）
+ * @param trace スキルの実行記録。無効にしている場合は null
  */
 public record OperatorDetail(
         UUID id,
         Instant filedAt,
         String askerId,
+        String askerName,
         String utterance,
         InquiryCategory categoryByAi,
         InquiryCategory category,
@@ -41,7 +46,10 @@ public record OperatorDetail(
         AnswerDetail answer,
         boolean sentImmediately,
         boolean read,
-        SlackStatus slackStatus) {
+        SlackStatus slackStatus,
+        HandlingStatus handlingStatus,
+        List<MessageView> messages,
+        List<TraceEntry> trace) {
 
     /**
      * 追加質問と回答。

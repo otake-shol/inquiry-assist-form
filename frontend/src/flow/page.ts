@@ -12,7 +12,8 @@ export type Section =
   | { kind: "researching" }
   | { kind: "filedNotice" }
   | { kind: "result" }
-  | { kind: "closing" };
+  | { kind: "closing" }
+  | { kind: "followup" };
 
 /**
  * InquiryView と回答済みの数から、ページに何を並べるかを決める純粋関数。
@@ -65,6 +66,16 @@ export function pageSections(
   }
 
   if (view.step === "CLOSED") sections.push({ kind: "closing" });
+
+  // 担当者に送った問い合わせは、終わりの後に「いまの状況」とやり取りを置く。
+  // 対応状況が無い古い応答では、やり取りがないものとして何も足さない。
+  if (
+    view.step === "CLOSED" &&
+    view.outcome === "FILED" &&
+    view.handlingStatus != null
+  ) {
+    sections.push({ kind: "followup" });
+  }
   return sections;
 }
 

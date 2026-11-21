@@ -16,6 +16,24 @@ export interface FlowError extends ErrorBody {
   source: "action" | "stream";
 }
 
+/**
+ * 送信済みの回答を、質問の順に並べた回答の配列に直す。
+ * 答えが記録されている先頭からの連続ぶんだけを返す（記録がなければ空）。
+ * 開き直したときに、答えた質問を「質問 → 回答」の形で再現するために使う。
+ * @param view 取得した問い合わせ
+ */
+export function answersFromSubmitted(view: InquiryView): (string | null)[] {
+  const submitted = view.submittedAnswers;
+  if (submitted == null) return [];
+  const answers: (string | null)[] = [];
+  for (const question of view.questions) {
+    const found = submitted.find((a) => a.questionId === question.id);
+    if (found === undefined) break;
+    answers.push(found.answer);
+  }
+  return answers;
+}
+
 /** 画面全体の状態。 */
 export interface FlowState {
   mock: boolean;
@@ -25,6 +43,12 @@ export interface FlowState {
   filedGuidance: string | null;
   /** 対象システムの選択肢（GET /api/config） */
   systems: SystemOption[];
+  /** 利用者の名前（GET /api/config の `user.name`。無ければ null） */
+  userName: string | null;
+  /** スキルの実行記録を見せるか（GET /api/config の `trace`） */
+  trace: boolean;
+  /** URL で開いた問い合わせの取得状況。読み込み中、見つからない、またはどちらでもない */
+  resume: "idle" | "loading" | "notFound";
   /** 入力時に選んだ対象システム（未選択は null、「わからない」は UNKNOWN_SYSTEM） */
   systemChoice: string | null;
   draft: string;
@@ -50,6 +74,8 @@ export type FlowAction =
       skills: Record<string, string> | null;
       filedGuidance: string | null;
       systems: SystemOption[];
+      userName?: string | null;
+      trace?: boolean;
     }
   | { type: "systemChosen"; choice: string | null }
   | { type: "draftChanged"; draft: string }
@@ -62,6 +88,10 @@ export type FlowAction =
   | { type: "streamProgress"; message: string }
   | { type: "streamFailed"; error: ErrorBody }
   | { type: "streamRetried" }
+  | { type: "resumeStarted" }
+  | { type: "inquiryResumed"; view: InquiryView }
+  | { type: "resumeNotFound" }
+  | { type: "resumeFailed"; error: ErrorBody }
   | { type: "reset" };
 
 /**
@@ -74,6 +104,9 @@ export function createInitialState(draft = ""): FlowState {
     skills: null,
     filedGuidance: null,
     systems: [],
+    userName: null,
+    trace: false,
+    resume: "idle",
     systemChoice: null,
     draft,
     view: null,
@@ -101,6 +134,8 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         skills: action.skills,
         filedGuidance: action.filedGuidance,
         systems: action.systems,
+        userName: action.userName ?? null,
+        trace: action.trace ?? false,
       };
     case "systemChosen":
       return { ...state, systemChoice: action.choice };
@@ -156,13 +191,48 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         progress: [],
         streamAttempt: state.streamAttempt + 1,
       };
-    case "reset":
+    case "resumeStarted":
+      return { ...resetKeepingConfig(state), resume: "loading" };
+    case "inquiryResumed":
       return {
-        ...createInitialState(),
-        mock: state.mock,
-        skills: state.skills,
-        filedGuidance: state.filedGuidance,
-        systems: state.systems,
+        ...state,
+        view: action.view,
+        busy: false,
+        error: null,
+        resume: "idle",
+        savedInquiryId: null,
+        categoryOpen: false,
+        // 追加質問の途中は保存していないため、最初から聞く。それ以外は送信済みの回答を再現する
+        answers:
+          action.view.step === "TRIAGED"
+            ? []
+            : answersFromSubmitted(action.view),
+        progress: [],
       };
+    case "resumeNotFound":
+      return { ...resetKeepingConfig(state), resume: "notFound" };
+    case "resumeFailed":
+      return {
+        ...resetKeepingConfig(state),
+        error: { ...action.error, source: "action" },
+      };
+    case "reset":
+      return resetKeepingConfig(state);
   }
+}
+
+/**
+ * 問い合わせの状態を捨てて最初に戻す。`GET /api/config` から受け取った設定は残す。
+ * @param state 現在の状態
+ */
+function resetKeepingConfig(state: FlowState): FlowState {
+  return {
+    ...createInitialState(),
+    mock: state.mock,
+    skills: state.skills,
+    filedGuidance: state.filedGuidance,
+    systems: state.systems,
+    userName: state.userName,
+    trace: state.trace,
+  };
 }

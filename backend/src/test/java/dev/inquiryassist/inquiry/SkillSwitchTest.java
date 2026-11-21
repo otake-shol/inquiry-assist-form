@@ -94,6 +94,21 @@ class SkillSwitchTest extends ApiSupport {
     }
 
     @Test
+    void traceのproviderは実際のモデルの呼び出しだけollamaでモックの呼び出しはmockになる() throws Exception {
+        OLLAMA.reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 77, 9);
+
+        String id = idOf(create("期限の仕様", null));
+
+        mvc.perform(get("/api/inquiries/" + id))
+                .andExpect(jsonPath("$.trace[0].skill").value("reception"))
+                .andExpect(jsonPath("$.trace[0].provider").value("ollama"))
+                .andExpect(jsonPath("$.trace[0].model").value("fake-model"))
+                .andExpect(jsonPath("$.trace[0].inputTokens").value(77))
+                .andExpect(jsonPath("$.trace[1].skill").value("interviewer"))
+                .andExpect(jsonPath("$.trace[1].provider").value("mock"));
+    }
+
+    @Test
     void 実際のモデルの受付が失敗すると503で失敗した呼び出しの利用量はモック由来ではない() throws Exception {
         OLLAMA.status(500);
 

@@ -2,7 +2,9 @@ import type {
   AnswerInput,
   AppConfig,
   ErrorBody,
+  HandlingStatus,
   InquiryCategory,
+  InquiryList,
   InquiryView,
   OperatorDetail,
   OperatorList,
@@ -162,9 +164,47 @@ export function sendNow(id: string): Promise<InquiryView> {
   return request<InquiryView>("POST", `/api/inquiries/${id}/send-now`);
 }
 
-/** `GET /api/operator/inquiries`。担当者に送られた問い合わせの一覧。 */
-export function getOperatorList(): Promise<OperatorList> {
-  return request<OperatorList>("GET", "/api/operator/inquiries");
+/** `GET /api/inquiries`。自分が作った問い合わせの一覧（新しい順）。 */
+export function getInquiries(): Promise<InquiryList> {
+  return request<InquiryList>("GET", "/api/inquiries");
+}
+
+/**
+ * `GET /api/inquiries/{id}`。問い合わせを取得する（開き直したときの再開に使う）。
+ * 取得すると、その問い合わせの未読の返信は既読になる。
+ * @param id 問い合わせ ID
+ */
+export function getInquiry(id: string): Promise<InquiryView> {
+  return request<InquiryView>(
+    "GET",
+    `/api/inquiries/${encodeURIComponent(id)}`,
+  );
+}
+
+/**
+ * `POST /api/inquiries/{id}/messages`。担当者に送った問い合わせへ追記する。
+ * @param id 問い合わせ ID
+ * @param body 追記の本文（1〜4000文字）
+ */
+export function postMessage(id: string, body: string): Promise<InquiryView> {
+  return request<InquiryView>("POST", `/api/inquiries/${id}/messages`, {
+    body,
+  });
+}
+
+/**
+ * `GET /api/operator/inquiries`。担当者に送られた問い合わせの一覧。
+ * @param status 対応状況での絞り込み（省略または null なら「すべて」）
+ */
+export function getOperatorList(
+  status: HandlingStatus | null = null,
+): Promise<OperatorList> {
+  return request<OperatorList>(
+    "GET",
+    status === null
+      ? "/api/operator/inquiries"
+      : `/api/operator/inquiries?status=${status}`,
+  );
 }
 
 /** `GET /api/operator/inquiries/{id}`。問い合わせの全内容。 */
@@ -175,4 +215,33 @@ export function getOperatorDetail(id: string): Promise<OperatorDetail> {
 /** `POST /api/operator/inquiries/{id}/read`。既読にして全内容を受け取る。 */
 export function markRead(id: string): Promise<OperatorDetail> {
   return request<OperatorDetail>("POST", `/api/operator/inquiries/${id}/read`);
+}
+
+/**
+ * `PUT /api/operator/inquiries/{id}/status`。対応状況を切り替える。
+ * @param id 問い合わせ ID
+ * @param status 新しい対応状況
+ */
+export function setHandlingStatus(
+  id: string,
+  status: HandlingStatus,
+): Promise<OperatorDetail> {
+  return request<OperatorDetail>(
+    "PUT",
+    `/api/operator/inquiries/${id}/status`,
+    { status },
+  );
+}
+
+/**
+ * `POST /api/operator/inquiries/{id}/replies`。担当者が本人に返信する。
+ * @param id 問い合わせ ID
+ * @param body 返信の本文（1〜4000文字）
+ */
+export function postReply(id: string, body: string): Promise<OperatorDetail> {
+  return request<OperatorDetail>(
+    "POST",
+    `/api/operator/inquiries/${id}/replies`,
+    { body },
+  );
 }

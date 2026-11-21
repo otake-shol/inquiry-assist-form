@@ -3,6 +3,7 @@ package dev.inquiryassist.web;
 import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.inquiry.InquiryList;
 import dev.inquiryassist.inquiry.InquiryService;
 import dev.inquiryassist.inquiry.InquiryView;
 import dev.inquiryassist.inquiry.InvalidStateException;
@@ -28,7 +29,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-/** 問い合わせフォームの REST と SSE（契約書 2〜9）。 */
+/** 問い合わせフォームの REST と SSE（契約書 2〜11）。 */
 @RestController
 public class InquiryController {
 
@@ -52,6 +53,9 @@ public class InquiryController {
 
     /** 言い直しの作り直し。 */
     public record RevisionRequest(@NotBlank @Size(max = 1000) String note) {}
+
+    /** 本人の追記。長さの検証は、前後の空白を除いてから行うためサービスで行う。 */
+    public record MessageRequest(@NotNull String body) {}
 
     /** 解決の判定。 */
     public record ResolutionRequest(@NotNull Boolean resolved) {}
@@ -203,7 +207,29 @@ public class InquiryController {
     }
 
     /**
-     * 問い合わせを取得する。
+     * 自分が作った問い合わせの一覧（新しい順、最大50件）。
+     *
+     * @return 一覧と、未読の返信がある件数
+     */
+    @GetMapping("/api/inquiries")
+    public InquiryList list() {
+        return service.list();
+    }
+
+    /**
+     * 担当者に送った後の問い合わせに追記する。
+     *
+     * @param id 問い合わせの識別子
+     * @param request 本文
+     * @return 追記後の問い合わせ
+     */
+    @PostMapping("/api/inquiries/{id}/messages")
+    public InquiryView addMessage(@PathVariable UUID id, @Valid @RequestBody MessageRequest request) {
+        return service.addMessage(id, request.body());
+    }
+
+    /**
+     * 問い合わせを取得する。担当者の返信が未読なら、読んだことにする。
      *
      * @param id 問い合わせの識別子
      * @return 問い合わせ

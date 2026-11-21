@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { makeStructuredView, makeView, groundedAnswer } from "../test/fakes.ts";
+import {
+  groundedAnswer,
+  makeFiledView,
+  makeStructuredView,
+  makeView,
+} from "../test/fakes.ts";
 import { canSendNow, pageSections, readTextParam, sectionKey } from "./page.ts";
 
 const questions = [
@@ -175,5 +180,34 @@ describe("pageSections の説明失敗", () => {
     const list = kinds(pageSections(view, 0));
     expect(list).toContain("researching");
     expect(list).not.toContain("result");
+  });
+});
+
+describe("pageSections のやり取り", () => {
+  it("担当者に送って終わった問い合わせは、終わりの後に「いまの状況」とやり取りを並べる", () => {
+    const list = kinds(pageSections(makeFiledView(), 0));
+    expect(list.slice(-2)).toEqual(["closing", "followup"]);
+  });
+
+  it("担当者に送っていない終わり方と、対応状況が無い古い応答には並べない", () => {
+    expect(
+      kinds(
+        pageSections(makeView({ step: "CLOSED", outcome: "SELF_RESOLVED" }), 0),
+      ),
+    ).not.toContain("followup");
+    expect(
+      kinds(
+        pageSections(
+          makeFiledView({ handlingStatus: undefined, messages: undefined }),
+          0,
+        ),
+      ),
+    ).not.toContain("followup");
+  });
+
+  it("まだ終わっていない問い合わせには並べない", () => {
+    expect(
+      kinds(pageSections(makeFiledView({ step: "ANSWERED" }), 0)),
+    ).not.toContain("followup");
   });
 });

@@ -15,6 +15,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param publicBaseUrl 投稿に載せるオペレータ画面へのリンクの基点。未設定ならリンクを載せない
  * @param skills スキルごとの実装の設定（キーはスキルの識別子）。書かれていないスキルは {@code mock}
  * @param ollama 手元のモデル（Ollama）の共通の設定
+ * @param trace スキルの実行記録の設定
+ * @param dev 認証を加えるまでの、利用者と担当者の表示名の仮の設定
  */
 @ConfigurationProperties("inquiry")
 public record InquiryProperties(
@@ -22,7 +24,25 @@ public record InquiryProperties(
         @DefaultValue Slack slack,
         String publicBaseUrl,
         @DefaultValue Map<String, SkillSettings> skills,
-        @DefaultValue Ollama ollama) {
+        @DefaultValue Ollama ollama,
+        @DefaultValue Trace trace,
+        @DefaultValue Dev dev) {
+
+    /**
+     * スキルの実行記録の設定。
+     *
+     * @param enabled 記録を画面に見せるか。既定は true。本番では、内部の言葉とモデルの名前を本人に見せないため false にする
+     */
+    public record Trace(@DefaultValue("true") boolean enabled) {}
+
+    /**
+     * 認証を加えるまでの、表示名の仮の設定。
+     *
+     * @param userName 利用者の表示名
+     * @param operatorName 担当者の表示名
+     */
+    public record Dev(
+            @DefaultValue("開発用ユーザー") String userName, @DefaultValue("担当者（開発用）") String operatorName) {}
 
     /**
      * スキルの設定を返す。書かれていなければ、既定（モック）の設定を返す。

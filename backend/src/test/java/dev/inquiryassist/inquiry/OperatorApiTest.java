@@ -130,6 +130,7 @@ class OperatorApiTest extends ApiSupport {
         mvc.perform(get("/api/operator/inquiries/" + id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.askerId").value("local-user"))
+                .andExpect(jsonPath("$.askerName").value("開発用ユーザー"))
                 .andExpect(jsonPath("$.utterance").value("[幽霊出典] 期限の仕様"))
                 .andExpect(jsonPath("$.system.id").value("job-admin"))
                 .andExpect(jsonPath("$.systemGuessed").value(false))

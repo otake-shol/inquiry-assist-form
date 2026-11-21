@@ -849,7 +849,9 @@ describe("会話の流れ", () => {
     render(<App subscribe={new FakeStream().subscribe} />);
 
     expect(await screen.findByLabelText(INPUT_LABEL)).toHaveValue("掲載期限");
-    expect(calls.filter((c) => c.path === "/api/inquiries")).toHaveLength(0);
+    expect(
+      calls.filter((c) => c.method === "POST" && c.path === "/api/inquiries"),
+    ).toHaveLength(0);
   });
 
   it("「今すぐ担当者に送る」は作成後から終わりまで下部にあり、send-now を呼んで完了になる", async () => {
@@ -1103,6 +1105,8 @@ describe("対象システム", () => {
 
   it("(a) 未選択と「わからない」はどちらも systemId: null で送られる", async () => {
     for (const choose of [false, true]) {
+      // 作成すると URL が /inquiries/{id} に変わるため、2周目は入力画面の URL に戻す
+      window.history.replaceState({}, "", "/");
       const user = userEvent.setup();
       const calls = installFakeFetch({
         ...withSystems,

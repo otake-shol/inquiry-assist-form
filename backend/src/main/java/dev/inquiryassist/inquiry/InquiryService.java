@@ -153,13 +153,14 @@ public class InquiryService {
             inquiry.systemLabel = selected.label();
         }
         AiResult<Reception> received;
+        long receptionStart = System.nanoTime();
         try {
             received = reception.receive(utterance, candidates(), selected == null ? null : option(selected));
         } catch (AiRefusalException | AiUnavailableException e) {
             // 失敗しても発話は失わない。種別なし・質問なしで保存し、「今すぐ送る」だけを可能にする
             // 失敗した呼び出しの利用量も記録する。分からなければ、受付がモックかどうかだけを記録に残す
             inquiry.mock = implementations.isMock(Skill.RECEPTION);
-            inquiry.addUsage(new SkillUsage(Skill.RECEPTION, failedUsageOf(e, Skill.RECEPTION), true));
+            inquiry.addUsage(new SkillUsage(Skill.RECEPTION, failedUsageOf(e, Skill.RECEPTION), true, millisSince(receptionStart)));
             commit(inquiry, null);
             throw new TriageFailedException(inquiry.id, e);
         }
@@ -177,7 +178,7 @@ public class InquiryService {
         }
         inquiry.categoryByAi = category;
         inquiry.categoryConfirmed = category;
-        inquiry.addUsage(Skill.RECEPTION, received.usage());
+        inquiry.addUsage(Skill.RECEPTION, received.usage(), millisSince(receptionStart));
         if (category.receivesZeroAnswer()) {
             inquiry.aiQuestions = askInterviewer(inquiry, category, scope);
         }
@@ -310,12 +311,13 @@ public class InquiryService {
         // 前回の言い直しは渡さず、伝えられた一言の全件（伝えられた順）を足して最初から言い直す
         List<String> corrections = new ArrayList<>(inquiry.revisionNotes);
         corrections.add(note);
+        long start = System.nanoTime();
         AiResult<StructuredInquiry> result = restater.restate(
                 inquiry.utterance, inquiry.category(), answeredQuestions(inquiry), systemOf(inquiry), corrections);
         inquiry.structuredByAi = result.value();
         inquiry.revisionNotes.add(note);
         inquiry.revisionsLeft--;
-        inquiry.addUsage(Skill.RESTATER, result.usage());
+        inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start));
         return toView(commit(inquiry, null));
     }
 
@@ -363,11 +365,13 @@ public class InquiryService {
             requireStep(inquiry, InquiryStep.ANSWERING);
             AccessScope scope = users.currentScope();
             AnswerPipeline.Result result;
+            long start = System.nanoTime();
             try {
                 result = pipeline.run(inquiry.structured(), scope, progress);
             } catch (AiUnavailableException | AiRefusalException e) {
                 // 調査の失敗。分かる場合は、失敗した呼び出しの利用量を記録する
-                inquiry.addUsage(new SkillUsage(Skill.INVESTIGATOR, failedUsageOf(e, Skill.INVESTIGATOR), true));
+                inquiry.addUsage(new SkillUsage(
+                        Skill.INVESTIGATOR, failedUsageOf(e, Skill.INVESTIGATOR), true, millisSince(start)));
                 commit(inquiry, null);
                 throw e;
             } catch (ExplanationFailedException e) {
@@ -434,14 +438,67 @@ public class InquiryService {
     }
 
     /**
-     * 問い合わせを1件取得する。
+     * 問い合わせを1件取得する。担当者の返信が未読なら、読んだことにする。
      *
      * @param id 問い合わせの識別子
      * @return 問い合わせ
-     * @throws InquiryNotFoundException 存在しない場合
+     * @throws InquiryNotFoundException 存在しない、または他人の問い合わせの場合
      */
     public InquiryView get(UUID id) {
-        return toView(load(id));
+        InquiryEntity inquiry = load(id);
+        if (inquiry.askerUnreadReply) {
+            repository.clearUnreadReply(id);
+        }
+        return toView(inquiry);
+    }
+
+    /**
+     * 自分（現在の利用者）が作った問い合わせを、新しい順に最大50件返す。
+     *
+     * @return 一覧と、未読の返信がある件数
+     */
+    public InquiryList list() {
+        String userId = users.currentScope().userId();
+        return new InquiryList(
+                repository.countByAskerIdAndAskerUnreadReplyTrue(userId),
+                repository.findTop50ByAskerIdOrderByCreatedAtDesc(userId).stream()
+                        .map(e -> new InquiryList.Item(
+                                e.id,
+                                e.createdAt,
+                                OperatorService.summaryOf(e),
+                                e.step,
+                                e.outcome,
+                                e.handlingStatus,
+                                e.askerUnreadReply,
+                                e.messages.size()))
+                        .toList());
+    }
+
+    /**
+     * 担当者に送った後の問い合わせに、本人が追記する。担当者側は未読に戻り、完了していた場合は対応中に戻る
+     * （終わった件に追記があったことを、担当者が見落とさないため）。オペレータの画面へ更新を知らせる。
+     *
+     * @param id 問い合わせの識別子
+     * @param body 本文。前後の空白を除いて1〜4000文字
+     * @return 追記後の問い合わせ
+     * @throws IllegalArgumentException 本文が空、または長すぎる場合
+     * @throws InquiryNotFoundException 存在しない、または他人の問い合わせの場合
+     * @throws InvalidStateException 担当者に送られていない（{@code FILED} でない）場合
+     */
+    public InquiryView addMessage(UUID id, String body) {
+        String trimmed = MessageBodies.validated(body);
+        InquiryEntity inquiry = load(id);
+        if (inquiry.outcome != InquiryOutcome.FILED) {
+            throw new InvalidStateException("担当者に送られた問い合わせにだけ追記できます");
+        }
+        inquiry.addMessage(MessageAuthor.ASKER, properties.dev().userName(), trimmed, Instant.now());
+        inquiry.readAt = null;
+        if (inquiry.handlingStatus == HandlingStatus.DONE) {
+            inquiry.handlingStatus = HandlingStatus.IN_PROGRESS;
+        }
+        InquiryEntity saved = commit(inquiry, null);
+        publishUpdated(saved);
+        return toView(saved);
     }
 
     private InquiryProperties.SystemEntry findSystem(String systemId) {
@@ -474,18 +531,24 @@ public class InquiryService {
      * 失敗はログと利用量（失敗した呼び出しとして）に残す。
      */
     private List<StoredQuestion> askInterviewer(InquiryEntity inquiry, InquiryCategory category, AccessScope scope) {
+        long start = System.nanoTime();
         try {
             AiResult<Interview> result =
                     interviewer.ask(inquiry.utterance, category, systemOf(inquiry), scope);
-            inquiry.addUsage(Skill.INTERVIEWER, result.usage());
+            inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start));
             return new ArrayList<>(result.value().questions().stream()
                     .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), null))
                     .toList());
         } catch (AiRefusalException | AiUnavailableException e) {
             log.warn("聞き手が失敗したため、質問なしで続行します id={}", inquiry.id, e);
-            inquiry.addUsage(new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true));
+            inquiry.addUsage(new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true, millisSince(start)));
             return new ArrayList<>();
         }
+    }
+
+    /** 単調増加の時計で、開始からの経過をミリ秒で返す。壁時計は調整で戻ることがあり、負の時間を記録しないため。 */
+    private static long millisSince(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000L;
     }
 
     /** 失敗が利用量を持っていればそれを使う。なければ、モデルが分からない利用量を、そのスキルの実装に合わせて作る。 */
@@ -507,6 +570,7 @@ public class InquiryService {
     }
 
     private void structure(InquiryEntity inquiry) {
+        long start = System.nanoTime();
         AiResult<StructuredInquiry> result = restater.restate(
                 inquiry.utterance,
                 inquiry.category(),
@@ -514,7 +578,7 @@ public class InquiryService {
                 systemOf(inquiry),
                 List.copyOf(inquiry.revisionNotes));
         inquiry.structuredByAi = result.value();
-        inquiry.addUsage(Skill.RESTATER, result.usage());
+        inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start));
         inquiry.step = InquiryStep.STRUCTURED;
     }
 
@@ -524,6 +588,7 @@ public class InquiryService {
         inquiry.outcome = InquiryOutcome.FILED;
         inquiry.sentImmediately = immediately;
         inquiry.filedAt = Instant.now();
+        inquiry.handlingStatus = HandlingStatus.OPEN;
         return new FilingNotifier.FilingNotice(
                 inquiry.id,
                 inquiry.category(),
@@ -561,6 +626,15 @@ public class InquiryService {
             }
         }
         return saved;
+    }
+
+    /** 保存の確定後に、オペレータの画面へ更新を知らせる。配信側の失敗で、確定済みの更新を失敗にしない。 */
+    private void publishUpdated(InquiryEntity saved) {
+        try {
+            events.publishEvent(new InquiryUpdatedEvent(OperatorService.toItem(saved)));
+        } catch (RuntimeException e) {
+            log.error("更新の通知イベントの配信に失敗 id={}", saved.id, e);
+        }
     }
 
     private InquiryEntity load(UUID id) {
@@ -661,6 +735,11 @@ public class InquiryService {
                 answer,
                 e.outcome == InquiryOutcome.INCIDENT_REDIRECTED ? incidentGuidance : null,
                 e.sentImmediately,
-                e.mock);
+                e.mock,
+                e.createdAt,
+                e.handlingStatus,
+                MessageBodies.viewsOf(e),
+                e.submittedAnswers(),
+                TraceViews.of(e, properties, implementations));
     }
 }

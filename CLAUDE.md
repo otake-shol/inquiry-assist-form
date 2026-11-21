@@ -13,7 +13,7 @@
 | `backend/src/main/java/dev/inquiryassist/core/skill/` | 5つのスキルの境界、受け渡す型、調査から説明までの流れ（`AnswerPipeline`） |
 | `backend/src/main/java/dev/inquiryassist/mock/` | スキルと一次情報の検索のモック実装 |
 | `backend/src/main/resources/db/migration/` | 保存スキーマ（Flyway）。適用済みの版は書き換えず、新しい版を足す |
-| `frontend/` | React + TypeScript + Vite（SPA）。`/` が本人向け、`/operator` が担当者向け |
+| `frontend/` | React + TypeScript + Vite（SPA）。`/`、`/inquiries`、`/inquiries/{id}` が本人向け、`/operator` が担当者向け |
 | `site/` | 業務フローとスキル設計の図解ページ（GitHub Pages で公開） |
 
 ## 設計上の決まり
@@ -79,6 +79,8 @@ npm run eval -- -Pskill=all -Psplit=dev -Prepeat=3       # 調整用の例を、
 - 手元のモデルでの品質は、評価で測っている途中。訂正を含む言い直しと、根拠の薄いシステムの推測が弱い（`docs/evaluation.md` の決まりに沿って直す）。
 - 聞き手の呼び出しが「出力を読めない」で時々失敗する（18回中3回起きたが、再現できていない）。理由と生の出力は記録するようにしてある。
 - 一次情報の検索はモックだけ（`mock-knowledge/` の見本のファイルを読む）。調べられるのは、見本の資料に書かれていることだけ。実際のリポジトリを調べる実装は未着手。
-- 担当者への通知は、ツール内（`/operator` の一覧と即時通知）と Slack（Incoming Webhook。投稿先が未設定なら投稿しない）。対応状況の管理（対応中、完了など）はまだない。
-- 投稿者は固定ユーザー（`FixedCurrentUserProvider`）。担当者向けの API にも認証がない。SSO は後の段階で加える。
+- 担当者への通知は、ツール内（`/operator` の一覧と即時通知）と Slack（Incoming Webhook。投稿先が未設定なら投稿しない）。
+- 送った後の往復がある。担当者は対応状況（未対応、対応中、完了）を変えて返信でき、本人は `/inquiries` で経過を見て追記できる。本人側は新しい返信を自動では取りにいかない（開き直したときに取得する）。
+- 画面の最下部の「裏側を見る（開発者向け）」に、どのスキルがどの実装で動いたかを出す（設定 `inquiry.trace.enabled`。本番では無効にする）。
+- 投稿者は固定ユーザー（`FixedCurrentUserProvider`）。担当者向けの API にも認証がない。画面に出る名前は設定の固定値（`inquiry.dev.*`）。SSO は後の段階で加える。
 - 結果の `ABANDONED`（離脱）は自動では設定していない。

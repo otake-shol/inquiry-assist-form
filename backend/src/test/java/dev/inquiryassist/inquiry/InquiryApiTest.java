@@ -796,8 +796,8 @@ class InquiryApiTest {
                 .andExpect(jsonPath("$.mock").value(true))
                 .andExpect(jsonPath("$.filedGuidance").value(filedGuidance));
         // 設定ファイルの日本語が文字化けせずに読めていること
-        assertThat(filedGuidance).startsWith("担当者が内容を確認して連絡します。");
-        assertThat(incidentGuidance).startsWith("障害の連絡は専用の経路");
+        assertThat(filedGuidance).startsWith("担当者が内容を確認し、このページに返信します。");
+        assertThat(incidentGuidance).startsWith("障害の連絡先は、社内の案内を");
     }
 
     // ---- (i) SSE ----

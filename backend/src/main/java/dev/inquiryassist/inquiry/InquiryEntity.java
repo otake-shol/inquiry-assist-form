@@ -53,7 +53,11 @@ class InquiryEntity {
             long outputTokens,
             long cacheReadTokens,
             boolean mock,
-            boolean failed) {}
+            boolean failed,
+            Long durationMillis) {}
+
+    /** 保存するやり取り1件。担当者の返信と本人の追記を同じ形で持つ。 */
+    record StoredMessage(UUID id, MessageAuthor from, String authorName, String body, Instant createdAt) {}
 
     /** 言い直しを作り直せる回数の初期値。 */
     static final int INITIAL_REVISIONS = 2;
@@ -170,6 +174,17 @@ class InquiryEntity {
     @Column(name = "read_at")
     Instant readAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "handling_status")
+    HandlingStatus handlingStatus;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(nullable = false)
+    List<StoredMessage> messages = new ArrayList<>();
+
+    @Column(name = "asker_unread_reply", nullable = false)
+    boolean askerUnreadReply;
+
     @Column(name = "slack_notified", nullable = false)
     boolean slackNotified;
 
@@ -217,7 +232,8 @@ class InquiryEntity {
                 u.outputTokens(),
                 u.cacheReadTokens(),
                 u.mock(),
-                usage.failed()));
+                usage.failed(),
+                usage.durationMillis()));
         mock = mock || u.mock();
     }
 
@@ -229,6 +245,48 @@ class InquiryEntity {
      */
     void addUsage(Skill skill, Usage usage) {
         addUsage(new SkillUsage(skill, usage));
+    }
+
+    /**
+     * 成功したスキルの利用量を、かかった時間つきで追記する。
+     *
+     * @param skill 呼んだスキル
+     * @param usage 利用量
+     * @param durationMillis 呼び出しにかかった時間（ミリ秒）
+     */
+    void addUsage(Skill skill, Usage usage, long durationMillis) {
+        addUsage(new SkillUsage(skill, usage, false, durationMillis));
+    }
+
+    /**
+     * やり取りに1件追記する。投稿者の名前は、投稿した時点の値を保存する。
+     *
+     * @param from 投稿者の区分
+     * @param authorName 表示用の名前
+     * @param body 本文
+     * @param now 投稿時刻
+     */
+    void addMessage(MessageAuthor from, String authorName, String body, Instant now) {
+        messages.add(new StoredMessage(UUID.randomUUID(), from, authorName, body, now));
+    }
+
+    /**
+     * 本人が送信した追加質問への回答を返す。
+     *
+     * <p>送信した回答は追加質問の {@code answer} にそのまま入っているため、別に持たず、そこから作る。
+     * 追加質問へ戻る（5b）と {@code answersSubmitted} が false に戻るので、その後は null になる。
+     * 「わからない」は、回答が null または空白のみで、どちらも null にそろえる（担当者向けの判定と同じ）。
+     *
+     * @return 回答の一覧。まだ送信していなければ null
+     */
+    List<InquiryView.SubmittedAnswer> submittedAnswers() {
+        if (!answersSubmitted) {
+            return null;
+        }
+        return followUps.stream()
+                .map(q -> new InquiryView.SubmittedAnswer(
+                        q.id(), q.answer() == null || q.answer().isBlank() ? null : q.answer()))
+                .toList();
     }
 
     /**

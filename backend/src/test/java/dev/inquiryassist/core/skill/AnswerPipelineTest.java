@@ -163,6 +163,25 @@ class AnswerPipelineTest {
     }
 
     @Test
+    void 調査と説明のそれぞれにかかった時間が記録される() {
+        var result = pipeline(mixed(), new RecordingExplainer(), new ArrayList<>()).run(INQUIRY, SCOPE, m -> {});
+
+        assertThat(result.usages()).extracting(SkillUsage::durationMillis).doesNotContainNull().allMatch(d -> d >= 0);
+    }
+
+    @Test
+    void 失敗した説明の呼び出しにも時間が記録される() {
+        var explainer = new RecordingExplainer();
+        explainer.failure = new AiUnavailableException("説明に失敗", null);
+
+        assertThatThrownBy(() -> pipeline(mixed(), explainer, new ArrayList<>()).run(INQUIRY, SCOPE, m -> {}))
+                .isInstanceOfSatisfying(ExplanationFailedException.class, e -> assertThat(e.usages())
+                        .extracting(SkillUsage::durationMillis)
+                        .doesNotContainNull()
+                        .allMatch(d -> d >= 0));
+    }
+
+    @Test
     void 説明が失敗すると調査と照合の結果を持った例外で伝える() {
         var explainer = new RecordingExplainer();
         explainer.failure = new AiUnavailableException("説明に失敗", null);

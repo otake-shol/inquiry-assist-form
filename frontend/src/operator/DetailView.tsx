@@ -1,6 +1,31 @@
-import type { OperatorDetail } from "../api/types.ts";
+import type { HandlingStatus, OperatorDetail } from "../api/types.ts";
+import { MessageForm, MessageThread } from "../components/Exchange.tsx";
+import { TracePanel } from "../components/TracePanel.tsx";
 import { SOURCE_TYPE_LABELS } from "../text/labels.ts";
-import { OP_TEXT, formatFiledAt, opCategoryLabel } from "./labels.ts";
+import {
+  HANDLING_LABELS,
+  OP_TEXT,
+  formatFiledAt,
+  opCategoryLabel,
+} from "./labels.ts";
+
+/** 対応状況の切り替えボタンの並び順。 */
+const STATUS_ORDER: HandlingStatus[] = ["OPEN", "IN_PROGRESS", "DONE"];
+
+/** DetailView の props。 */
+interface DetailViewProps {
+  detail: OperatorDetail;
+  /** スキルの実行記録を最下部に出すか（`GET /api/config` の `trace`） */
+  trace: boolean;
+  /** 状況の切り替えや返信を送っている最中か */
+  busy: boolean;
+  /** 直近の操作が失敗したか */
+  failed: boolean;
+  /** 対応状況を切り替える。成功したら true */
+  onStatus: (status: HandlingStatus) => Promise<boolean>;
+  /** 本人に返信する。成功したら true */
+  onReply: (body: string) => Promise<boolean>;
+}
 
 /**
  * 箇条書きの1区分。項目が無ければ何も出さない。
@@ -22,10 +47,19 @@ function List({ title, items }: { title: string; items: string[] }) {
 
 /**
  * 1件の問い合わせの全内容。元の発話から調べた結果、出典の照合結果まで。
- * @param props 問い合わせの全内容
+ * 上部に対応状況の切り替え、下部にやり取りと返信の入力欄、最下部にスキルの実行記録を置く。
+ * @param props 問い合わせの全内容と、操作の受け口
  */
-export function DetailView({ detail }: { detail: OperatorDetail }) {
+export function DetailView({
+  detail,
+  trace,
+  busy,
+  failed,
+  onStatus,
+  onReply,
+}: DetailViewProps) {
   const { structured, answer } = detail;
+  const messages = detail.messages ?? [];
   return (
     <article className="op-article">
       <header className="op-article-head">
@@ -52,8 +86,27 @@ export function DetailView({ detail }: { detail: OperatorDetail }) {
         <p className="op-meta">
           <time dateTime={detail.filedAt}>{formatFiledAt(detail.filedAt)}</time>
           {" ・ "}
-          {detail.askerId}
+          {detail.askerName ?? detail.askerId}
         </p>
+        <div
+          className="op-status-switch"
+          role="group"
+          aria-label={OP_TEXT.statusSwitchLabel}
+        >
+          {STATUS_ORDER.map((status) => (
+            <button
+              key={status}
+              type="button"
+              aria-pressed={detail.handlingStatus === status}
+              disabled={busy}
+              onClick={() => {
+                if (detail.handlingStatus !== status) void onStatus(status);
+              }}
+            >
+              {HANDLING_LABELS[status]}
+            </button>
+          ))}
+        </div>
       </header>
 
       <section>
@@ -168,6 +221,27 @@ export function DetailView({ detail }: { detail: OperatorDetail }) {
           </>
         )}
       </section>
+
+      <section className="op-exchange">
+        <h3>{OP_TEXT.exchange}</h3>
+        <MessageThread messages={messages} mine="OPERATOR" />
+        {messages.length === 0 && (
+          <p className="op-muted">{OP_TEXT.noMessages}</p>
+        )}
+        <MessageForm
+          label={OP_TEXT.replyLabel}
+          submitLabel={OP_TEXT.replySubmit}
+          busy={busy}
+          onSubmit={onReply}
+        />
+        {failed && (
+          <p className="op-muted" role="alert">
+            {OP_TEXT.actionFailed}
+          </p>
+        )}
+      </section>
+
+      {trace && <TracePanel entries={detail.trace} />}
     </article>
   );
 }

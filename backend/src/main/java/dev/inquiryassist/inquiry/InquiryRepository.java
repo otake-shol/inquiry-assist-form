@@ -15,11 +15,23 @@ interface InquiryRepository extends JpaRepository<InquiryEntity, UUID> {
     /** 担当者に送られた問い合わせを新しい順に返す。 */
     List<InquiryEntity> findByOutcomeOrderByFiledAtDesc(InquiryOutcome outcome);
 
-    /** 担当者に送られた未読の問い合わせを新しい順に返す。 */
-    List<InquiryEntity> findByOutcomeAndReadAtIsNullOrderByFiledAtDesc(InquiryOutcome outcome);
-
     /** 担当者に送られた未読の件数を返す。 */
     long countByOutcomeAndReadAtIsNull(InquiryOutcome outcome);
+
+    /** 担当者に送られた問い合わせの、対応状況ごとの件数を返す。 */
+    long countByOutcomeAndHandlingStatus(InquiryOutcome outcome, HandlingStatus status);
+
+    /** 本人が作った問い合わせを新しい順に、最大50件返す。 */
+    List<InquiryEntity> findTop50ByAskerIdOrderByCreatedAtDesc(String askerId);
+
+    /** 本人が作った問い合わせのうち、未読の返信があるものの件数を返す。 */
+    long countByAskerIdAndAskerUnreadReplyTrue(String askerId);
+
+    /** 返信を読んだことにする。楽観ロックの対象外の列だけを更新し、取得が他の操作と競合しないようにする。 */
+    @Transactional
+    @Modifying(clearAutomatically = true)
+    @Query("update InquiryEntity e set e.askerUnreadReply = false where e.id = :id and e.askerUnreadReply = true")
+    int clearUnreadReply(@Param("id") UUID id);
 
     /** 既読にする（すでに既読なら時刻を変えない）。楽観ロックの対象外の列だけを更新する。 */
     @Transactional

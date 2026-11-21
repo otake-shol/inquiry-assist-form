@@ -135,7 +135,9 @@ final class EvalRunner {
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
                 null,
                 settings,
-                new InquiryProperties.Ollama(config.ollamaUrl(), "30m", config.seed()));
+                new InquiryProperties.Ollama(config.ollamaUrl(), "30m", config.seed()),
+                new InquiryProperties.Trace(true),
+                new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"));
         OllamaClient client = new OllamaClient(config.ollamaUrl(), "30m", config.seed(), JSON);
         return new EvalExecutor(
                 new OllamaReceptionSkill(client, JSON, properties),

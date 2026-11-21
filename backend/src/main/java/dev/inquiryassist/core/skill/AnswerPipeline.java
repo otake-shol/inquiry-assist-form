@@ -66,8 +66,9 @@ public final class AnswerPipeline {
     public Result run(StructuredInquiry inquiry, AccessScope scope, ProgressListener progress) {
         List<SkillUsage> usages = new ArrayList<>();
 
+        long investigationStart = System.nanoTime();
         AiResult<Investigation> investigation = investigator.investigate(inquiry, scope, progress);
-        usages.add(new SkillUsage(Skill.INVESTIGATOR, investigation.usage()));
+        usages.add(new SkillUsage(Skill.INVESTIGATOR, investigation.usage(), false, millisSince(investigationStart)));
 
         progress.onProgress(PROGRESS_VERIFYING);
         VerifiedInvestigation verified = verifier.verify(investigation.value(), scope);
@@ -79,14 +80,16 @@ public final class AnswerPipeline {
 
         progress.onProgress(PROGRESS_EXPLAINING);
         AiResult<Explanation> explanation;
+        long explanationStart = System.nanoTime();
         try {
             explanation = explainer.explain(inquiry, verified.confirmed());
         } catch (AiRefusalException | AiUnavailableException e) {
             List<SkillUsage> failedUsages = new ArrayList<>(usages);
-            failedUsages.add(new SkillUsage(Skill.EXPLAINER, failedUsageOf(e), true));
+            // 失敗した呼び出しも費用と時間がかかっているため、時間を記録する
+            failedUsages.add(new SkillUsage(Skill.EXPLAINER, failedUsageOf(e), true, millisSince(explanationStart)));
             throw new ExplanationFailedException(e, verified, failedUsages);
         }
-        usages.add(new SkillUsage(Skill.EXPLAINER, explanation.usage()));
+        usages.add(new SkillUsage(Skill.EXPLAINER, explanation.usage(), false, millisSince(explanationStart)));
 
         List<Citation> citations = new ArrayList<>(verified.confirmed().stream()
                 .flatMap(f -> f.evidence().stream())
@@ -107,6 +110,11 @@ public final class AnswerPipeline {
                 verified.unconfirmed().stream().map(Finding::statement).toList(),
                 verified.notFound(),
                 verified.nextChecks());
+    }
+
+    /** 単調増加の時計で、開始からの経過をミリ秒で返す。壁時計は調整で戻ることがあり、負の時間を記録しないため。 */
+    private static long millisSince(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000L;
     }
 
     /** 失敗が利用量を持っていればそれを使う。持っていなければ、中身のない利用量を記録する。 */

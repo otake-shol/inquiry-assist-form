@@ -260,3 +260,85 @@ test("問いに答えていない結果は関連して分かったこととし�
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * 送った後の往復: 本人が送る → 担当者が返信する → 本人が開き直して読み、追記する →
+ * 担当者に未読として戻り、完了にする → 本人の画面に完了が出る。
+ */
+test("送った後に担当者と本人がやり取りでき、開き直しても続きが見える", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  const mark = `往復確認 ${Date.now()}`;
+  const reply = `担当者からの返信 ${Date.now()}`;
+  const append = `本人からの追記 ${Date.now()}`;
+
+  // 本人が送る。作成後は URL がその問い合わせを指す
+  await page.goto("/");
+  await page.getByLabel(INPUT_LABEL).fill(`${mark} 請求書の宛名を知りたい`);
+  await page.getByRole("button", { name: "送信する" }).click();
+  await expect(page.getByText("として受け取りました")).toBeVisible();
+  await expect(page).toHaveURL(/\/inquiries\/[0-9a-f-]{36}$/);
+  const askerUrl = page.url();
+  await page.getByRole("button", { name: "今すぐ担当者に送る" }).click();
+  await expect(page.getByText("担当者の確認を待っています")).toBeVisible();
+  await expect(
+    page.getByText("担当者からの返信は、ここに表示されます。"),
+  ).toBeVisible();
+
+  // 担当者が開いて返信する。未対応は自動で対応中になる
+  await page.goto("/operator");
+  const list = page.getByRole("region", { name: "受付一覧" });
+  await list.getByRole("button").filter({ hasText: mark }).click();
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+  const statusSwitch = detail.getByRole("group", {
+    name: "対応状況を切り替える",
+  });
+  await expect(
+    statusSwitch.getByRole("button", { name: "未対応" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await detail.getByLabel("本人に返信する").fill(reply);
+  await detail.getByRole("button", { name: "返信を送る" }).click();
+  await expect(detail.getByText(reply)).toBeVisible();
+  await expect(
+    statusSwitch.getByRole("button", { name: "対応中" }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  // 本人の一覧に未読の返信の印がつき、開くと返信が読める
+  await page.goto("/inquiries");
+  const mine = page.getByRole("listitem").filter({ hasText: mark });
+  await expect(mine).toContainText("担当者が対応中");
+  await expect(mine).toContainText("未読の返信");
+  await page.goto(askerUrl);
+  await expect(page.getByText("担当者が対応しています")).toBeVisible();
+  await expect(page.getByText(reply)).toBeVisible();
+
+  // 本人が追記する
+  await page.getByLabel("追加で伝える").fill(append);
+  await page.getByRole("button", { name: "送る", exact: true }).click();
+  await expect(page.getByText(append)).toBeVisible();
+
+  // 担当者に追記が届き、完了にする
+  await page.goto("/operator");
+  await list.getByRole("button").filter({ hasText: mark }).click();
+  await expect(detail.getByText(append)).toBeVisible();
+  await statusSwitch.getByRole("button", { name: "完了" }).click();
+  await expect(
+    statusSwitch.getByRole("button", { name: "完了" }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  // 本人の画面に完了が出る。裏側の表示も開ける
+  await page.goto(askerUrl);
+  await expect(page.getByText("対応が完了しました")).toBeVisible();
+  await page.getByText("裏側を見る（開発者向け）").click();
+  await expect(page.getByText("照合（コード）")).toBeVisible();
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
