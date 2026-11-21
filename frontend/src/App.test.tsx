@@ -1,11 +1,4 @@
-import {
-  act,
-  cleanup,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App.tsx";
@@ -1188,51 +1181,26 @@ describe("調査の結果と説明の失敗", () => {
     return screen.getByText("担当者向けの詳しい内容").closest("details")!;
   }
 
-  it("(a) 根拠を確かめられなかったことは、あるときだけ分かったこととは別の見出しで出る", async () => {
+  it("(a) unconfirmed に中身が入った応答が来ても、本人の画面には見出しも事実の文も出さない", async () => {
     const memo = await showResult({
       ...groundedAnswer,
       memo: {
         ...groundedAnswer.memo,
-        unconfirmed: ["別の画面でも同じ制限がかかっている"],
+        unconfirmed: ["期限切れの求人は、再掲載ボタンから元に戻せる"],
       },
     });
 
+    // 担当者向けの詳しい内容は従来どおり出るが、確かめられなかったことは出ない
     expect(within(memo).getByText("分かったこと")).toBeInTheDocument();
     expect(
-      within(memo).getByText("根拠を確かめられなかったこと"),
-    ).toBeInTheDocument();
-    expect(
-      within(memo).getByText("別の画面でも同じ制限がかかっている"),
-    ).toBeInTheDocument();
-    expect(
-      within(memo).getByText(
-        "調査で挙がりましたが、資料で裏づけを取れていません。",
-      ),
-    ).toBeInTheDocument();
-    // 主の説明には影響しない
+      within(memo).queryByText("根拠を確かめられなかったこと"),
+    ).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("再掲載ボタン");
+    expect(document.body.textContent).not.toContain("裏づけを取れていません");
     expect(
       screen.getByText("掲載期限は最大90日まで延長できます。"),
     ).toBeInTheDocument();
-    expect(memo).not.toHaveAttribute("open");
     expectNoInternalWords();
-  });
-
-  it("(a) unconfirmed が空でも、無い古い応答でも見出しは出ない", async () => {
-    for (const unconfirmed of [[], undefined]) {
-      const { unconfirmed: _drop, ...rest } = groundedAnswer.memo;
-      void _drop;
-      const memo = await showResult({
-        ...groundedAnswer,
-        memo: unconfirmed === undefined ? rest : { ...rest, unconfirmed },
-      });
-      expect(
-        within(memo).queryByText("根拠を確かめられなかったこと"),
-      ).not.toBeInTheDocument();
-      expect(
-        within(memo).queryByText(/裏づけを取れていません/),
-      ).not.toBeInTheDocument();
-      cleanup();
-    }
   });
 
   it("(d) 説明だけが失敗しても failed で再試行と今すぐ担当者に送るが出る", async () => {

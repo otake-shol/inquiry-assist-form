@@ -47,28 +47,55 @@ class SkillFlowTest extends ApiSupport {
     void 一部幽霊は確かめられた事実だけから説明を書き落ちた事実は未確認として残る() throws Exception {
         String id = toAnswering("[一部幽霊] " + SPEC, null);
 
-        String done = doneOf(stream(id));
+        String streamBody = stream(id);
+        String done = doneOf(streamBody);
 
         assertThat((Boolean) JsonPath.read(done, "$.answer.grounded")).isTrue();
         String explanation = JsonPath.read(done, "$.answer.askerExplanation");
         assertThat(explanation).contains(CODE_FACT).doesNotContain(GHOST_FACT).doesNotContain("再掲載");
         assertThat((List<String>) JsonPath.read(done, "$.answer.memo.findings")).containsExactly(CODE_FACT);
-        assertThat((List<String>) JsonPath.read(done, "$.answer.memo.unconfirmed")).containsExactly(GHOST_FACT);
         assertThat((List<?>) JsonPath.read(done, "$.answer.citations")).hasSize(1);
         assertThat((String) JsonPath.read(done, "$.answer.citations[0].path")).contains("JobPostingService");
+
+        // 本人向けの応答（done と最終の GET）は unconfirmed が空で、落ちた事実の文を本文のどこにも含まない
+        assertThat((List<?>) JsonPath.read(done, "$.answer.memo.unconfirmed")).isEmpty();
+        String view = text(mvc.perform(get("/api/inquiries/" + id)).andExpect(status().isOk()));
+        assertThat((List<?>) JsonPath.read(view, "$.answer.memo.unconfirmed")).isEmpty();
+        assertThat(streamBody).doesNotContain(GHOST_FACT);
+        assertThat(view).doesNotContain(GHOST_FACT);
+
+        // 保存は変えず、オペレータの詳細には入っている
+        resolve(id, false);
+        String detail = operatorDetail(id);
+        assertThat((List<String>) JsonPath.read(detail, "$.answer.memo.unconfirmed")).containsExactly(GHOST_FACT);
     }
 
     @Test
     void 幽霊出典は事実がすべて未確認として残り根拠なしになる() throws Exception {
         String id = toAnswering("[幽霊出典] " + SPEC, null);
 
-        String done = doneOf(stream(id));
+        String streamBody = stream(id);
+        String done = doneOf(streamBody);
 
         assertThat((Boolean) JsonPath.read(done, "$.answer.grounded")).isFalse();
         assertThat((Object) JsonPath.read(done, "$.answer.askerExplanation")).isNull();
-        assertThat((List<?>) JsonPath.read(done, "$.answer.memo.unconfirmed")).hasSize(2);
         // 説明は呼ばれず、利用量にも説明は現れない
         assertThat(usageSteps(id)).doesNotContain("explainer");
+
+        // 本人向けの応答には確かめられなかった事実を含めない
+        String ghostB = "夜間のバッチで自動的に延長される";
+        assertThat((List<?>) JsonPath.read(done, "$.answer.memo.unconfirmed")).isEmpty();
+        String view = text(mvc.perform(get("/api/inquiries/" + id)).andExpect(status().isOk()));
+        assertThat((List<?>) JsonPath.read(view, "$.answer.memo.unconfirmed")).isEmpty();
+        for (String body : List.of(streamBody, view)) {
+            assertThat(body).doesNotContain(GHOST_FACT).doesNotContain(ghostB);
+        }
+
+        // 担当者の詳細（取得と既読化）には入っている
+        resolve(id, false);
+        assertThat((List<?>) JsonPath.read(operatorDetail(id), "$.answer.memo.unconfirmed")).hasSize(2);
+        String read = text(mvc.perform(post("/api/operator/inquiries/" + id + "/read")).andExpect(status().isOk()));
+        assertThat((List<?>) JsonPath.read(read, "$.answer.memo.unconfirmed")).hasSize(2);
     }
 
     @Test

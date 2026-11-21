@@ -63,7 +63,10 @@ export interface Citation {
 /** 担当者向けメモ。 */
 export interface AnswerMemo {
   findings: string[];
-  /** 調査が挙げたが、根拠の実在を確かめられなかった事実。古い応答では無い */
+  /**
+   * 調査が挙げたが、根拠の実在を確かめられなかった事実。担当者にだけ見せる
+   * （本人向けの応答では常に空。本人向けの画面では中身があっても表示しない）。
+   */
   unconfirmed?: string[];
   notFound: string[];
   nextChecks: string[];

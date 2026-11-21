@@ -104,15 +104,6 @@ export function Result({
       <details>
         <summary>{TEXT.memoTitle}</summary>
         <MemoList title={TEXT.memoFindings} items={answer.memo.findings} />
-        {(answer.memo.unconfirmed ?? []).length > 0 && (
-          <div className="memo-unconfirmed">
-            <MemoList
-              title={TEXT.memoUnconfirmed}
-              items={answer.memo.unconfirmed ?? []}
-            />
-            <p className="memo-note">{TEXT.memoUnconfirmedNote}</p>
-          </div>
-        )}
         <MemoList title={TEXT.memoNotFound} items={answer.memo.notFound} />
         <MemoList title={TEXT.memoNextChecks} items={answer.memo.nextChecks} />
       </details>

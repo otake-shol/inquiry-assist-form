@@ -587,6 +587,15 @@ public class InquiryService {
                 result.verified());
     }
 
+    /**
+     * 本人向けの技術メモから、根拠を確かめられなかったこと（unconfirmed）を落とす。これは担当者にだけ見せる内容で、
+     * 画面で隠すのではなく、本人向けの応答に API が含めない。保存は変えず、オペレータ向けの詳細には残る。
+     * 本人向けの応答（InquiryView と進捗ストリームの done）はすべてこの view から作るため、ここ1か所で落とす。
+     */
+    private static TechnicalMemo forAsker(TechnicalMemo memo) {
+        return memo == null ? null : new TechnicalMemo(memo.findings(), List.of(), memo.notFound(), memo.nextChecks());
+    }
+
     private InquiryView toView(InquiryEntity e) {
         StructuredInquiry structured = e.structured();
         InquiryView.AnswerView answer = e.answerGrounded == null
@@ -594,7 +603,7 @@ public class InquiryService {
                 : new InquiryView.AnswerView(
                         e.answerGrounded,
                         e.askerExplanation,
-                        e.technicalMemo,
+                        forAsker(e.technicalMemo),
                         e.citations.stream()
                                 .filter(StoredCitation::verified)
                                 .map(c -> new Citation(

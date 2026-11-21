@@ -89,10 +89,12 @@ interface ExplainerSkill {
 | `askerExplanation` | 説明のスキルの出力。`grounded` でなければ `null` |
 | `citations`（本人向け） | `confirmed` の事実の根拠（照合を通ったもの） |
 | `memo.findings` | `confirmed` の事実の文 |
-| `memo.unconfirmed` | `unconfirmed` の事実の文。「根拠を確かめられなかったこと」として示す |
+| `memo.unconfirmed` | `unconfirmed` の事実の文。担当者にだけ「根拠を確かめられなかったこと」として示す |
 | `memo.notFound`、`memo.nextChecks` | 調査の出力のまま |
 
 確かめられなかった事実を捨てずに `memo.unconfirmed` に残すのは、担当者にとっては調べる手がかりになるため。ただし事実としては示さず、必ず区別して表示する。
+
+問い合わせた本人には見せない。本人は裏づけのない内容の真偽を判断できず、もっともらしい文面であればそのまま試してしまう。本人向けの応答には API の時点で含めず、画面での非表示には頼らない。
 
 ## 呼ぶ順序と種別
 

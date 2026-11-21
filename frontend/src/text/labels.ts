@@ -99,8 +99,6 @@ export const TEXT = {
   citationsTitle: (n: number) => `根拠にした資料（${n}件）`,
   memoTitle: "担当者向けの詳しい内容",
   memoFindings: "分かったこと",
-  memoUnconfirmed: "根拠を確かめられなかったこと",
-  memoUnconfirmedNote: "調査で挙がりましたが、資料で裏づけを取れていません。",
   memoNotFound: "調べたが見つからなかったこと",
   memoNextChecks: "次に確認すること",
   resolved: "解決しました",

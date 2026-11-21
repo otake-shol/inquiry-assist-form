@@ -476,7 +476,8 @@ class InquiryApiTest {
         assertThat((List<?>) JsonPath.read(done, "$.answer.citations")).isEmpty();
         // 事実は確かめられなかったものとして残り、分かったことには入らない
         assertThat((List<?>) JsonPath.read(done, "$.answer.memo.findings")).isEmpty();
-        assertThat((List<?>) JsonPath.read(done, "$.answer.memo.unconfirmed")).hasSize(2);
+        // 確かめられなかった事実は担当者だけに見せるため、本人向けの応答には含めない
+        assertThat((List<?>) JsonPath.read(done, "$.answer.memo.unconfirmed")).isEmpty();
         // 画面には出さないが、記録には照合失敗として残す
         assertThat(jdbc.queryForObject(
                         "select citations->0->>'verified' from inquiries where id = ?::uuid", String.class, id))

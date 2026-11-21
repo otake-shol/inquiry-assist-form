@@ -166,10 +166,10 @@ test("/operator/{id} を直接開くとその問い合わせの詳細が見え�
 });
 
 /**
- * `[一部幽霊]` では事実の一部だけ根拠を確かめられず、
- * 結果の「担当者向けの詳しい内容」に「根拠を確かめられなかったこと」が出る。
+ * `[一部幽霊]` では事実の一部だけ根拠を確かめられない。
+ * その内容は担当者にだけ見せる: 本人の画面には出ず、オペレータ画面には出る。
  */
-test("一部の事実の根拠を確かめられなかったことが詳しい内容に出る", async ({
+test("根拠を確かめられなかったことは本人には見せず担当者にだけ見せる", async ({
   page,
 }) => {
   const consoleErrors: string[] = [];
@@ -178,11 +178,12 @@ test("一部の事実の根拠を確かめられなかったことが詳しい�
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  const marker = `一部確認 ${Date.now()}`;
 
   await page.goto("/");
   await page
     .getByLabel(INPUT_LABEL)
-    .fill("求人の掲載期限は、何日まで延長できますか？ [一部幽霊]");
+    .fill(`求人の掲載期限は、何日まで延長できますか？ ${marker} [一部幽霊]`);
   await page.getByRole("button", { name: "送信する" }).click();
 
   const confirm = page.getByRole("button", { name: "合っています" });
@@ -197,11 +198,21 @@ test("一部の事実の根拠を確かめられなかったことが詳しい�
   await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
     timeout: 30_000,
   });
+  // 本人の画面: 詳しい内容を開いても、確かめられなかったことは見えない
   await page.getByText("担当者向けの詳しい内容").click();
-  await expect(page.getByText("根拠を確かめられなかったこと")).toBeVisible();
-  await expect(
-    page.getByText("調査で挙がりましたが、資料で裏づけを取れていません。"),
-  ).toBeVisible();
+  await expect(page.getByText("分かったこと")).toBeVisible();
+  await expect(page.getByText("根拠を確かめられなかったこと")).toHaveCount(0);
+
+  // 解決しないで担当者に送る
+  await page.getByRole("button", { name: /まだ解決していません/ }).click();
+  await expect(page.getByText(/担当者に送りました/)).toBeVisible();
+  await expect(page.getByText("根拠を確かめられなかったこと")).toHaveCount(0);
+
+  // オペレータ画面: 見える
+  await page.goto("/operator");
+  await page.getByRole("button", { name: new RegExp(marker) }).click();
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+  await expect(detail.getByText("根拠を確かめられなかったこと")).toBeVisible();
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
