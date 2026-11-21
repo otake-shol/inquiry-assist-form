@@ -110,6 +110,23 @@ class InquiryEntity {
     @Column(name = "answer_answered")
     Boolean answerAnswered;
 
+    /**
+     * 確かめられた事実が、本人の問いに答えているかを返す。
+     *
+     * <p>判定が記録されていない場合は、根拠の有無に従う。この列を足す前に作られた記録は判定を受けておらず、
+     * 当時は「根拠があれば答えとして見せる」動きだった。判定がないことを「答えていないと判定した」と
+     * 取り違えると、判定していない記録に「問いに答えていない」という印が付く。
+     *
+     * @return 問いに答えている場合は true。根拠がなければ常に false
+     */
+    boolean answered() {
+        boolean grounded = Boolean.TRUE.equals(answerGrounded);
+        if (!grounded) {
+            return false;
+        }
+        return answerAnswered == null || answerAnswered;
+    }
+
     @Column(name = "asker_explanation")
     String askerExplanation;
 

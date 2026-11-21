@@ -185,6 +185,26 @@ class SkillFlowTest extends ApiSupport {
     }
 
     @Test
+    void 判定が記録されていない記録は根拠の有無に従い_答えていないと判定したことにしない() throws Exception {
+        // answered の列を足す前に作られた記録を再現する。当時は判定そのものがなかった
+        String grounded = toAnswering(SPEC, null);
+        String ungrounded = toAnswering("[根拠なし] " + SPEC, null);
+        for (String id : List.of(grounded, ungrounded)) {
+            stream(id);
+            resolve(id, false);
+            jdbc.update("update inquiries set answer_answered = null where id = ?::uuid", id);
+        }
+
+        String groundedView = text(mvc.perform(get("/api/inquiries/" + grounded)).andExpect(status().isOk()));
+        assertThat((Boolean) JsonPath.read(groundedView, "$.answer.answered")).isTrue();
+        assertThat((Boolean) JsonPath.read(operatorDetail(grounded), "$.answer.answered")).isTrue();
+
+        String ungroundedView = text(mvc.perform(get("/api/inquiries/" + ungrounded)).andExpect(status().isOk()));
+        assertThat((Boolean) JsonPath.read(ungroundedView, "$.answer.answered")).isFalse();
+        assertThat((Boolean) JsonPath.read(operatorDetail(ungrounded), "$.answer.answered")).isFalse();
+    }
+
+    @Test
     void 的外れでも根拠ありなら説明と出典と技術メモは従来どおり返す() throws Exception {
         String id = toAnswering("[的外れ] " + SPEC, null);
 

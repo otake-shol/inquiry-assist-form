@@ -622,7 +622,7 @@ public class InquiryService {
                 ? null
                 : new InquiryView.AnswerView(
                         e.answerGrounded,
-                        Boolean.TRUE.equals(e.answerAnswered),
+                        e.answered(),
                         e.askerExplanation,
                         forAsker(e.technicalMemo),
                         e.citations.stream()
