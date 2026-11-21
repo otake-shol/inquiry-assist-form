@@ -90,9 +90,8 @@ describe("パスによる画面の切り替え", () => {
     expect(
       await screen.findByRole("heading", { name: "問い合わせ受付" }),
     ).toBeInTheDocument();
-    expect(
-      await screen.findByText("担当者に送られた問い合わせはまだありません。"),
-    ).toBeInTheDocument();
+    // 1件もなくても3つの列を出し、どれも「ありません」と示す
+    expect(await screen.findAllByText("ありません")).toHaveLength(3);
     expect(
       screen.queryByRole("button", { name: "送信する" }),
     ).not.toBeInTheDocument();

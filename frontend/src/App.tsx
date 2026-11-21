@@ -459,7 +459,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
   }
 
   return (
-    <div className="app">
+    <div className={`app ${route.kind === "inquiries" ? "wide" : ""}`}>
       <UserHeader
         route={route}
         userName={userName}

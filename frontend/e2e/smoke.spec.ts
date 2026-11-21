@@ -342,3 +342,73 @@ test("送った後に担当者と本人がやり取りでき、開き直して�
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
+
+/**
+ * 担当者のボード: カードを別の列へドラッグすると対応状況が変わり、
+ * 開き直しても変わったままで、本人のボードでも同じ状態の列に入る。
+ */
+test("担当者がカードをドラッグして対応状況を変えられる", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const mark = `ボード確認 ${Date.now()}`;
+
+  await page.goto("/");
+  await page.getByLabel(INPUT_LABEL).fill(`${mark} 請求書の宛名を知りたい`);
+  await page.getByRole("button", { name: "送信する" }).click();
+  await expect(page.getByText("として受け取りました")).toBeVisible();
+  await page.getByRole("button", { name: "今すぐ担当者に送る" }).click();
+  await expect(page.getByText("担当者の確認を待っています")).toBeVisible();
+
+  // 届いた時点では「未対応」の列にある
+  await page.goto("/operator");
+  const board = page.getByRole("region", { name: "受付一覧" });
+  const open = board.getByRole("region", { name: /^未対応/ });
+  const inProgress = board.getByRole("region", { name: /^対応中/ });
+  const card = board.getByRole("listitem").filter({ hasText: mark });
+  await expect(
+    open.getByRole("listitem").filter({ hasText: mark }),
+  ).toBeVisible();
+
+  // 「対応中」の列へドラッグする
+  await card.dragTo(inProgress);
+  await expect(
+    inProgress.getByRole("listitem").filter({ hasText: mark }),
+  ).toBeVisible();
+  await expect(
+    open.getByRole("listitem").filter({ hasText: mark }),
+  ).toHaveCount(0);
+
+  // 開き直しても「対応中」のまま
+  await page.reload();
+  await expect(
+    inProgress.getByRole("listitem").filter({ hasText: mark }),
+  ).toBeVisible();
+
+  // 本人のボードでも「担当者が対応中」の列に入る
+  await page.goto("/inquiries");
+  await expect(
+    page
+      .getByRole("region", { name: /^担当者が対応中/ })
+      .getByRole("listitem")
+      .filter({ hasText: mark }),
+  ).toBeVisible();
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * スマホの幅では、ボードの列は横にスクロールして見るが、ページ全体は横にはみ出さない。
+ * （視覚的に隠した文字の位置の基準が列の外にあり、ページ全体が横に広がったことがある）
+ */
+test("スマホの幅でボードがページの横幅からはみ出さない", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  for (const path of ["/operator", "/inquiries"]) {
+    await page.goto(path);
+    await expect(page.getByRole("region").first()).toBeVisible();
+    // e2e の型の設定はブラウザの型（DOM）を含まないため、式を文字列で渡す
+    const overflow = await page.evaluate<number>(
+      "document.documentElement.scrollWidth - window.innerWidth",
+    );
+    expect(overflow, `${path} の横のはみ出し`).toBeLessThanOrEqual(0);
+  }
+});

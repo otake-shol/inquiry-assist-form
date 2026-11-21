@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { makeDetail, makeItem } from "../test/fakes.ts";
 import {
-  adjustCounts,
+  arrangeOperatorBoard,
   initialOperatorState,
+  operatorColumnOf,
   mergeFiled,
   operatorReducer,
   tabTitleOf,
-  totalCount,
   unreadCountOf,
   visibleItems,
 } from "./state.ts";
@@ -61,43 +61,60 @@ describe("オペレータ画面の純粋関数", () => {
   });
 });
 
-describe("対応状況のタブと更新の反映", () => {
+describe("担当者のボードの列と並び順", () => {
+  it("列は対応状況で決まり、対応状況の無い古い応答は未対応に入る", () => {
+    expect(operatorColumnOf({ handlingStatus: "OPEN" })).toBe("OPEN");
+    expect(operatorColumnOf({ handlingStatus: "IN_PROGRESS" })).toBe(
+      "IN_PROGRESS",
+    );
+    expect(operatorColumnOf({ handlingStatus: "DONE" })).toBe("DONE");
+    expect(operatorColumnOf({ handlingStatus: null })).toBe("OPEN");
+    expect(operatorColumnOf({})).toBe("OPEN");
+  });
+
+  it("列ごとに振り分け、列の中は未読を上に寄せて、同じ条件なら新しい順にする", () => {
+    const at = (id: string, filedAt: string, rest = {}) =>
+      makeItem({ id, filedAt, read: true, handlingStatus: "OPEN", ...rest });
+    const board = arrangeOperatorBoard([
+      at("old-read", "2026-11-20T00:00:00Z"),
+      at("new-read", "2026-11-21T00:00:00Z"),
+      at("old-unread", "2026-11-19T00:00:00Z", { read: false }),
+      at("new-unread", "2026-11-21T01:00:00Z", { read: false }),
+      at("working", "2026-11-18T00:00:00Z", { handlingStatus: "IN_PROGRESS" }),
+      at("finished", "2026-11-18T00:00:00Z", { handlingStatus: "DONE" }),
+      at("legacy", "2026-11-17T00:00:00Z", { handlingStatus: undefined }),
+    ]);
+    expect(board.OPEN.map((i) => i.id)).toEqual([
+      "new-unread",
+      "old-unread",
+      "new-read",
+      "old-read",
+      "legacy",
+    ]);
+    expect(board.IN_PROGRESS.map((i) => i.id)).toEqual(["working"]);
+    expect(board.DONE.map((i) => i.id)).toEqual(["finished"]);
+  });
+
+  it("日時が同じなら渡された順のままにし、元の配列は変えない", () => {
+    const first = makeItem({ id: "x", read: true, handlingStatus: "OPEN" });
+    const second = makeItem({ id: "y", read: true, handlingStatus: "OPEN" });
+    const input = [first, second];
+    expect(arrangeOperatorBoard(input).OPEN.map((i) => i.id)).toEqual([
+      "x",
+      "y",
+    ]);
+    expect(input).toEqual([first, second]);
+  });
+});
+
+describe("更新の反映", () => {
   const open = makeItem({ id: "o", read: true, handlingStatus: "OPEN" });
   const done = makeItem({ id: "d", read: true, handlingStatus: "DONE" });
-
-  it("タブの絞り込みでも、開いている1件は残る", () => {
-    expect(visibleItems([open, done], false, null, "DONE")).toEqual([done]);
-    expect(visibleItems([open, done], false, "o", "DONE")).toEqual([
-      open,
-      done,
-    ]);
-    expect(visibleItems([open, done], false, null, "ALL")).toEqual([
-      open,
-      done,
-    ]);
-  });
-
-  it("対応状況が変わった件数だけを直し、取得できていなければ何もしない", () => {
-    const counts = { OPEN: 2, IN_PROGRESS: 1, DONE: 5 };
-    expect(adjustCounts(counts, "OPEN", "DONE")).toEqual({
-      OPEN: 1,
-      IN_PROGRESS: 1,
-      DONE: 6,
-    });
-    expect(adjustCounts(counts, undefined, "OPEN")).toEqual({
-      ...counts,
-      OPEN: 3,
-    });
-    expect(adjustCounts(counts, "DONE", "DONE")).toBe(counts);
-    expect(adjustCounts(null, "OPEN", "DONE")).toBeNull();
-    expect(totalCount(counts)).toBe(8);
-  });
 
   it("updated は一覧のその件を更新し、未読なら先頭へ動かす。既読なら位置を保つ", () => {
     const base = {
       ...initialOperatorState,
       items: [open, makeItem({ id: "x", read: true }), done],
-      counts: { OPEN: 1, IN_PROGRESS: 0, DONE: 1 },
     };
     const unreadUpdate = operatorReducer(base, {
       type: "updated",
@@ -115,27 +132,39 @@ describe("対応状況のタブと更新の反映", () => {
     });
     expect(readUpdate.items.map((i) => i.id)).toEqual(["o", "x", "d"]);
     expect(readUpdate.items[0].handlingStatus).toBe("IN_PROGRESS");
-    expect(readUpdate.counts).toEqual({ OPEN: 0, IN_PROGRESS: 1, DONE: 1 });
   });
 
-  it("updated で開いているタブの対応状況から外れた件は一覧から除く", () => {
+  it("statusMoved は一覧のその件と、開いている詳細の対応状況を変える", () => {
     const base = {
       ...initialOperatorState,
-      tab: "OPEN" as const,
-      items: [open],
+      items: [open, done],
+      detail: makeDetail({ id: "o", handlingStatus: "OPEN" }),
     };
     const moved = operatorReducer(base, {
-      type: "updated",
-      item: { ...open, handlingStatus: "DONE" },
+      type: "statusMoved",
+      id: "o",
+      status: "DONE",
     });
-    expect(moved.items).toEqual([]);
+    expect(moved.items.map((i) => i.handlingStatus)).toEqual(["DONE", "DONE"]);
+    expect(moved.detail?.handlingStatus).toBe("DONE");
+
+    const other = operatorReducer(base, {
+      type: "statusMoved",
+      id: "d",
+      status: "OPEN",
+    });
+    expect(other.detail?.handlingStatus).toBe("OPEN");
+    expect(other.items[1].handlingStatus).toBe("OPEN");
   });
 
-  it("タブを切り替えると読み込み中に戻る", () => {
-    const next = operatorReducer(
+  it("詳細の取得に失敗しても、一覧の取得の失敗とは別に扱う", () => {
+    const failed = operatorReducer(
       { ...initialOperatorState, loaded: true },
-      { type: "tabChanged", tab: "DONE" },
+      { type: "detailFailed" },
     );
-    expect(next).toMatchObject({ tab: "DONE", loaded: false });
+    expect(failed).toMatchObject({ detailFailed: true, failed: false });
+    expect(operatorReducer(failed, { type: "closeDetail" }).detailFailed).toBe(
+      false,
+    );
   });
 });

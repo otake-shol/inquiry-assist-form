@@ -244,7 +244,7 @@ describe("オペレータ画面", () => {
     ).toBeInTheDocument();
   });
 
-  it("未読が無いと未読だけでは空の案内が出る", async () => {
+  it("未読が無いと未読だけでは、どの列もカードがなく「ありません」と示す", async () => {
     const user = userEvent.setup();
     installFakeFetch(operatorRoutes([readItem]));
     render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
@@ -252,9 +252,9 @@ describe("オペレータ画面", () => {
 
     await user.click(screen.getByRole("checkbox", { name: "未読だけ" }));
 
-    expect(
-      screen.getByText("未読の問い合わせはありません。"),
-    ).toBeInTheDocument();
+    const board = screen.getByRole("region", { name: "受付一覧" });
+    expect(within(board).queryAllByRole("button")).toHaveLength(0);
+    expect(within(board).getAllByText("ありません")).toHaveLength(3);
   });
 });
 
@@ -320,21 +320,25 @@ describe("オペレータ画面の URL", () => {
       expect(screen.queryByText("元の発話")).not.toBeInTheDocument(),
     );
     expect(
-      screen.getByText("左の一覧から問い合わせを選んでください。"),
-    ).toBeInTheDocument();
+      screen.queryByRole("region", { name: "問い合わせの詳細" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("(b) 詳細の「一覧に戻る」は /operator に戻す", async () => {
+  it("(b) 詳細のパネルの「閉じる」は /operator に戻し、開いていたカードへフォーカスを戻す", async () => {
     window.history.replaceState({}, "", "/operator/op-1");
     const user = userEvent.setup();
     installFakeFetch(operatorRoutes());
     render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
     await screen.findByText("昨日まで見えていた求人が今日は見えません");
 
-    await user.click(screen.getByRole("button", { name: "一覧に戻る" }));
+    await user.click(screen.getByRole("button", { name: "閉じる" }));
 
     expect(window.location.pathname).toBe("/operator");
     expect(screen.queryByText("元の発話")).not.toBeInTheDocument();
+    const card = screen.getByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
+    await waitFor(() => expect(card).toHaveFocus());
   });
 
   it("(c) 存在しない id では一覧を出したうえで見つかりませんでしたと示す", async () => {

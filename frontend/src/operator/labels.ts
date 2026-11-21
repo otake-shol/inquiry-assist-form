@@ -34,10 +34,9 @@ export const OP_TEXT = {
   unreadOnly: "未読だけ",
   listLabel: "受付一覧",
   detailLabel: "問い合わせの詳細",
-  empty: "担当者に送られた問い合わせはまだありません。",
-  emptyUnread: "未読の問い合わせはありません。",
-  noSelection: "左の一覧から問い合わせを選んでください。",
-  back: "一覧に戻る",
+  close: "閉じる",
+  loading: "読み込んでいます…",
+  messageCount: (count: number) => `やり取り ${count}件`,
   arrived: "新しい問い合わせが届きました",
   dismiss: "通知を閉じる",
   unread: "未読",
@@ -66,23 +65,31 @@ export const OP_TEXT = {
   verified: "照合済み",
   unverified: "照合できず",
   loadFailed: "読み込めませんでした。時間をおいて開き直してください。",
-  tabsLabel: "対応状況で絞り込む",
-  tabAll: "すべて",
   statusSwitchLabel: "対応状況を切り替える",
   exchange: "やり取り",
   noMessages: "やり取りはまだありません。",
   replyLabel: "本人に返信する",
   replySubmit: "返信を送る",
+  moveFailed:
+    "対応状況を変えられませんでした。元の列に戻しました。時間をおいてもう一度お試しください。",
   actionFailed:
     "うまく処理できませんでした。時間をおいてもう一度お試しください。",
 } as const;
 
+/** 読み上げ用に、カードを呼ぶときの言い直しの長さの上限。 */
+const MOVED_HEAD_LENGTH = 20;
+
 /**
- * 一覧が空のときの文言。
- * @param onlyUnread 未読だけに絞っているか
+ * 対応状況が変わったことを伝える文。カードは言い直しの先頭で呼ぶ。
+ * @param summary 言い直しの文章
+ * @param status 変わった後の対応状況
  */
-export function emptyText(onlyUnread: boolean): string {
-  return onlyUnread ? OP_TEXT.emptyUnread : OP_TEXT.empty;
+export function movedText(summary: string, status: HandlingStatus): string {
+  const head =
+    summary.length > MOVED_HEAD_LENGTH
+      ? `${summary.slice(0, MOVED_HEAD_LENGTH)}…`
+      : summary;
+  return `「${head}」を${HANDLING_LABELS[status]}に移しました`;
 }
 
 /**

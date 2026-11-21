@@ -192,19 +192,9 @@ export function postMessage(id: string, body: string): Promise<InquiryView> {
   });
 }
 
-/**
- * `GET /api/operator/inquiries`。担当者に送られた問い合わせの一覧。
- * @param status 対応状況での絞り込み（省略または null なら「すべて」）
- */
-export function getOperatorList(
-  status: HandlingStatus | null = null,
-): Promise<OperatorList> {
-  return request<OperatorList>(
-    "GET",
-    status === null
-      ? "/api/operator/inquiries"
-      : `/api/operator/inquiries?status=${status}`,
-  );
+/** `GET /api/operator/inquiries`。担当者に送られた問い合わせの一覧（全件）。 */
+export function getOperatorList(): Promise<OperatorList> {
+  return request<OperatorList>("GET", "/api/operator/inquiries");
 }
 
 /** `GET /api/operator/inquiries/{id}`。問い合わせの全内容。 */

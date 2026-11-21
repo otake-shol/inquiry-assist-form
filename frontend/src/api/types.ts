@@ -198,15 +198,10 @@ export interface OperatorItem {
   messageCount?: number;
 }
 
-/** 対応状況ごとの件数。 */
-export type HandlingCounts = Partial<Record<HandlingStatus, number>>;
-
 /** `GET /api/operator/inquiries` の応答。 */
 export interface OperatorList {
   unreadCount: number;
   items: OperatorItem[];
-  /** 対応状況ごとの件数（絞り込みの影響を受けない）。無い古い応答では欠ける */
-  counts?: HandlingCounts;
 }
 
 /** 本人向けの一覧の1件。 */

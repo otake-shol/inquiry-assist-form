@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Root from "../Root.tsx";
@@ -35,16 +42,36 @@ const done2 = makeItem({
   summary: "完了した件。",
   messageCount: 1,
 });
-const counts = { OPEN: 1, IN_PROGRESS: 0, DONE: 1 };
+
+/**
+ * 列の領域を名前（見出し）で取る。名前は「見出し 件数」の形。
+ * @param title 列の見出し
+ */
+const column = (title: string) =>
+  screen.getByRole("region", { name: new RegExp(`^${title} \\d+件$`) });
+
+/**
+ * 列の中のカード（ボタン）を、言い直しの一部で取る。
+ * @param title 列の見出し
+ * @param text カードに含まれる文字
+ */
+const cardIn = (title: string, text: RegExp) =>
+  within(column(title)).queryByRole("button", { name: text });
+
+/** カードをドラッグして、指定の列に落とす。 */
+function dragTo(card: HTMLElement, title: string) {
+  const item = card.closest("li")!;
+  fireEvent.dragStart(item);
+  fireEvent.dragOver(column(title));
+  fireEvent.drop(column(title));
+  fireEvent.dragEnd(item);
+}
 
 /** 一覧と詳細の API を登録する。 */
 function routes(extra: Parameters<typeof installFakeFetch>[0] = {}) {
   return {
     "GET /api/operator/inquiries": {
-      body: { unreadCount: 0, items: [open1, done2], counts },
-    },
-    "GET /api/operator/inquiries?status=DONE": {
-      body: { unreadCount: 0, items: [done2], counts },
+      body: { unreadCount: 0, items: [open1, done2] },
     },
     "GET /api/operator/inquiries/op-1": {
       body: makeDetail({ read: true, handlingStatus: "OPEN", messages: [] }),
@@ -56,52 +83,67 @@ function routes(extra: Parameters<typeof installFakeFetch>[0] = {}) {
 const callsTo = (calls: RecordedCall[], method: string, path: string) =>
   calls.filter((c) => c.method === method && c.path === path);
 
-describe("担当者の画面: 対応状況のタブ", () => {
-  it("既定は「すべて」で、タブごとの件数を添える。押すと status つきで取得し直す", async () => {
-    const user = userEvent.setup();
-    const calls = installFakeFetch(routes());
+describe("担当者のボード: 列とカード", () => {
+  it("未対応・対応中・完了の3列に件数を添え、カードを対応状況の列に入れる。空の列は「ありません」と示す", async () => {
+    installFakeFetch(routes());
     render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
 
-    const tabs = await screen.findByRole("group", {
-      name: "対応状況で絞り込む",
-    });
-    const labels = within(tabs)
-      .getAllByRole("button")
-      .map((b) => b.textContent);
-    expect(labels).toEqual(["未対応1", "対応中0", "完了1", "すべて2"]);
+    await screen.findByRole("button", { name: /完了した件/ });
+    const board = screen.getByRole("region", { name: "受付一覧" });
     expect(
-      within(tabs).getByRole("button", { name: /すべて/ }),
-    ).toHaveAttribute("aria-pressed", "true");
-    expect(callsTo(calls, "GET", "/api/operator/inquiries")).toHaveLength(1);
-
-    await user.click(within(tabs).getByRole("button", { name: /完了/ }));
-    await waitFor(() =>
-      expect(
-        callsTo(calls, "GET", "/api/operator/inquiries?status=DONE"),
-      ).toHaveLength(1),
-    );
-    expect(within(tabs).getByRole("button", { name: /完了/ })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    const list = screen.getByRole("region", { name: "受付一覧" });
-    await waitFor(() =>
-      expect(
-        within(list).queryByText(/求人が一覧に出なくなった/),
-      ).not.toBeInTheDocument(),
-    );
-    expect(within(list).getByText("完了した件。")).toBeInTheDocument();
+      within(board)
+        .getAllByRole("heading", { level: 3 })
+        .map((h) => h.textContent),
+    ).toEqual(["未対応", "対応中", "完了"]);
+    expect(column("未対応")).toHaveAccessibleName("未対応 1件");
+    expect(column("対応中")).toHaveAccessibleName("対応中 0件");
+    expect(column("完了")).toHaveAccessibleName("完了 1件");
+    expect(cardIn("未対応", /求人が一覧に出なくなった/)).toBeInTheDocument();
+    expect(cardIn("完了", /完了した件/)).toBeInTheDocument();
+    expect(within(column("対応中")).getByText("ありません")).toBeVisible();
+    // 領域の中のボタンはカードだけ
+    expect(within(board).getAllByRole("button")).toHaveLength(2);
   });
 
-  it("各件に対応状況の印が出る。古い応答（印なし）でも一覧は出る", async () => {
+  it("カードに種別・対象システム・今すぐ送る・日時・やり取りの件数を出す", async () => {
     installFakeFetch(
       routes({
         "GET /api/operator/inquiries": {
           body: {
             unreadCount: 0,
             items: [
-              open1,
-              done2,
+              makeItem({
+                id: "op-1",
+                read: true,
+                handlingStatus: "IN_PROGRESS",
+                sentImmediately: true,
+                messageCount: 3,
+              }),
+            ],
+          },
+        },
+      }),
+    );
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+
+    const card = await screen.findByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
+    expect(card).toHaveTextContent("不具合の疑い");
+    expect(card).toHaveTextContent("求人管理画面");
+    expect(card).toHaveTextContent("今すぐ送る");
+    expect(card).toHaveTextContent("やり取り 3件");
+    expect(within(card).getByText(/\d+\/\d+/)).toBeInTheDocument();
+    expect(cardIn("対応中", /求人が一覧に出なくなった/)).toBe(card);
+  });
+
+  it("対応状況の無い古い応答のカードは未対応の列に入る", async () => {
+    installFakeFetch(
+      routes({
+        "GET /api/operator/inquiries": {
+          body: {
+            unreadCount: 0,
+            items: [
               makeItem({ id: "op-3", summary: "古い応答の件。", read: true }),
             ],
           },
@@ -110,20 +152,204 @@ describe("担当者の画面: 対応状況のタブ", () => {
     );
     render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
 
-    const rows = await screen.findAllByRole("button", { name: /。/ });
-    expect(rows[0]).toHaveTextContent("未対応");
-    expect(rows[1]).toHaveTextContent("完了");
-    expect(rows[2]).toHaveTextContent("古い応答の件。");
-    // counts が無い応答ではタブに件数を出さない
-    const tabs = screen.getByRole("group", { name: "対応状況で絞り込む" });
+    await screen.findByRole("button", { name: /古い応答の件/ });
+    expect(cardIn("未対応", /古い応答の件/)).toBeInTheDocument();
+  });
+
+  it("カードを押すとパネルが開いて URL が変わり、パネルの先頭にフォーカスが移る。閉じるとカードに戻る", async () => {
+    const user = userEvent.setup();
+    installFakeFetch(routes());
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+
+    const card = await screen.findByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
     expect(
-      within(tabs).getByRole("button", { name: "未対応" }),
+      screen.queryByRole("region", { name: "問い合わせの詳細" }),
+    ).not.toBeInTheDocument();
+    await user.click(card);
+
+    const panel = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+    expect(window.location.pathname).toBe("/operator/op-1");
+    await waitFor(() => expect(panel).toHaveFocus());
+    // 開いているカードは強調し、ボードは見えたまま
+    expect(card).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("region", { name: "受付一覧" })).toBeVisible();
+
+    await user.click(within(panel).getByRole("button", { name: "閉じる" }));
+    expect(window.location.pathname).toBe("/operator");
+    expect(
+      screen.queryByRole("region", { name: "問い合わせの詳細" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => expect(card).toHaveFocus());
+    expect(card).not.toHaveAttribute("aria-current");
+  });
+
+  it("Enter でカードを開け、Esc でパネルを閉じて URL が戻る", async () => {
+    const user = userEvent.setup();
+    installFakeFetch(routes());
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+
+    const card = await screen.findByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
+    card.focus();
+    await user.keyboard("{Enter}");
+    await screen.findByRole("region", { name: "問い合わせの詳細" });
+    expect(window.location.pathname).toBe("/operator/op-1");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(window.location.pathname).toBe("/operator"));
+    expect(
+      screen.queryByRole("region", { name: "問い合わせの詳細" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("担当者のボード: ドラッグで対応状況を変える", () => {
+  it("別の列に落とすと PUT が呼ばれ、カードが列を移り、読み上げに伝わる", async () => {
+    const calls = installFakeFetch(
+      routes({
+        "PUT /api/operator/inquiries/op-1/status": {
+          body: makeDetail({
+            read: true,
+            handlingStatus: "IN_PROGRESS",
+            messages: [],
+          }),
+        },
+      }),
+    );
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    const card = await screen.findByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
+
+    dragTo(card, "対応中");
+
+    // 画面にはすぐ反映される
+    expect(cardIn("対応中", /求人が一覧に出なくなった/)).toBeInTheDocument();
+    expect(cardIn("未対応", /求人が一覧に出なくなった/)).toBeNull();
+    await waitFor(() =>
+      expect(
+        callsTo(calls, "PUT", "/api/operator/inquiries/op-1/status")[0].body,
+      ).toEqual({ status: "IN_PROGRESS" }),
+    );
+    expect(
+      await screen.findByText(
+        /「求人が一覧に出なくなった.*」を対応中に移しました/,
+      ),
     ).toBeInTheDocument();
+    expect(column("対応中")).toHaveAccessibleName("対応中 1件");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("掴んでいる間は落とせる列を示し、離したら戻る。掴んだ列自身は示さない", async () => {
+    installFakeFetch(routes());
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    const card = await screen.findByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
+    const item = card.closest("li")!;
+    expect(item).toHaveAttribute("draggable", "true");
+
+    fireEvent.dragStart(item);
+    expect(item).toHaveClass("dragging");
+    expect(column("未対応")).not.toHaveClass("droppable");
+    expect(column("対応中")).toHaveClass("droppable");
+    expect(column("完了")).toHaveClass("droppable");
+
+    fireEvent.dragOver(column("完了"));
+    expect(column("完了")).toHaveClass("over");
+    expect(column("対応中")).not.toHaveClass("over");
+
+    fireEvent.dragEnd(item);
+    expect(item).not.toHaveClass("dragging");
+    expect(column("完了")).not.toHaveClass("droppable", "over");
+  });
+
+  it("API が失敗したら元の列に戻し、その旨を伝える", async () => {
+    const calls = installFakeFetch(
+      routes({
+        "PUT /api/operator/inquiries/op-1/status": {
+          status: 500,
+          body: { code: "X", message: "x" },
+        },
+      }),
+    );
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    const card = await screen.findByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
+
+    dragTo(card, "完了");
+    expect(cardIn("完了", /求人が一覧に出なくなった/)).toBeInTheDocument();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "対応状況を変えられませんでした。元の列に戻しました",
+    );
+    expect(cardIn("未対応", /求人が一覧に出なくなった/)).toBeInTheDocument();
+    expect(cardIn("完了", /求人が一覧に出なくなった/)).toBeNull();
+    expect(
+      callsTo(calls, "PUT", "/api/operator/inquiries/op-1/status"),
+    ).toHaveLength(1);
+    expect(screen.queryByText(/に移しました/)).not.toBeInTheDocument();
+  });
+
+  it("同じ列に落としても API を呼ばない", async () => {
+    const calls = installFakeFetch(routes());
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    const card = await screen.findByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
+
+    dragTo(card, "未対応");
+
+    expect(cardIn("未対応", /求人が一覧に出なくなった/)).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("開いているパネルの切り替えも、ドラッグに合わせて変わる", async () => {
+    const user = userEvent.setup();
+    installFakeFetch(
+      routes({
+        "PUT /api/operator/inquiries/op-1/status": {
+          body: makeDetail({
+            read: true,
+            handlingStatus: "DONE",
+            messages: [],
+          }),
+        },
+      }),
+    );
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    const card = await screen.findByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
+    await user.click(card);
+    const panel = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+    const group = await within(panel).findByRole("group", {
+      name: "対応状況を切り替える",
+    });
+
+    dragTo(card, "完了");
+
+    expect(within(group).getByRole("button", { name: "完了" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      within(group).getByRole("button", { name: "未対応" }),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 });
 
 describe("担当者の画面: 状況の切り替えと返信", () => {
-  it("状況の切り替えで PUT が呼ばれ、詳細と一覧の印、件数が変わる", async () => {
+  it("状況の切り替えで PUT が呼ばれ、詳細が変わり、カードが列を移って読み上げにも伝わる", async () => {
     const user = userEvent.setup();
     const calls = installFakeFetch(
       routes({
@@ -161,18 +387,17 @@ describe("担当者の画面: 状況の切り替えと返信", () => {
     expect(
       callsTo(calls, "PUT", "/api/operator/inquiries/op-1/status")[0].body,
     ).toEqual({ status: "DONE" });
-    const row = screen.getByRole("button", {
-      name: /求人が一覧に出なくなった理由/,
-      current: true,
-    });
-    expect(row).toHaveTextContent("完了");
-    const tabs = screen.getByRole("group", { name: "対応状況で絞り込む" });
+    expect(cardIn("完了", /求人が一覧に出なくなった理由/)).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(cardIn("未対応", /求人が一覧に出なくなった理由/)).toBeNull();
+    expect(column("完了")).toHaveAccessibleName("完了 2件");
     expect(
-      within(tabs).getByRole("button", { name: /未対応/ }),
-    ).toHaveTextContent("0");
-    expect(
-      within(tabs).getByRole("button", { name: /完了/ }),
-    ).toHaveTextContent("2");
+      await screen.findByText(
+        /「求人が一覧に出なくなった.*」を完了に移しました/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("本人に返信すると POST が呼ばれ、やり取りに現れる。担当者の返信は右、本人の追記は左", async () => {
@@ -317,33 +542,29 @@ describe("担当者の画面: 状況の切り替えと返信", () => {
   });
 });
 
-describe("担当者の画面: ストリームの updated", () => {
-  it("未読になった件は一覧の先頭に動き、更新された内容（状況・やり取りの数）が反映される", async () => {
+describe("担当者の画面: ストリーム", () => {
+  it("filed で「未対応」の列の先頭にカードが足され、通知が出る", async () => {
     const stream = new FakeOperatorStream();
     installFakeFetch(routes());
     render(<Root subscribeOperator={stream.subscribe} />);
     await screen.findByRole("button", { name: /完了した件/ });
 
     act(() =>
-      stream.latest.handlers.onUpdated({
-        ...done2,
-        read: false,
-        handlingStatus: "IN_PROGRESS",
-        messageCount: 2,
-      }),
+      stream.latest.handlers.onFiled(
+        makeItem({ id: "op-9", summary: "請求書の宛名を変えてほしい。" }),
+      ),
     );
 
-    const list = screen.getByRole("region", { name: "受付一覧" });
-    const rows = within(list).getAllByRole("button", { name: /。/ });
-    expect(rows[0]).toHaveTextContent("完了した件。");
-    expect(rows[0]).toHaveTextContent("対応中");
-    expect(rows[0]).toHaveClass("unread");
-    expect(rows).toHaveLength(2);
-    // 通知のバナーは出さない（新しく届いた件ではない）
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    const cards = within(column("未対応")).getAllByRole("button");
+    expect(cards[0]).toHaveTextContent("請求書の宛名を変えてほしい。");
+    expect(cards).toHaveLength(2);
+    expect(column("未対応")).toHaveAccessibleName("未対応 2件");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "新しい問い合わせが届きました",
+    );
   });
 
-  it("既読のままの更新は位置を変えず、その件だけを書き換える", async () => {
+  it("updated で対応状況が変わったカードは、別の列に移る", async () => {
     const stream = new FakeOperatorStream();
     installFakeFetch(routes());
     render(<Root subscribeOperator={stream.subscribe} />);
@@ -353,33 +574,64 @@ describe("担当者の画面: ストリームの updated", () => {
       stream.latest.handlers.onUpdated({ ...done2, handlingStatus: "OPEN" }),
     );
 
-    const rows = within(
-      screen.getByRole("region", { name: "受付一覧" }),
-    ).getAllByRole("button", { name: /。/ });
-    expect(rows[1]).toHaveTextContent("完了した件。");
-    expect(rows[1]).toHaveTextContent("未対応");
+    expect(cardIn("未対応", /完了した件/)).toBeInTheDocument();
+    expect(cardIn("完了", /完了した件/)).toBeNull();
+    expect(column("完了")).toHaveAccessibleName("完了 0件");
+    // 通知のバナーは出さない（新しく届いた件ではない）
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("絞り込み中のタブから外れた件は一覧から消える", async () => {
-    const user = userEvent.setup();
+  it("updated で未読に戻った件は、列の上に寄る", async () => {
     const stream = new FakeOperatorStream();
-    installFakeFetch(routes());
+    installFakeFetch(
+      routes({
+        "GET /api/operator/inquiries": {
+          body: {
+            unreadCount: 0,
+            items: [
+              makeItem({
+                id: "op-5",
+                read: true,
+                summary: "新しい既読の件。",
+                filedAt: "2026-11-21T09:00:00Z",
+                handlingStatus: "OPEN",
+              }),
+              makeItem({
+                id: "op-6",
+                read: true,
+                summary: "古い既読の件。",
+                filedAt: "2026-11-20T09:00:00Z",
+                handlingStatus: "OPEN",
+              }),
+            ],
+          },
+        },
+      }),
+    );
     render(<Root subscribeOperator={stream.subscribe} />);
-    await user.click(await screen.findByRole("button", { name: /完了/ }));
-    await screen.findByRole("button", { name: /完了した件/ });
+    await screen.findByRole("button", { name: /古い既読の件/ });
+    expect(
+      within(column("未対応")).getAllByRole("button")[0],
+    ).toHaveTextContent("新しい既読の件。");
 
     act(() =>
       stream.latest.handlers.onUpdated({
-        ...done2,
-        handlingStatus: "IN_PROGRESS",
+        ...makeItem({
+          id: "op-6",
+          summary: "古い既読の件。",
+          filedAt: "2026-11-20T09:00:00Z",
+          handlingStatus: "OPEN",
+        }),
+        read: false,
+        messageCount: 2,
       }),
     );
 
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("button", { name: /完了した件/ }),
-      ).not.toBeInTheDocument(),
-    );
+    const cards = within(column("未対応")).getAllByRole("button");
+    expect(cards[0]).toHaveTextContent("古い既読の件。");
+    expect(cards[0]).toHaveClass("unread");
+    expect(cards[0]).toHaveTextContent("やり取り 2件");
+    await waitFor(() => expect(document.title).toBe("(1) 問い合わせ受付"));
   });
 
   it("開いている件が更新されたら、詳細を取り直してやり取りに反映する（未読に戻った件は既読にして受け取る）", async () => {
