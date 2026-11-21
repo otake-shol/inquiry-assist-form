@@ -90,7 +90,7 @@ describe("オペレータ画面", () => {
     expect(rows[1]).toHaveTextContent("システム未定");
     expect(rows[1]).toHaveTextContent("今すぐ送る");
     expect(screen.getByLabelText("未読 1件")).toBeInTheDocument();
-    expect(document.title).toBe("(1) 問い合わせ受付");
+    await waitFor(() => expect(document.title).toBe("(1) 問い合わせ受付"));
   });
 
   it("(f) 未読の1件を開くと詳細が出て read が呼ばれ、未読数が減る。既読の1件は取得だけ", async () => {
@@ -128,7 +128,7 @@ describe("オペレータ画面", () => {
     expect(within(detail).getByText("Slack に投稿済み")).toBeInTheDocument();
     // 未読数が減る
     expect(screen.queryByLabelText(/^未読 \d+件$/)).not.toBeInTheDocument();
-    expect(document.title).toBe("問い合わせ受付");
+    await waitFor(() => expect(document.title).toBe("問い合わせ受付"));
 
     await user.click(
       screen.getByRole("button", { name: /掲載期限の延長日数を知りたい/ }),
@@ -164,7 +164,8 @@ describe("オペレータ画面", () => {
     });
     render(<Root subscribeOperator={stream.subscribe} />);
     await screen.findByRole("button", { name: /求人が一覧に出なくなった/ });
-    expect(document.title).toBe("(1) 問い合わせ受付");
+    // タイトルは描画の後の副作用で変わる。一覧が見えた直後に読むと、遅い環境では間に合わないことがある
+    await waitFor(() => expect(document.title).toBe("(1) 問い合わせ受付"));
 
     act(() => stream.latest.handlers.onFiled(fresh));
 
@@ -176,7 +177,7 @@ describe("オペレータ画面", () => {
     const banner = screen.getByRole("status");
     expect(banner).toHaveTextContent("新しい問い合わせが届きました");
     expect(banner).toHaveTextContent("請求書の宛名を変えてほしい。");
-    expect(document.title).toBe("(2) 問い合わせ受付");
+    await waitFor(() => expect(document.title).toBe("(2) 問い合わせ受付"));
 
     await user.click(
       within(banner).getByRole("button", {
@@ -186,7 +187,7 @@ describe("オペレータ画面", () => {
     expect(await screen.findByText("宛名を変えたい")).toBeInTheDocument();
     expect(count(calls, "POST", "/api/operator/inquiries/op-9/read")).toBe(1);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(document.title).toBe("(1) 問い合わせ受付");
+    await waitFor(() => expect(document.title).toBe("(1) 問い合わせ受付"));
   });
 
   it("切断から再接続できたら一覧を取り直す", async () => {
