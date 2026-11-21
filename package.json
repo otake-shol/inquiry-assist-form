@@ -1,0 +1,14 @@
+{
+  "name": "inquiry-assist-form",
+  "private": true,
+  "version": "0.0.0",
+  "description": "AI補助つき問い合わせフォーム",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "verify": "npm run verify:backend && npm run verify:frontend",
+    "verify:backend": "cd backend && ./gradlew check --console=plain",
+    "verify:frontend": "npm --prefix frontend run verify"
+  }
+}
