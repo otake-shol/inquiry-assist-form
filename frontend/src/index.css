@@ -438,9 +438,50 @@ blockquote {
   background: var(--card);
   border: 1px dashed var(--warn-line);
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 6px 14px;
   margin-bottom: 24px;
   font-size: 0.85rem;
+}
+
+.mock-bar details {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+}
+
+.mock-bar summary {
+  padding: 0;
+  font-weight: 400;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  list-style: none;
+}
+
+.mock-bar summary::-webkit-details-marker {
+  display: none;
+}
+
+.mock-bar summary::after {
+  content: "開く";
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.mock-bar details[open] summary::after {
+  content: "閉じる";
+}
+
+.mock-help {
+  margin: 6px 0 0;
+}
+
+.mock-bar details[open] {
+  padding-bottom: 6px;
 }
 
 .badge {

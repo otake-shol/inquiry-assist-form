@@ -1,0 +1,316 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "問い合わせアシストの業務フロー",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "本人の操作"
+        },
+        "backend": {
+          "label": "AIのスキル"
+        },
+        "messagebus": {
+          "label": "通常のコード"
+        },
+        "database": {
+          "label": "知識源"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "make-question",
+        "label": "問いを作る",
+        "focus": [
+          "write",
+          "reception",
+          "interviewer",
+          "answer",
+          "restater",
+          "confirm"
+        ],
+        "note": "悩みの発話を、本人が「合っています」と言える問いに直すまで。"
+      },
+      {
+        "id": "investigate",
+        "label": "調べて答える",
+        "focus": [
+          "confirm",
+          "investigator",
+          "knowledge",
+          "verifier",
+          "explainer",
+          "resolve"
+        ],
+        "note": "根拠を集め、実在を確かめ、確かめた事実だけから答えを書く。"
+      },
+      {
+        "id": "handoff",
+        "label": "人に渡す",
+        "focus": [
+          "confirm",
+          "explainer",
+          "resolve",
+          "filing"
+        ],
+        "note": "担当者に届く3つの経路。どの経路でも問いと調査内容を添える。"
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "asker",
+      "label": "本人"
+    },
+    {
+      "id": "ai",
+      "label": "AIのスキル"
+    },
+    {
+      "id": "code",
+      "label": "通常のコード"
+    },
+    {
+      "id": "sources",
+      "label": "知識源"
+    }
+  ],
+  "phases": [
+    {
+      "id": "shape",
+      "label": "問いを作る",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "answer-phase",
+      "label": "調べて答える",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "handoff-phase",
+      "label": "人に渡す",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "write",
+    "reception",
+    "interviewer",
+    "answer",
+    "restater",
+    "confirm",
+    "investigator",
+    "verifier",
+    "explainer",
+    "resolve",
+    "filing"
+  ],
+  "nodes": [
+    {
+      "id": "write",
+      "lane": "asker",
+      "col": 0,
+      "type": "frontend",
+      "label": "悩みを書く",
+      "sublabel": "まとまっていなくてよい",
+      "width": 148
+    },
+    {
+      "id": "answer",
+      "lane": "asker",
+      "col": 1,
+      "type": "frontend",
+      "label": "質問に答える",
+      "sublabel": "「わからない」も選べる",
+      "width": 148
+    },
+    {
+      "id": "confirm",
+      "lane": "asker",
+      "col": 2,
+      "type": "frontend",
+      "label": "言い直しを確かめる",
+      "sublabel": "自分で書き直してもよい",
+      "width": 148
+    },
+    {
+      "id": "resolve",
+      "lane": "asker",
+      "col": 4,
+      "type": "frontend",
+      "label": "解決したかを選ぶ",
+      "sublabel": "解決なら記録して終わり",
+      "width": 148
+    },
+    {
+      "id": "reception",
+      "lane": "ai",
+      "col": 0,
+      "type": "backend",
+      "label": "受付",
+      "sublabel": "種別を判定する",
+      "tag": "スキル1",
+      "width": 148
+    },
+    {
+      "id": "interviewer",
+      "lane": "ai",
+      "col": 1,
+      "type": "backend",
+      "label": "聞き手",
+      "sublabel": "足りない情報を質問にする",
+      "tag": "スキル2",
+      "width": 148
+    },
+    {
+      "id": "restater",
+      "lane": "ai",
+      "col": 2,
+      "type": "backend",
+      "label": "言い直し",
+      "sublabel": "問いを文章と構造にする",
+      "tag": "スキル3",
+      "width": 148
+    },
+    {
+      "id": "investigator",
+      "lane": "ai",
+      "col": 3,
+      "type": "backend",
+      "label": "調査",
+      "sublabel": "根拠つきの事実を集める",
+      "tag": "スキル4",
+      "width": 148
+    },
+    {
+      "id": "explainer",
+      "lane": "ai",
+      "col": 4,
+      "type": "backend",
+      "label": "説明",
+      "sublabel": "業務の言葉で答えを書く",
+      "tag": "スキル5",
+      "width": 148
+    },
+    {
+      "id": "verifier",
+      "lane": "code",
+      "col": 3,
+      "type": "messagebus",
+      "label": "照合",
+      "sublabel": "根拠の実在を確かめる",
+      "width": 148
+    },
+    {
+      "id": "filing",
+      "lane": "code",
+      "col": 5,
+      "type": "messagebus",
+      "label": "担当者に送る",
+      "sublabel": "問いと調査内容を添える",
+      "width": 148
+    },
+    {
+      "id": "knowledge",
+      "lane": "sources",
+      "col": 2,
+      "type": "database",
+      "label": "コード・FAQ・用語",
+      "sublabel": "読み取り専用の検索",
+      "width": 148
+    }
+  ],
+  "edges": [
+    {
+      "id": "write-reception",
+      "from": "write",
+      "to": "reception",
+      "variant": "emphasis"
+    },
+    {
+      "id": "reception-interviewer",
+      "from": "reception",
+      "to": "interviewer",
+      "label": "仕様の確認・不具合",
+      "variant": "emphasis"
+    },
+    {
+      "id": "interviewer-answer",
+      "from": "interviewer",
+      "to": "answer",
+      "variant": "emphasis"
+    },
+    {
+      "id": "answer-restater",
+      "from": "answer",
+      "to": "restater",
+      "variant": "emphasis"
+    },
+    {
+      "id": "restater-confirm",
+      "from": "restater",
+      "to": "confirm",
+      "variant": "emphasis"
+    },
+    {
+      "id": "confirm-investigator",
+      "from": "confirm",
+      "to": "investigator",
+      "label": "合っている",
+      "variant": "emphasis"
+    },
+    {
+      "id": "investigator-verifier",
+      "from": "investigator",
+      "to": "verifier",
+      "variant": "emphasis",
+      "route": "drop",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "verifier-explainer",
+      "from": "verifier",
+      "to": "explainer",
+      "label": "確かめた根拠だけ",
+      "variant": "emphasis"
+    },
+    {
+      "id": "explainer-resolve",
+      "from": "explainer",
+      "to": "resolve",
+      "variant": "emphasis"
+    },
+    {
+      "id": "resolve-filing",
+      "from": "resolve",
+      "to": "filing",
+      "label": "未解決",
+      "variant": "default"
+    },
+    {
+      "id": "knowledge-investigator",
+      "from": "knowledge",
+      "to": "investigator",
+      "label": "検索して読む",
+      "variant": "dashed"
+    },
+    {
+      "id": "explainer-filing",
+      "from": "explainer",
+      "to": "filing",
+      "label": "不具合は必ず送る",
+      "variant": "default",
+      "role": "branch"
+    }
+  ]
+}

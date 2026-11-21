@@ -14,6 +14,7 @@ interface MockBarProps {
 
 /**
  * 「モック」バッジと、シナリオを試せる例文ボタン。
+ * 開発者向けの表示なので、例文は折りたたんでおき、本来の画面を押し下げない。
  * @param props 例文選択の受け口
  */
 export function MockBar({ onPick, canPick }: MockBarProps) {
@@ -36,12 +37,17 @@ export function MockBar({ onPick, canPick }: MockBarProps) {
 
   return (
     <section className="mock-bar" aria-label="モックのシナリオ">
-      <span className="badge">モック</span>
-      <span className="mock-note">
-        例文を押すと入力欄に入ります（入力画面で使えます）
-      </span>
-      {renderGroup("状況の例", CATEGORY_EXAMPLE_LIST)}
-      {renderGroup("動きの例", TAG_EXAMPLE_LIST)}
+      <details>
+        <summary>
+          <span className="badge">モック</span>
+          <span className="mock-note">例文を試す</span>
+        </summary>
+        <p className="mock-note mock-help">
+          例文を押すと入力欄に入ります（入力画面で使えます）
+        </p>
+        {renderGroup("状況の例", CATEGORY_EXAMPLE_LIST)}
+        {renderGroup("動きの例", TAG_EXAMPLE_LIST)}
+      </details>
     </section>
   );
 }

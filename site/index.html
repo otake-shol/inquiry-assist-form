@@ -1,0 +1,785 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>問い合わせアシスト｜業務フローとスキル設計</title>
+    <meta
+      name="description"
+      content="悩みの発話を答えられる問いに直し、根拠を確かめて答える問い合わせフォームの業務フローと、AIに任せる5つのスキルの設計。"
+    />
+    <style>
+      :root {
+        --bg: #f5f4ef;
+        --card: #fffefa;
+        --ink: #1c2530;
+        --muted: #5b6676;
+        --line: #d9d6cc;
+        --ai: #1d4f91;
+        --ai-bg: #e8effa;
+        --human: #8a5a12;
+        --human-bg: #fbf1dc;
+        --code: #3d4756;
+        --code-bg: #eeeeea;
+        --branch: #6b7482;
+        --radius: 14px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14181d;
+          --card: #1c2229;
+          --ink: #e9edf2;
+          --muted: #a3adba;
+          --line: #343c47;
+          --ai: #8fb8f2;
+          --ai-bg: #1b2a40;
+          --human: #e6bd6f;
+          --human-bg: #33291a;
+          --code: #c3cad4;
+          --code-bg: #262d36;
+          --branch: #98a2b0;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family:
+          "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic",
+          system-ui, sans-serif;
+        font-size: 16px;
+        line-height: 1.8;
+      }
+      h1,
+      h2,
+      h3 {
+        font-feature-settings: "palt";
+      }
+      main {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 56px 24px 96px;
+      }
+      header p.eyebrow {
+        margin: 0 0 8px;
+        color: var(--muted);
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+      }
+      h1 {
+        margin: 0 0 16px;
+        font-size: clamp(1.6rem, 4.2vw, 2.3rem);
+        line-height: 1.35;
+        letter-spacing: 0.01em;
+      }
+      .lead {
+        margin: 0;
+        max-width: 44em;
+        font-size: 1.05rem;
+      }
+      h2 {
+        margin: 72px 0 12px;
+        font-size: 1.35rem;
+        line-height: 1.4;
+      }
+      h2 + p {
+        margin-top: 0;
+        color: var(--muted);
+        max-width: 46em;
+      }
+
+      /* 凡例 */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        margin: 32px 0 0;
+        padding: 0;
+        list-style: none;
+        font-size: 0.9rem;
+      }
+      .legend li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .swatch {
+        width: 18px;
+        height: 18px;
+        border-radius: 5px;
+        border: 2px solid;
+      }
+      .swatch.human {
+        background: var(--human-bg);
+        border-color: var(--human);
+      }
+      .swatch.ai {
+        background: var(--ai-bg);
+        border-color: var(--ai);
+      }
+      .swatch.code {
+        background: var(--code-bg);
+        border-color: var(--code);
+      }
+
+      /* フロー */
+      .lanes {
+        display: grid;
+        grid-template-columns: 1fr 64px 1fr;
+        margin: 40px 0 8px;
+        color: var(--muted);
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+      .lanes span:first-child {
+        text-align: right;
+        padding-right: 4px;
+      }
+      .lanes span:last-child {
+        grid-column: 3;
+        padding-left: 4px;
+      }
+      .flow {
+        position: relative;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+      }
+      .flow::before {
+        content: "";
+        position: absolute;
+        top: 20px;
+        bottom: 20px;
+        left: 50%;
+        width: 2px;
+        margin-left: -1px;
+        background: var(--line);
+      }
+      .flow > li {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr 64px 1fr;
+        align-items: start;
+        margin-bottom: 20px;
+      }
+      .step {
+        counter-increment: step;
+      }
+      .step::before {
+        content: counter(step);
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: center;
+        width: 36px;
+        height: 36px;
+        margin-top: 10px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 0.9rem;
+        font-weight: 700;
+        background: var(--bg);
+        border: 2px solid var(--line);
+        color: var(--muted);
+        z-index: 1;
+      }
+      .card {
+        grid-row: 1;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 16px 20px 18px;
+      }
+      .human .card {
+        grid-column: 1;
+        background: var(--human-bg);
+        border-color: var(--human);
+      }
+      .human::before {
+        border-color: var(--human);
+        color: var(--human);
+      }
+      .ai .card {
+        grid-column: 3;
+        background: var(--ai-bg);
+        border: 2px solid var(--ai);
+      }
+      .ai::before {
+        border-color: var(--ai);
+        background: var(--ai);
+        color: var(--bg);
+      }
+      .code .card {
+        grid-column: 3;
+        background: var(--code-bg);
+        border-color: var(--code);
+      }
+      .code::before {
+        border-color: var(--code);
+        color: var(--code);
+      }
+      .kind {
+        display: block;
+        margin-bottom: 2px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+      .human .kind {
+        color: var(--human);
+      }
+      .ai .kind {
+        color: var(--ai);
+      }
+      .code .kind {
+        color: var(--code);
+      }
+      .card h3 {
+        margin: 0 0 4px;
+        font-size: 1.2rem;
+        line-height: 1.4;
+      }
+      .card p {
+        margin: 0;
+      }
+      .spec {
+        margin: 12px 0 0;
+        padding: 12px 0 0;
+        border-top: 1px solid color-mix(in srgb, var(--ai) 30%, transparent);
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 14px;
+        font-size: 0.9rem;
+        line-height: 1.65;
+      }
+      .spec dt {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .spec dd {
+        margin: 0;
+      }
+
+      /* 分岐の注記 */
+      .branch .note {
+        grid-row: 1;
+        border: 1.5px dashed var(--branch);
+        border-radius: 12px;
+        padding: 10px 16px;
+        font-size: 0.92rem;
+        line-height: 1.7;
+        color: var(--ink);
+      }
+      .branch.left .note {
+        grid-column: 1;
+      }
+      .branch.right .note {
+        grid-column: 3;
+      }
+      .branch .note strong {
+        display: block;
+        color: var(--branch);
+        font-size: 0.8rem;
+        letter-spacing: 0.06em;
+      }
+      .branch::before {
+        content: "";
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: center;
+        width: 10px;
+        height: 10px;
+        margin-top: 18px;
+        border-radius: 50%;
+        background: var(--branch);
+        z-index: 1;
+      }
+      .always {
+        margin: 28px 0 0;
+        padding: 16px 20px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--card);
+      }
+      .always strong {
+        font-weight: 700;
+      }
+
+      /* 表 */
+      .table-wrap {
+        overflow-x: auto;
+        margin-top: 20px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--card);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+      th,
+      td {
+        padding: 12px 16px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      tr:last-child th,
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      thead th {
+        font-size: 0.82rem;
+        color: var(--muted);
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+      tbody th {
+        white-space: nowrap;
+      }
+      .yes {
+        color: var(--ai);
+        font-weight: 700;
+      }
+      .no {
+        color: var(--muted);
+      }
+
+      /* 決まり */
+      .rules {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+        margin: 20px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .rules li {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 16px 20px;
+      }
+      .rules strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 1.02rem;
+      }
+      .rules span {
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      footer {
+        margin-top: 72px;
+        padding-top: 24px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      a {
+        color: var(--ai);
+        text-underline-offset: 3px;
+      }
+
+      /* スマホ: 1列にして線を左へ寄せる */
+      @media (max-width: 760px) {
+        main {
+          padding: 36px 16px 72px;
+        }
+        .lanes {
+          display: none;
+        }
+        .flow::before {
+          left: 18px;
+        }
+        .flow > li {
+          grid-template-columns: 36px 1fr;
+          column-gap: 12px;
+        }
+        .step::before,
+        .branch::before {
+          grid-column: 1;
+        }
+        .human .card,
+        .ai .card,
+        .code .card,
+        .branch.left .note,
+        .branch.right .note {
+          grid-column: 2;
+        }
+        .spec {
+          grid-template-columns: 1fr;
+          gap: 0;
+        }
+        .spec dt {
+          margin-top: 8px;
+        }
+      }
+      @media print {
+        body {
+          background: #fff;
+        }
+        .flow > li {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">問い合わせアシスト</p>
+        <h1>業務フローとスキル設計</h1>
+        <p class="lead">
+          人が持ってくるのは問いではなく状況です。その状況を答えられる問いに直し、根拠を確かめて答えるまでの流れと、AIに任せる5つのスキルをまとめます。
+        </p>
+        <ul class="legend" aria-label="凡例">
+          <li><span class="swatch human"></span>本人の操作</li>
+          <li><span class="swatch ai"></span>AIのスキル</li>
+          <li><span class="swatch code"></span>通常のコード</li>
+        </ul>
+      </header>
+
+      <section aria-labelledby="flow-title">
+        <h2 id="flow-title">業務フロー</h2>
+        <p>
+          左が本人、右がシステムです。上から下へ、会話のように交互に進みます。点線の枠は途中で分かれる経路です。
+        </p>
+
+        <div class="lanes" aria-hidden="true">
+          <span>本人</span>
+          <span>システム</span>
+        </div>
+
+        <ol class="flow">
+          <li class="step human">
+            <div class="card">
+              <span class="kind">本人の操作</span>
+              <h3>悩みをそのまま書く</h3>
+              <p>まとまっていなくて構いません。分類も件名も求めません。</p>
+            </div>
+          </li>
+
+          <li class="step ai">
+            <div class="card">
+              <span class="kind">AIのスキル 1</span>
+              <h3>受付</h3>
+              <p>書かれた内容から、問い合わせの種別を判定します。</p>
+              <dl class="spec">
+                <dt>入力</dt>
+                <dd>元の発話</dd>
+                <dt>出力</dt>
+                <dd>種別（仕様の確認・相談／不具合かもしれない件／作業の依頼／障害）</dd>
+                <dt>道具</dt>
+                <dd>なし</dd>
+                <dt>モデル</dt>
+                <dd>小さいモデル</dd>
+              </dl>
+            </div>
+          </li>
+
+          <li class="branch right">
+            <div class="note">
+              <strong>障害のとき</strong>
+              「いま業務やサービスが止まっていますか」と1問だけ聞き、専用の窓口を案内して終わります。このフォームでは受け付けません。
+            </div>
+          </li>
+
+          <li class="step ai">
+            <div class="card">
+              <span class="kind">AIのスキル 2</span>
+              <h3>聞き手</h3>
+              <p>答えるのに足りない情報を、エンジニアでなくても答えられる質問にします。</p>
+              <dl class="spec">
+                <dt>入力</dt>
+                <dd>元の発話、種別</dd>
+                <dt>出力</dt>
+                <dd>選択肢つきの質問（最大3個）</dd>
+                <dt>道具</dt>
+                <dd>用語対応表とFAQの軽い検索</dd>
+                <dt>モデル</dt>
+                <dd>中程度のモデル</dd>
+              </dl>
+            </div>
+          </li>
+
+          <li class="branch right">
+            <div class="note">
+              <strong>作業の依頼のとき</strong>
+              聞き手を呼ばず、決まった3問（何を、いつまでに、対象は何か）を聞きます。
+            </div>
+          </li>
+
+          <li class="step human">
+            <div class="card">
+              <span class="kind">本人の操作</span>
+              <h3>質問に答える</h3>
+              <p>1問ずつ、選択肢を押すだけです。「わからない」も選べます。</p>
+            </div>
+          </li>
+
+          <li class="step ai">
+            <div class="card">
+              <span class="kind">AIのスキル 3</span>
+              <h3>言い直し</h3>
+              <p>「つまり、こういうことですね」と、問いを文章で言い直します。</p>
+              <dl class="spec">
+                <dt>入力</dt>
+                <dd>元の発話、種別、質問への回答</dd>
+                <dt>出力</dt>
+                <dd>言い直しの文章、保存と引き継ぎに使う構造化データ</dd>
+                <dt>道具</dt>
+                <dd>用語対応表</dd>
+                <dt>モデル</dt>
+                <dd>上位のモデル（体験の要のため）</dd>
+              </dl>
+            </div>
+          </li>
+
+          <li class="step human">
+            <div class="card">
+              <span class="kind">本人の操作</span>
+              <h3>言い直しを確かめる</h3>
+              <p>「合っています」か「少し違います」を選びます。</p>
+            </div>
+          </li>
+
+          <li class="branch left">
+            <div class="note">
+              <strong>少し違うとき</strong>
+              違う点を一言伝えると、スキル3が言い直しを作り直します（2回まで）。自分で書き直すこともできます。
+            </div>
+          </li>
+
+          <li class="branch left">
+            <div class="note">
+              <strong>作業の依頼のとき</strong>
+              調べずに、そのまま担当者へ送ります（11へ）。
+            </div>
+          </li>
+
+          <li class="step ai">
+            <div class="card">
+              <span class="kind">AIのスキル 4</span>
+              <h3>調査</h3>
+              <p>コード、FAQ、用語対応表を調べ、根拠つきの事実をまとめます。</p>
+              <dl class="spec">
+                <dt>入力</dt>
+                <dd>確定した言い直しと構造化データ</dd>
+                <dt>出力</dt>
+                <dd>分かったこと、調べたが見つからなかったこと、次に確認すること、根拠の一覧</dd>
+                <dt>道具</dt>
+                <dd>読み取り専用の検索とファイル読み取り（繰り返し使う）</dd>
+                <dt>モデル</dt>
+                <dd>最上位のモデル</dd>
+              </dl>
+            </div>
+          </li>
+
+          <li class="step code">
+            <div class="card">
+              <span class="kind">通常のコード</span>
+              <h3>照合</h3>
+              <p>
+                調査が挙げた根拠が実在するかを、機械的に確かめます。確かめられた根拠が1つもなければ、「わからない」と答えます。
+              </p>
+            </div>
+          </li>
+
+          <li class="step ai">
+            <div class="card">
+              <span class="kind">AIのスキル 5</span>
+              <h3>説明</h3>
+              <p>確かめられた事実だけから、本人向けの説明を業務の言葉で書きます。</p>
+              <dl class="spec">
+                <dt>入力</dt>
+                <dd>確定した言い直し、確かめられた事実と根拠</dd>
+                <dt>出力</dt>
+                <dd>本人向けの説明</dd>
+                <dt>道具</dt>
+                <dd>用語対応表</dd>
+                <dt>モデル</dt>
+                <dd>中程度のモデル</dd>
+              </dl>
+            </div>
+          </li>
+
+          <li class="branch right">
+            <div class="note">
+              <strong>不具合かもしれない件のとき</strong>
+              結果を本人に見せたうえで、調べた内容を添えて必ず担当者へ送ります（11へ）。
+            </div>
+          </li>
+
+          <li class="step human">
+            <div class="card">
+              <span class="kind">本人の操作</span>
+              <h3>解決したかを選ぶ</h3>
+              <p>解決したら、記録して終わりです。まだなら担当者へ送ります。</p>
+            </div>
+          </li>
+
+          <li class="step code">
+            <div class="card">
+              <span class="kind">通常のコード</span>
+              <h3>担当者に送る</h3>
+              <p>
+                言い直した問いと調査の内容を添えて送ります。担当者は調査済みの状態から始められ、本人は同じ説明を繰り返さずに済みます。
+              </p>
+            </div>
+          </li>
+        </ol>
+
+        <p class="always">
+          <strong>どの段階からでも「今すぐ担当者に送る」を使えます。</strong>
+          AIは使えば早く答えが出る近道であり、人にたどり着く前の関門ではありません。
+        </p>
+      </section>
+
+      <section aria-labelledby="route-title">
+        <h2 id="route-title">種別ごとに使うスキル</h2>
+        <p>費用と待ち時間がかかる調査は、答えが役に立つ種別でだけ呼びます。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">種別</th>
+                <th scope="col">受付</th>
+                <th scope="col">聞き手</th>
+                <th scope="col">言い直し</th>
+                <th scope="col">調査・照合・説明</th>
+                <th scope="col">終わり方</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">仕様の確認・相談</th>
+                <td class="yes">使う</td>
+                <td class="yes">使う</td>
+                <td class="yes">使う</td>
+                <td class="yes">使う</td>
+                <td>本人が解決したかを選ぶ</td>
+              </tr>
+              <tr>
+                <th scope="row">不具合かもしれない件</th>
+                <td class="yes">使う</td>
+                <td class="yes">使う</td>
+                <td class="yes">使う</td>
+                <td class="yes">使う</td>
+                <td>調べた内容を添えて必ず担当者へ送る</td>
+              </tr>
+              <tr>
+                <th scope="row">作業の依頼</th>
+                <td class="yes">使う</td>
+                <td class="no">使わない（決まった3問）</td>
+                <td class="yes">使う</td>
+                <td class="no">使わない</td>
+                <td>必ず担当者へ送る</td>
+              </tr>
+              <tr>
+                <th scope="row">障害</th>
+                <td class="yes">使う</td>
+                <td class="no">使わない（決まった1問）</td>
+                <td class="no">使わない</td>
+                <td class="no">使わない</td>
+                <td>専用の窓口を案内する</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section aria-labelledby="quality-title">
+        <h2 id="quality-title">スキルごとの品質の基準</h2>
+        <p>
+          スキルは、品質の基準、使える道具、失敗のしかたのどれかが違う単位で分けます。基準が違えば、評価も改善も別々に行えます。
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">スキル</th>
+                <th scope="col">品質の基準</th>
+                <th scope="col">失敗したとき</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">1 受付</th>
+                <td>種別の正答率。障害を見逃さないこと</td>
+                <td>本人が種別を変更できる。迷ったら人に送る側へ倒す</td>
+              </tr>
+              <tr>
+                <th scope="row">2 聞き手</th>
+                <td>本人が答えられるか。答えが調査の役に立つか</td>
+                <td>「わからない」で先へ進める</td>
+              </tr>
+              <tr>
+                <th scope="row">3 言い直し</th>
+                <td>本人が1回で「合っています」を選ぶ割合</td>
+                <td>一言で作り直すか、本人が書き直す</td>
+              </tr>
+              <tr>
+                <th scope="row">4 調査</th>
+                <td>事実の正しさ。根拠が照合を通る割合</td>
+                <td>照合で根拠を捨て、残らなければ「わからない」と答える</td>
+              </tr>
+              <tr>
+                <th scope="row">5 説明</th>
+                <td>エンジニアでない人が読めるか。事実を足していないか</td>
+                <td>根拠と詳しい内容を折りたたんで添え、確かめられるようにする</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section aria-labelledby="rules-title">
+        <h2 id="rules-title">設計の決まり</h2>
+        <ul class="rules">
+          <li>
+            <strong>順序はコードが決める</strong>
+            <span>スキル同士が自律的に相談し合う構成にしません。次に何が起きるかが決まっているほうが、待ち時間も費用も読めます。</span>
+          </li>
+          <li>
+            <strong>確かめられることはAIに任せない</strong>
+            <span>根拠の照合、閲覧権限の適用、回数の上限は通常のコードが担います。</span>
+          </li>
+          <li>
+            <strong>道具は必要なスキルにだけ渡す</strong>
+            <span>コードを検索できるのは調査だけです。繰り返し処理を持つのも調査だけです。</span>
+          </li>
+          <li>
+            <strong>調査と説明を分ける</strong>
+            <span>説明を照合の後に書くことで、実在を確かめた根拠だけに基づく答えになります。</span>
+          </li>
+          <li>
+            <strong>分けすぎない</strong>
+            <span>基準も道具も変わらない分割はしません。呼び出しが増えるほど待ち時間が増え、受け渡しで情報が落ちます。</span>
+          </li>
+          <li>
+            <strong>スキルごとに記録する</strong>
+            <span>使ったモデル、プロンプトの版、トークン数を残し、スキル単位で費用と品質を追います。</span>
+          </li>
+        </ul>
+      </section>
+
+      <footer>
+        <p>
+          同じ流れを、拡大や経路の強調をしながら確かめられる<a href="explore.html">操作できる図</a>も用意しています（操作部分の表示は英語です）。
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

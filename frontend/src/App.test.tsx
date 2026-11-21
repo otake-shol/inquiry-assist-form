@@ -926,7 +926,12 @@ describe("入力とモック表示", () => {
     installFakeFetch({ "GET /api/config": { body: { mock: true } } });
     render(<App subscribe={new FakeStream().subscribe} />);
 
-    expect(await screen.findByText("モック")).toBeInTheDocument();
+    const badge = await screen.findByText("モック");
+    const details = badge.closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    await user.click(screen.getByText("例文を試す"));
+    expect(details).toHaveAttribute("open");
     await user.click(screen.getByRole("button", { name: "[根拠なし]" }));
     expect(screen.getByLabelText(INPUT_LABEL)).toHaveValue(
       "求人の掲載期限は、何日まで延長できますか？ [根拠なし]",
