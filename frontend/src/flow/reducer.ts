@@ -19,6 +19,8 @@ export interface FlowError extends ErrorBody {
 /** 画面全体の状態。 */
 export interface FlowState {
   mock: boolean;
+  /** スキルごとの実装（GET /api/config。無ければ null） */
+  skills: Record<string, string> | null;
   /** 担当者に送った後の案内文（GET /api/config） */
   filedGuidance: string | null;
   /** 対象システムの選択肢（GET /api/config） */
@@ -45,6 +47,7 @@ export type FlowAction =
   | {
       type: "configLoaded";
       mock: boolean;
+      skills: Record<string, string> | null;
       filedGuidance: string | null;
       systems: SystemOption[];
     }
@@ -68,6 +71,7 @@ export type FlowAction =
 export function createInitialState(draft = ""): FlowState {
   return {
     mock: false,
+    skills: null,
     filedGuidance: null,
     systems: [],
     systemChoice: null,
@@ -94,6 +98,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       return {
         ...state,
         mock: action.mock,
+        skills: action.skills,
         filedGuidance: action.filedGuidance,
         systems: action.systems,
       };
@@ -155,6 +160,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       return {
         ...createInitialState(),
         mock: state.mock,
+        skills: state.skills,
         filedGuidance: state.filedGuidance,
         systems: state.systems,
       };

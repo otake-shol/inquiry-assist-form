@@ -7,12 +7,12 @@ import dev.inquiryassist.core.Usage;
 import dev.inquiryassist.core.skill.Reception;
 import dev.inquiryassist.core.skill.ReceptionSkill;
 import java.util.List;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /** 受付のモック。キーワードで種別を判定し、発話に候補の名前が含まれれば対象システムを推測する。 */
 @Component
-@Profile("mock")
+@ConditionalOnProperty(name = "inquiry.skills.reception.provider", havingValue = "mock", matchIfMissing = true)
 public class MockReceptionSkill implements ReceptionSkill {
 
     /**
@@ -24,7 +24,7 @@ public class MockReceptionSkill implements ReceptionSkill {
     @Override
     public AiResult<Reception> receive(String utterance, List<SystemOption> candidates, SystemOption selected) {
         if (MockScenario.has(utterance, MockScenario.TAG_TRIAGE_ERROR)) {
-            throw new AiUnavailableException("モックの種別判定エラー", null);
+            throw new AiUnavailableException("モックの種別判定エラー", null, Usage.ofMock());
         }
         SystemOption guessed = selected != null
                 ? null

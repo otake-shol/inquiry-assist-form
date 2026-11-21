@@ -104,8 +104,8 @@ class MockSkillsTest {
 
     @Test
     void 整形では確定した対象システムの名前をtargetSystemに入れgoalは発話のまま() {
-        var withSystem = restater.restate("[遅延] x", InquiryCategory.SPEC_QUESTION, List.of(), SYSTEMS.get(2)).value();
-        var without = restater.restate("x", InquiryCategory.SPEC_QUESTION, List.of(), null).value();
+        var withSystem = restater.restate("[遅延] x", InquiryCategory.SPEC_QUESTION, List.of(), SYSTEMS.get(2), List.of()).value();
+        var without = restater.restate("x", InquiryCategory.SPEC_QUESTION, List.of(), null, List.of()).value();
 
         assertThat(withSystem.targetSystem()).isEqualTo("請求管理");
         assertThat(withSystem.goal()).isEqualTo("[遅延] x");
@@ -118,9 +118,9 @@ class MockSkillsTest {
                 new AnsweredQuestion(new FollowUpQuestion("q1", "どの画面での話ですか", List.of()), "求人管理画面"),
                 new AnsweredQuestion(new FollowUpQuestion("q2", "状態は", List.of()), null));
 
-        assertThat(restater.restate("[質問なし] [遅延] 期限", InquiryCategory.SPEC_QUESTION, List.of(), null).value().summary())
+        assertThat(restater.restate("[質問なし] [遅延] 期限", InquiryCategory.SPEC_QUESTION, List.of(), null, List.of()).value().summary())
                 .isEqualTo("「期限」について、いまの仕組みがどうなっているかを知りたい。");
-        assertThat(restater.restate("期限", InquiryCategory.SUSPECTED_BUG, answered, null).value().summary())
+        assertThat(restater.restate("期限", InquiryCategory.SUSPECTED_BUG, answered, null, List.of()).value().summary())
                 .isEqualTo("「期限」という状況が起きている。これが意図した動きかどうかを確認したい。（どの画面での話ですか: 求人管理画面）");
     }
 
@@ -131,18 +131,20 @@ class MockSkillsTest {
                 new AnsweredQuestion(new FollowUpQuestion("wr-when", "いつ", List.of()), null),
                 new AnsweredQuestion(new FollowUpQuestion("wr-target", "対象", List.of()), "求人A"));
 
-        assertThat(restater.restate("延長をお願いします", InquiryCategory.WORK_REQUEST, answers, null).value().summary())
+        assertThat(restater.restate("延長をお願いします", InquiryCategory.WORK_REQUEST, answers, null, List.of()).value().summary())
                 .isEqualTo("期間の延長を対応してほしい。対象は求人A。");
     }
 
     @Test
-    void 作り直しは補足を足しgoalを変えない() {
-        var current = restater.restate("期限", InquiryCategory.SPEC_QUESTION, List.of(), null).value();
+    void 訂正があれば伝えられた順に補足を足しgoalを変えない() {
+        var first = restater.restate("期限", InquiryCategory.SPEC_QUESTION, List.of(), null, List.of()).value();
 
-        var revised = restater.revise("期限", current, "一昨日から").value();
+        var revised = restater
+                .restate("期限", InquiryCategory.SPEC_QUESTION, List.of(), null, List.of("一昨日から", "画面は管理画面"))
+                .value();
 
-        assertThat(revised.summary()).isEqualTo(current.summary() + " 補足: 一昨日から");
-        assertThat(revised.goal()).isEqualTo(current.goal());
+        assertThat(revised.summary()).isEqualTo(first.summary() + " 補足: 一昨日から 補足: 画面は管理画面");
+        assertThat(revised.goal()).isEqualTo(first.goal());
     }
 
     // ---- 調査・説明（パイプライン経由） ----

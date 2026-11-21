@@ -38,8 +38,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.core.env.Environment;
-import org.springframework.core.env.Profiles;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -91,7 +89,7 @@ public class InquiryService {
     private final FilingNotifier notifier;
     private final TransactionTemplate transaction;
     private final String incidentGuidance;
-    private final Environment environment;
+    private final SkillImplementations implementations;
     private final InquiryProperties properties;
     private final ApplicationEventPublisher events;
     private final Set<UUID> generating = ConcurrentHashMap.newKeySet();
@@ -106,7 +104,7 @@ public class InquiryService {
      * @param notifier 起票の通知先
      * @param transaction 保存時のトランザクション
      * @param incidentGuidance 障害の案内文
-     * @param environment モック動作中かの判定に使う
+     * @param implementations スキルごとの実装（失敗した呼び出しの利用量の補完に使う）
      * @param properties 対象システムの一覧など
      * @param events 起票の確定後にイベントを発行する
      */
@@ -120,7 +118,7 @@ public class InquiryService {
             FilingNotifier notifier,
             TransactionTemplate transaction,
             @Value("${inquiry.incident-guidance}") String incidentGuidance,
-            Environment environment,
+            SkillImplementations implementations,
             InquiryProperties properties,
             ApplicationEventPublisher events) {
         this.reception = reception;
@@ -132,7 +130,7 @@ public class InquiryService {
         this.notifier = notifier;
         this.transaction = transaction;
         this.incidentGuidance = incidentGuidance;
-        this.environment = environment;
+        this.implementations = implementations;
         this.properties = properties;
         this.events = events;
     }
@@ -159,7 +157,9 @@ public class InquiryService {
             received = reception.receive(utterance, candidates(), selected == null ? null : option(selected));
         } catch (AiRefusalException | AiUnavailableException e) {
             // 失敗しても発話は失わない。種別なし・質問なしで保存し、「今すぐ送る」だけを可能にする
-            inquiry.mock = environment.acceptsProfiles(Profiles.of("mock"));
+            // 失敗した呼び出しの利用量も記録する。分からなければ、受付がモックかどうかだけを記録に残す
+            inquiry.mock = implementations.isMock(Skill.RECEPTION);
+            inquiry.addUsage(new SkillUsage(Skill.RECEPTION, failedUsageOf(e, Skill.RECEPTION), true));
             commit(inquiry, null);
             throw new TriageFailedException(inquiry.id, e);
         }
@@ -307,7 +307,11 @@ public class InquiryService {
         if (inquiry.revisionsLeft <= 0) {
             throw new InvalidStateException("言い直しを作り直せる回数を使い切りました");
         }
-        AiResult<StructuredInquiry> result = restater.revise(inquiry.utterance, inquiry.structuredByAi, note);
+        // 前回の言い直しは渡さず、伝えられた一言の全件（伝えられた順）を足して最初から言い直す
+        List<String> corrections = new ArrayList<>(inquiry.revisionNotes);
+        corrections.add(note);
+        AiResult<StructuredInquiry> result = restater.restate(
+                inquiry.utterance, inquiry.category(), answeredQuestions(inquiry), systemOf(inquiry), corrections);
         inquiry.structuredByAi = result.value();
         inquiry.revisionNotes.add(note);
         inquiry.revisionsLeft--;
@@ -361,6 +365,11 @@ public class InquiryService {
             AnswerPipeline.Result result;
             try {
                 result = pipeline.run(inquiry.structured(), scope, progress);
+            } catch (AiUnavailableException | AiRefusalException e) {
+                // 調査の失敗。分かる場合は、失敗した呼び出しの利用量を記録する
+                inquiry.addUsage(new SkillUsage(Skill.INVESTIGATOR, failedUsageOf(e, Skill.INVESTIGATOR), true));
+                commit(inquiry, null);
+                throw e;
             } catch (ExplanationFailedException e) {
                 // 費用をかけた調査の結果は失わない。本人向けの回答は作らない（answerGrounded は null のまま）
                 inquiry.answerGrounded = null;
@@ -472,27 +481,36 @@ public class InquiryService {
                     .toList());
         } catch (AiRefusalException | AiUnavailableException e) {
             log.warn("聞き手が失敗したため、質問なしで続行します id={}", inquiry.id, e);
-            inquiry.addUsage(new SkillUsage(
-                    Skill.INTERVIEWER,
-                    new Usage("unknown", "unknown", 0, 0, 0, environment.acceptsProfiles(Profiles.of("mock"))),
-                    true));
+            inquiry.addUsage(new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true));
             return new ArrayList<>();
         }
+    }
+
+    /** 失敗が利用量を持っていればそれを使う。なければ、モデルが分からない利用量を、そのスキルの実装に合わせて作る。 */
+    private Usage failedUsageOf(RuntimeException failure, Skill skill) {
+        Usage usage = failure instanceof AiUnavailableException unavailable
+                ? unavailable.usage()
+                : failure instanceof AiRefusalException refusal ? refusal.usage() : null;
+        return usage != null ? usage : new Usage("unknown", "unknown", 0, 0, 0, implementations.isMock(skill));
     }
 
     private static List<StoredCitation> storedCitations(List<CitationVerifier.Result> results) {
         return new ArrayList<>(results.stream().map(InquiryService::toStored).toList());
     }
 
-    private void structure(InquiryEntity inquiry) {
-        List<AnsweredQuestion> answered = inquiry.followUps.stream()
+    private static List<AnsweredQuestion> answeredQuestions(InquiryEntity inquiry) {
+        return inquiry.followUps.stream()
                 .map(q -> new AnsweredQuestion(new FollowUpQuestion(q.id(), q.text(), q.options()), q.answer()))
                 .toList();
+    }
+
+    private void structure(InquiryEntity inquiry) {
         AiResult<StructuredInquiry> result = restater.restate(
                 inquiry.utterance,
                 inquiry.category(),
-                answered,
-                systemOf(inquiry));
+                answeredQuestions(inquiry),
+                systemOf(inquiry),
+                List.copyOf(inquiry.revisionNotes));
         inquiry.structuredByAi = result.value();
         inquiry.addUsage(Skill.RESTATER, result.usage());
         inquiry.step = InquiryStep.STRUCTURED;

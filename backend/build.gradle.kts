@@ -37,6 +37,24 @@ dependencies {
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-tasks.withType<Test> {
-	useJUnitPlatform()
+tasks.test {
+	// 実際の Ollama を呼ぶテスト（@Tag("live")）は、通常の検証に含めない。liveTest で実行する
+	useJUnitPlatform {
+		excludeTags("live")
+	}
+}
+
+// 手元の Ollama を実際に呼ぶ確認。Ollama とモデルが動いている環境で、手元から実行する
+tasks.register<Test>("liveTest") {
+	description = "実際の Ollama を呼ぶテスト（@Tag(\"live\")）だけを実行する"
+	group = "verification"
+	testClassesDirs = sourceSets.test.get().output.classesDirs
+	classpath = sourceSets.test.get().runtimeClasspath
+	useJUnitPlatform {
+		includeTags("live")
+	}
+	testLogging {
+		events("passed", "failed", "skipped")
+		showStandardStreams = true
+	}
 }

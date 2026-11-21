@@ -116,6 +116,8 @@ export interface AppConfig {
   filedGuidance?: string;
   /** 対象システムの選択肢（空または省略なら選択を出さない） */
   systems?: SystemOption[];
+  /** スキルの識別子から、動いている実装（`mock` / `ollama`）への対応。古い API では無い */
+  skills?: Record<string, string>;
 }
 
 /** エラー本文。通信失敗など HTTP 外の失敗は code が `NETWORK`。 */

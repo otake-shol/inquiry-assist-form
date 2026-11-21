@@ -8,7 +8,7 @@ import dev.inquiryassist.core.Usage;
 import dev.inquiryassist.core.skill.ExplainerSkill;
 import dev.inquiryassist.core.skill.Finding;
 import java.util.List;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
  * 渡されなかった事実の内容は説明に現れない。{@code [説明エラー]} で失敗する。
  */
 @Component
-@Profile("mock")
+@ConditionalOnProperty(name = "inquiry.skills.explainer.provider", havingValue = "mock", matchIfMissing = true)
 public class MockExplainerSkill implements ExplainerSkill {
 
     /**
@@ -28,7 +28,7 @@ public class MockExplainerSkill implements ExplainerSkill {
     @Override
     public AiResult<String> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings) {
         if (MockScenario.has(inquiry.goal(), MockScenario.TAG_EXPLAIN_ERROR)) {
-            throw new AiUnavailableException("モックの説明エラー", null);
+            throw new AiUnavailableException("モックの説明エラー", null, Usage.ofMock());
         }
         StringBuilder text = new StringBuilder();
         boolean bug = inquiry.category() == InquiryCategory.SUSPECTED_BUG;

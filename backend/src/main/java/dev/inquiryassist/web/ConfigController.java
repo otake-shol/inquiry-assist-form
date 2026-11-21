@@ -1,10 +1,10 @@
 package dev.inquiryassist.web;
 
 import dev.inquiryassist.inquiry.InquiryProperties;
+import dev.inquiryassist.inquiry.SkillImplementations;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.env.Environment;
-import org.springframework.core.env.Profiles;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -18,8 +18,10 @@ public class ConfigController {
      * @param mock モック動作中か
      * @param filedGuidance 担当者に送った後の案内文
      * @param systems 対象システムの一覧
+     * @param skills スキルの識別子から、動いている実装の名前（mock または ollama）への対応
      */
-    public record ConfigResponse(boolean mock, String filedGuidance, List<SystemView> systems) {}
+    public record ConfigResponse(
+            boolean mock, String filedGuidance, List<SystemView> systems, Map<String, String> skills) {}
 
     /**
      * 対象システム。
@@ -29,20 +31,20 @@ public class ConfigController {
      */
     public record SystemView(String id, String label) {}
 
-    private final Environment environment;
+    private final SkillImplementations implementations;
     private final String filedGuidance;
     private final InquiryProperties properties;
 
     /**
-     * @param environment 有効なプロファイルの判定に使う
+     * @param implementations スキルごとの実装
      * @param filedGuidance 担当者に送った後の案内文
      * @param properties 対象システムの一覧
      */
     public ConfigController(
-            Environment environment,
+            SkillImplementations implementations,
             @Value("${inquiry.filed-guidance}") String filedGuidance,
             InquiryProperties properties) {
-        this.environment = environment;
+        this.implementations = implementations;
         this.properties = properties;
         this.filedGuidance = filedGuidance;
     }
@@ -52,10 +54,11 @@ public class ConfigController {
      */
     @GetMapping("/api/config")
     public ConfigResponse config() {
-        return new ConfigResponse(environment.acceptsProfiles(Profiles.of("mock")),
+        return new ConfigResponse(implementations.includesMock(),
                 filedGuidance,
                 properties.systems().stream()
                         .map(s -> new SystemView(s.id(), s.label()))
-                        .toList());
+                        .toList(),
+                implementations.byId());
     }
 }

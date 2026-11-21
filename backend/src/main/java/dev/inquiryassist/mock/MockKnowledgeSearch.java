@@ -11,10 +11,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  * 閲覧範囲外は検索結果に含めず、読み取りは {@link SecurityException} で拒否する。
  */
 @Component
-@Profile("mock")
+@ConditionalOnProperty(name = "inquiry.knowledge.provider", havingValue = "mock", matchIfMissing = true)
 public class MockKnowledgeSearch implements KnowledgeSearch {
 
     private static final String ROOT = "mock-knowledge/";

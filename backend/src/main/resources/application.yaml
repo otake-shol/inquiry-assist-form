@@ -2,9 +2,6 @@
 spring:
   application:
     name: backend
-  profiles:
-    # 既定はモック。本番は production + bedrock を明示する（production と mock の併用は起動時に拒否）
-    default: mock
   threads:
     virtual:
       enabled: true
@@ -14,6 +11,20 @@ spring:
       ddl-auto: none
 
 inquiry:
+  # スキルごとの実装（mock | ollama）。設定を書かなければすべてモックで、外部のAIには接続しない。
+  # 手元のモデルで動かす設定はプロファイル local-ai（application-local-ai.yaml）。
+  # 本番（プロファイル production）では、1つでもモックがあれば起動を止める
+  skills:
+    reception: { provider: mock }
+    interviewer: { provider: mock }
+    restater: { provider: mock }
+    investigator: { provider: mock }
+    explainer: { provider: mock }
+  knowledge:
+    provider: mock
+  ollama:
+    base-url: http://localhost:11434
+    keep-alive: 30m
   mock:
     # モックの [遅延] タグで進捗の各段階が待つ時間
     slow-step-delay: 2s

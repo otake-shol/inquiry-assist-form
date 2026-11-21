@@ -941,6 +941,110 @@ describe("入力とモック表示", () => {
     expect(within(bar).queryByText("種別の例")).not.toBeInTheDocument();
   });
 
+  describe("スキルごとの実装の表示", () => {
+    const ollamaExceptInvestigator = {
+      reception: "ollama",
+      interviewer: "ollama",
+      restater: "ollama",
+      investigator: "mock",
+      explainer: "ollama",
+    };
+
+    it("(a) skills が無い・全モックなら従来どおり「モック」で内訳や注記は出ない", async () => {
+      for (const skills of [
+        undefined,
+        { reception: "mock", investigator: "mock" },
+      ]) {
+        installFakeFetch({
+          "GET /api/config": { body: { mock: true, skills } },
+        });
+        const { unmount } = render(
+          <App subscribe={new FakeStream().subscribe} />,
+        );
+
+        expect(await screen.findByText("モック")).toBeInTheDocument();
+        expect(screen.queryByText("一部モック")).not.toBeInTheDocument();
+        expect(screen.queryByText(/手元のモデル/)).not.toBeInTheDocument();
+        expect(
+          screen.queryByText(/モックで動いているスキルにだけ効きます/),
+        ).not.toBeInTheDocument();
+        unmount();
+      }
+    });
+
+    it("(b) 一部が ollama なら「一部モック」と内訳、タグの注記、調査がモックの注記が出る", async () => {
+      installFakeFetch({
+        "GET /api/config": {
+          body: { mock: true, skills: ollamaExceptInvestigator },
+        },
+      });
+      render(<App subscribe={new FakeStream().subscribe} />);
+
+      expect(await screen.findByText("一部モック")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "受付・聞き手・言い直し・説明は手元のモデル、調査はモックで動いています",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("タグは、モックで動いているスキルにだけ効きます"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "何を尋ねても、求人の掲載期限についての調査結果が返ります",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("(b) 調査が実際のモデルなら、調査の注記は出さない", async () => {
+      installFakeFetch({
+        "GET /api/config": {
+          body: {
+            mock: true,
+            skills: {
+              ...ollamaExceptInvestigator,
+              investigator: "ollama",
+              reception: "mock",
+            },
+          },
+        },
+      });
+      render(<App subscribe={new FakeStream().subscribe} />);
+
+      expect(await screen.findByText("一部モック")).toBeInTheDocument();
+      expect(
+        screen.getByText("タグは、モックで動いているスキルにだけ効きます"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/求人の掲載期限についての調査結果が返ります/),
+      ).not.toBeInTheDocument();
+    });
+
+    it("(c) mock が false なら案内枠を出さない", async () => {
+      installFakeFetch({
+        "GET /api/config": {
+          body: {
+            mock: false,
+            skills: {
+              reception: "ollama",
+              interviewer: "ollama",
+              restater: "ollama",
+              investigator: "ollama",
+              explainer: "ollama",
+            },
+          },
+        },
+      });
+      render(<App subscribe={new FakeStream().subscribe} />);
+
+      expect(await screen.findByLabelText(INPUT_LABEL)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("region", { name: "モックのシナリオ" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/モック/)).not.toBeInTheDocument();
+    });
+  });
+
   it("config の取得に失敗しても非モックとして描画される", async () => {
     installFakeFetch({
       "GET /api/config": { status: 500, body: { code: "X", message: "x" } },

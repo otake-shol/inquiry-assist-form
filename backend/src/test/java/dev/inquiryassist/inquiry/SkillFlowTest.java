@@ -118,6 +118,13 @@ class SkillFlowTest extends ApiSupport {
         assertThat(jdbc.queryForObject(
                         "select (usages->-1->>'failed')::boolean from inquiries where id = ?::uuid", Boolean.class, id))
                 .isTrue();
+        // 失敗した説明の利用量は、モック由来として残る（モデルが unknown のままにならない）
+        assertThat(jdbc.queryForObject(
+                        "select (usages->-1->>'mock')::boolean from inquiries where id = ?::uuid", Boolean.class, id))
+                .isTrue();
+        assertThat(jdbc.queryForObject(
+                        "select usages->-1->>'model' from inquiries where id = ?::uuid", String.class, id))
+                .isEqualTo("mock");
         // 担当者に送られるまで、オペレータからは見えない
         mvc.perform(get("/api/operator/inquiries/" + id)).andExpect(status().isNotFound());
     }
@@ -172,6 +179,10 @@ class SkillFlowTest extends ApiSupport {
         assertThat(jdbc.queryForObject(
                         "select (usages->0->>'failed')::boolean from inquiries where id = ?::uuid", Boolean.class, id))
                 .isFalse();
+        // 失敗した聞き手の利用量も、モック由来として残る
+        assertThat(jdbc.queryForObject(
+                        "select (usages->1->>'mock')::boolean from inquiries where id = ?::uuid", Boolean.class, id))
+                .isTrue();
     }
 
     @Test

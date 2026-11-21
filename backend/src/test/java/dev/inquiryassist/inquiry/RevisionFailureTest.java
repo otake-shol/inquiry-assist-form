@@ -37,9 +37,9 @@ class RevisionFailureTest {
         var id = service.create("期限の仕様", null).id();
         service.answerQuestions(id, List.of());
 
-        doThrow(new AiUnavailableException("失敗", null)).when(assistant).revise(any(), any(), any());
+        doThrow(new AiUnavailableException("失敗", null)).when(assistant).restate(any(), any(), any(), any(), any());
         assertThatThrownBy(() -> service.revise(id, "違う")).isInstanceOf(AiUnavailableException.class);
-        doThrow(new AiRefusalException("拒否")).when(assistant).revise(any(), any(), any());
+        doThrow(new AiRefusalException("拒否")).when(assistant).restate(any(), any(), any(), any(), any());
         assertThatThrownBy(() -> service.revise(id, "違う")).isInstanceOf(AiRefusalException.class);
 
         assertThat(service.get(id).revisionsLeft()).isEqualTo(2);
@@ -49,7 +49,7 @@ class RevisionFailureTest {
                         id.toString()))
                 .isZero();
 
-        doCallRealMethod().when(assistant).revise(any(), any(), any());
+        doCallRealMethod().when(assistant).restate(any(), any(), any(), any(), any());
         assertThat(service.revise(id, "違う").revisionsLeft()).isEqualTo(1);
     }
 }

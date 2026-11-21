@@ -76,6 +76,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
     progress,
     draft,
     mock,
+    skills,
     answers,
     categoryOpen,
     streamAttempt,
@@ -95,6 +96,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
         dispatch({
           type: "configLoaded",
           mock: config.mock,
+          skills: config.skills ?? null,
           filedGuidance: config.filedGuidance ?? null,
           systems: config.systems ?? [],
         }),
@@ -353,6 +355,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
       </header>
       {mock && (
         <MockBar
+          skills={skills}
           canPick={view === null && !busy}
           onPick={(text) => dispatch({ type: "draftChanged", draft: text })}
         />

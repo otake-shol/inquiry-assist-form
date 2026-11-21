@@ -10,7 +10,9 @@
     "verify": "npm run verify:backend && npm run verify:frontend",
     "verify:backend": "bash scripts/gradle.sh check --console=plain",
     "verify:frontend": "npm --prefix frontend run verify",
+    "verify:live": "bash scripts/gradle.sh liveTest --console=plain",
     "dev:backend": "bash scripts/gradle.sh bootRun --console=plain",
+    "dev:backend:local-ai": "bash scripts/gradle.sh bootRun --console=plain --args=--spring.profiles.active=local-ai",
     "dev:frontend": "npm --prefix frontend run dev",
     "smoke": "npm --prefix frontend run smoke"
   }

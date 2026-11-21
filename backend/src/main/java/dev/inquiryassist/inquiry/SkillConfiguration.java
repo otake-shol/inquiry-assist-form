@@ -13,6 +13,17 @@ import org.springframework.context.annotation.Configuration;
 class SkillConfiguration {
 
     /**
+     * スキルごとの実装の対応。設定から読む。
+     *
+     * @param environment 設定の参照先
+     * @return 実装の対応
+     */
+    @Bean
+    SkillImplementations skillImplementations(org.springframework.core.env.Environment environment) {
+        return SkillImplementations.from(environment);
+    }
+
+    /**
      * 調査、照合、説明の流れ。
      *
      * @param investigator 調査

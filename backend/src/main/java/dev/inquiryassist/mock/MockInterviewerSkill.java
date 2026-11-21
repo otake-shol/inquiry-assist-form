@@ -11,12 +11,12 @@ import dev.inquiryassist.core.skill.Interview;
 import dev.inquiryassist.core.skill.InterviewerSkill;
 import java.util.ArrayList;
 import java.util.List;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /** 聞き手のモック。正常系は2問、対象システムが決まっていれば画面を尋ねる質問を除いた1問。 */
 @Component
-@Profile("mock")
+@ConditionalOnProperty(name = "inquiry.skills.interviewer.provider", havingValue = "mock", matchIfMissing = true)
 public class MockInterviewerSkill implements InterviewerSkill {
 
     /**
@@ -30,7 +30,7 @@ public class MockInterviewerSkill implements InterviewerSkill {
     public AiResult<Interview> ask(
             String utterance, InquiryCategory category, SystemOption system, AccessScope scope) {
         if (MockScenario.has(utterance, MockScenario.TAG_QUESTION_ERROR)) {
-            throw new AiUnavailableException("モックの質問生成エラー", null);
+            throw new AiUnavailableException("モックの質問生成エラー", null, Usage.ofMock());
         }
         List<FollowUpQuestion> questions = new ArrayList<>();
         if (!MockScenario.has(utterance, MockScenario.TAG_NO_QUESTIONS)) {

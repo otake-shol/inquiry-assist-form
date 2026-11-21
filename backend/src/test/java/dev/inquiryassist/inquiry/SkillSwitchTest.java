@@ -1,0 +1,127 @@
+package dev.inquiryassist.inquiry;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.jayway.jsonpath.JsonPath;
+import dev.inquiryassist.core.skill.ReceptionSkill;
+import dev.inquiryassist.core.skill.RestaterSkill;
+import dev.inquiryassist.mock.MockInterviewerSkill;
+import dev.inquiryassist.mock.MockReceptionSkill;
+import dev.inquiryassist.ollama.FakeOllama;
+import dev.inquiryassist.ollama.OllamaReceptionSkill;
+import java.util.List;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
+
+/** 一部のスキルだけを ollama にした構成で、実装の選択と、モックを含むことの扱いを確認する。 */
+@TestPropertySource(properties = {
+    "inquiry.skills.reception.provider=ollama",
+    "inquiry.skills.reception.model=fake-model",
+    "inquiry.skills.reception.timeout=5s"
+})
+class SkillSwitchTest extends ApiSupport {
+
+    private static final FakeOllama OLLAMA = new FakeOllama();
+
+    @DynamicPropertySource
+    static void ollama(DynamicPropertyRegistry registry) {
+        registry.add("inquiry.ollama.base-url", OLLAMA::baseUrl);
+    }
+
+    @AfterAll
+    static void stop() {
+        OLLAMA.close();
+    }
+
+    @Autowired
+    ReceptionSkill reception;
+
+    @Autowired
+    org.springframework.beans.factory.ObjectProvider<MockReceptionSkill> mockReception;
+
+    @Autowired
+    org.springframework.beans.factory.ObjectProvider<MockInterviewerSkill> mockInterviewer;
+
+    @Autowired
+    RestaterSkill restater;
+
+    @Test
+    void ollamaにしたスキルだけが切り替わり他はモックのまま() {
+        assertThat(reception).isInstanceOf(OllamaReceptionSkill.class);
+        assertThat(mockReception.getIfAvailable()).isNull();
+        assertThat(mockInterviewer.getIfAvailable()).isNotNull();
+        assertThat(restater).isInstanceOf(dev.inquiryassist.mock.MockRestaterSkill.class);
+    }
+
+    @Test
+    void configのskillsとmockは一部だけollamaでもモックを含むことを示す() throws Exception {
+        mvc.perform(get("/api/config"))
+                .andExpect(jsonPath("$.mock").value(true))
+                .andExpect(jsonPath("$.skills.reception").value("ollama"))
+                .andExpect(jsonPath("$.skills.interviewer").value("mock"))
+                .andExpect(jsonPath("$.skills.investigator").value("mock"));
+    }
+
+    @Test
+    void 一部モックの問い合わせ記録はmockがtrueで実際のモデルの利用量も残る() throws Exception {
+        OLLAMA.reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 77, 9);
+
+        String created = create("期限の仕様", null);
+        String id = idOf(created);
+
+        // 受付は実際のモデル（フェイク）、聞き手はモック
+        assertThat((String) JsonPath.read(created, "$.category")).isEqualTo("SPEC_QUESTION");
+        assertThat((List<?>) JsonPath.read(created, "$.questions")).hasSize(2);
+        assertThat((Boolean) JsonPath.read(created, "$.mock")).isTrue();
+        assertThat(row(id).get("mock")).isEqualTo(true);
+        var usages = jdbc.queryForList(
+                "select u->>'step' as step, u->>'model' as model, (u->>'mock')::boolean as mock,"
+                        + " (u->>'inputTokens')::int as input from inquiries, jsonb_array_elements(usages) u"
+                        + " where id = ?::uuid",
+                id);
+        assertThat(usages.get(0)).containsEntry("step", "reception").containsEntry("model", "fake-model")
+                .containsEntry("mock", false).containsEntry("input", 77);
+        assertThat(usages.get(1)).containsEntry("step", "interviewer").containsEntry("mock", true);
+    }
+
+    @Test
+    void 実際のモデルの受付が失敗すると503で失敗した呼び出しの利用量はモック由来ではない() throws Exception {
+        OLLAMA.status(500);
+
+        String body = text(mvc.perform(post("/api/inquiries")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"utterance\":\"期限の仕様\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("AI_UNAVAILABLE")));
+        String id = JsonPath.read(body, "$.inquiryId");
+
+        // 受付が実際のモデルなので、この記録はモックではない
+        assertThat(row(id).get("mock")).isEqualTo(false);
+        assertThat(jdbc.queryForObject(
+                        "select (usages->0->>'failed')::boolean from inquiries where id = ?::uuid", Boolean.class, id))
+                .isTrue();
+        assertThat(jdbc.queryForObject(
+                        "select (usages->0->>'mock')::boolean from inquiries where id = ?::uuid", Boolean.class, id))
+                .isFalse();
+    }
+
+    @Test
+    void モックのタグは実際のモデルで動くスキルには効かない() throws Exception {
+        // 受付が ollama のため、[判定エラー] を書いても失敗しない
+        OLLAMA.reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 1, 1);
+
+        mvc.perform(post("/api/inquiries")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"utterance\":\"[判定エラー] 期限の仕様\"}"))
+                .andExpect(status().isCreated());
+    }
+}

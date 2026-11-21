@@ -14,7 +14,7 @@ import dev.inquiryassist.core.skill.ProgressListener;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  * {@code [拒否]} のタグを整形後の {@code goal} から読む。
  */
 @Component
-@Profile("mock")
+@ConditionalOnProperty(name = "inquiry.skills.investigator.provider", havingValue = "mock", matchIfMissing = true)
 public class MockInvestigatorSkill implements InvestigatorSkill {
 
     private static final String CODE_PATH = "src/main/java/com/example/jobboard/JobPostingService.java";
@@ -65,10 +65,10 @@ public class MockInvestigatorSkill implements InvestigatorSkill {
         step(slow, progress, "FAQを確認しています");
         step(slow, progress, "用語対応表を照合しています");
         if (MockScenario.has(tags, MockScenario.TAG_ERROR)) {
-            throw new AiUnavailableException("モックの調査エラー", null);
+            throw new AiUnavailableException("モックの調査エラー", null, Usage.ofMock());
         }
         if (MockScenario.has(tags, MockScenario.TAG_REFUSED)) {
-            throw new AiRefusalException("モックが調査を拒否しました");
+            throw new AiRefusalException("モックが調査を拒否しました", Usage.ofMock());
         }
 
         List<String> notFound = List.of("期限切れの求人を一覧に出す設定やフラグは、job-board のコードには見つからなかった");
@@ -110,7 +110,7 @@ public class MockInvestigatorSkill implements InvestigatorSkill {
                 Thread.sleep(slowStepDelay);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new AiUnavailableException("モックの待機が中断された", e);
+                throw new AiUnavailableException("モックの待機が中断された", e, Usage.ofMock());
             }
         }
         progress.onProgress(message);

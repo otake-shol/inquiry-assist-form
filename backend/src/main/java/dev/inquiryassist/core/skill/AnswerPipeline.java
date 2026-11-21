@@ -83,7 +83,7 @@ public final class AnswerPipeline {
             explanation = explainer.explain(inquiry, verified.confirmed());
         } catch (AiRefusalException | AiUnavailableException e) {
             List<SkillUsage> failedUsages = new ArrayList<>(usages);
-            failedUsages.add(new SkillUsage(Skill.EXPLAINER, failedUsage(), true));
+            failedUsages.add(new SkillUsage(Skill.EXPLAINER, failedUsageOf(e), true));
             throw new ExplanationFailedException(e, verified, failedUsages);
         }
         usages.add(new SkillUsage(Skill.EXPLAINER, explanation.usage()));
@@ -109,8 +109,11 @@ public final class AnswerPipeline {
                 verified.nextChecks());
     }
 
-    /** 失敗した呼び出しは利用量が得られないため、中身のない利用量を記録する。 */
-    private static Usage failedUsage() {
-        return new Usage("unknown", "unknown", 0, 0, 0, false);
+    /** 失敗が利用量を持っていればそれを使う。持っていなければ、中身のない利用量を記録する。 */
+    private static Usage failedUsageOf(RuntimeException failure) {
+        Usage usage = failure instanceof AiUnavailableException unavailable
+                ? unavailable.usage()
+                : failure instanceof AiRefusalException refusal ? refusal.usage() : null;
+        return usage != null ? usage : new Usage("unknown", "unknown", 0, 0, 0, false);
     }
 }

@@ -1,0 +1,30 @@
+# 手元のモデル（Ollama）で、受付・聞き手・言い直し・説明を動かす。調査は道具を繰り返し使うため、まだモック。
+# 使い方: npm run dev:backend:local-ai（Ollama とモデルが手元で動いていること）
+inquiry:
+  skills:
+    reception:
+      provider: ollama
+      model: qwen3.6:35b
+      temperature: 0
+      think: false
+      timeout: 60s
+    interviewer:
+      provider: ollama
+      model: qwen3.6:35b
+      temperature: 0
+      think: false
+      timeout: 60s
+    restater:
+      provider: ollama
+      model: qwen3.6:35b
+      temperature: 0
+      think: false
+      timeout: 60s
+    investigator:
+      provider: mock
+    explainer:
+      provider: ollama
+      model: qwen3.6:35b
+      temperature: 0
+      think: true
+      timeout: 120s
