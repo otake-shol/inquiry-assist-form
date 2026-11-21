@@ -34,6 +34,8 @@ export interface Question {
 
 /** 整形後の問い。 */
 export interface StructuredInquiry {
+  /** 本人に見せる言い直しの文章。画面はこの文章だけを見せる。 */
+  summary: string;
   targetSystem: string | null;
   goal: string;
   whatHappened: string | null;
@@ -77,6 +79,8 @@ export interface InquiryView {
   categoryByAi: InquiryCategory | null;
   category: InquiryCategory | null;
   questions: Question[];
+  /** 言い直しを作り直せる残り回数 */
+  revisionsLeft: number;
   structured: StructuredInquiry | null;
   answer: ZeroAnswer | null;
   incidentGuidance: string | null;
@@ -93,6 +97,8 @@ export interface AnswerInput {
 /** `GET /api/config` の応答。 */
 export interface AppConfig {
   mock: boolean;
+  /** 担当者に送った後の案内文 */
+  filedGuidance?: string;
 }
 
 /** エラー本文。通信失敗など HTTP 外の失敗は code が `NETWORK`。 */

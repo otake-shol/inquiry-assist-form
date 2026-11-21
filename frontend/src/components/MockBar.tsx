@@ -40,8 +40,8 @@ export function MockBar({ onPick, canPick }: MockBarProps) {
       <span className="mock-note">
         例文を押すと入力欄に入ります（入力画面で使えます）
       </span>
-      {renderGroup("種別の例", CATEGORY_EXAMPLE_LIST)}
-      {renderGroup("振る舞いの例", TAG_EXAMPLE_LIST)}
+      {renderGroup("状況の例", CATEGORY_EXAMPLE_LIST)}
+      {renderGroup("動きの例", TAG_EXAMPLE_LIST)}
     </section>
   );
 }

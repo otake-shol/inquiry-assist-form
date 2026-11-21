@@ -12,6 +12,8 @@ interface ErrorNoticeProps {
   hasInquiry: boolean;
   /** 0次回答の再試行（再試行できる場面でのみ渡す） */
   onRetry?: () => void;
+  /** 再試行ボタンの文言 */
+  retryLabel?: string;
   busy: boolean;
 }
 
@@ -23,6 +25,7 @@ export function ErrorNotice({
   error,
   hasInquiry,
   onRetry,
+  retryLabel = "もう一度試す",
   busy,
 }: ErrorNoticeProps) {
   const aiText = AI_ERROR_TEXT[error.code];
@@ -32,13 +35,13 @@ export function ErrorNotice({
       {aiText !== undefined && (
         <p>
           {hasInquiry
-            ? "画面下の「今すぐ担当者に送る」を使えます。"
+            ? "ページの下の「今すぐ担当者に送る」から送れます。"
             : AI_ERROR_BEFORE_CREATE_HINT}
         </p>
       )}
       {onRetry !== undefined && (
         <button type="button" onClick={onRetry} disabled={busy}>
-          もう一度試す
+          {retryLabel}
         </button>
       )}
     </div>

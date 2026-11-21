@@ -19,7 +19,7 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 | step | 意味 | 次の操作 |
 | --- | --- | --- |
 | `TRIAGED` | 種別の判定と追加質問が出た | 種別の変更（3）、追加質問への回答（4） |
-| `STRUCTURED` | 整形後の問いが出た | 整形結果の確定（5） |
+| `STRUCTURED` | 整形後の問い（言い直し）が出た | 確定（5）、作り直し（5a）、追加質問へ戻る（5b） |
 | `ANSWERING` | 0次回答の生成待ち | 進捗ストリームの購読（6） |
 | `ANSWERED` | 0次回答が出て、本人の解決判定待ち | 解決の判定（7） |
 | `CLOSED` | 終了。`outcome` が結果を示す | なし |
@@ -48,7 +48,9 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
   "categoryByAi": "SPEC_QUESTION",
   "category": "SPEC_QUESTION",
   "questions": [{ "id": "q1", "text": "質問文", "options": ["選択肢A", "選択肢B"] }],
+  "revisionsLeft": 2,
   "structured": {
+    "summary": "昨日まで応募者向けの一覧に出ていた求人が、今日は表示されなくなった。なぜ表示されなくなったのかを知りたい。",
     "targetSystem": "求人管理画面",
     "goal": "必須",
     "whatHappened": null,
@@ -78,6 +80,8 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 ```
 
 - `structured` は `STRUCTURED` 以降で非 null。`answer` は0次回答の完了後に非 null。
+- `structured.summary` は本人に見せる言い直しの文章（必須）。画面はこの文章だけを見せ、ほかの項目は保存と起票に使う。
+- `revisionsLeft` は言い直しを作り直せる残り回数（初期値2）。
 - `answer.citations` には照合できた出典だけを入れる。照合できた出典が0件なら `grounded` は `false`、`askerExplanation` は `null`、`memo` は残る。
 - `questions[].options` が空の質問は自由記述で答える。「わからない」は画面が常に追加し、APIには `answer: null` で送る。
 - `urgency` は `LOW`／`NORMAL`／`HIGH`。`sourceType` は `CODE`／`FAQ`／`DOCUMENT`／`GLOSSARY`。
@@ -87,7 +91,7 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 
 ### 1. `GET /api/config`
 
-`200` `{ "mock": true }`。画面はモック動作中に「モック」と表示する。
+`200` `{ "mock": true, "filedGuidance": "担当者が内容を確認して連絡します。" }`。画面はモック動作中に「モック」と表示する。`filedGuidance` は担当者に送った後の案内文（設定 `inquiry.filed-guidance`）。
 
 ### 2. `POST /api/inquiries`
 
@@ -125,12 +129,27 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 
 ### 5. `PUT /api/inquiries/{id}/structured`
 
-リクエスト `{ "targetSystem": null, "goal": "必須", "whatHappened": null, "expectedResult": null, "urgency": "NORMAL" }`。本人が確認・修正した整形結果を確定する。`step` が `STRUCTURED` のときだけ有効。
+リクエスト `{}` または `{ "summary": "本人が書き直した文章" }`。言い直しを確定する。`step` が `STRUCTURED` のときだけ有効。
+
+- 本文が空（`summary` なし）: AIの言い直しをそのまま確定する（「合っています」）
+- `summary` あり（1〜2000文字）: 本人が書き直した文章で確定する。確定値の `summary` だけをこの文章に置き換え、ほかの項目はAIの値を残す。0次回答は `summary` を問いの本文として扱う
 
 `200` InquiryView。
 
 - `WORK_REQUEST`: `step: CLOSED`、`outcome: FILED`。担当者に通知する
 - それ以外: `step: ANSWERING`
+
+### 5a. `POST /api/inquiries/{id}/revision`
+
+リクエスト `{ "note": "消えたのは一昨日から" }`（1〜1000文字）。本人が違う点を一言で伝え、AIが言い直しを作り直す。`step` が `STRUCTURED` で `revisionsLeft` が1以上のときだけ有効。残りが0なら `INVALID_STATE`。
+
+`200` InquiryView（`step: STRUCTURED`、`structured` が新しい言い直し、`revisionsLeft` が1減る）。伝えられた一言は記録に残す。AIが失敗した場合（`AI_REFUSED`／`AI_UNAVAILABLE`）は残り回数を減らさない。
+
+### 5b. `POST /api/inquiries/{id}/reopen`
+
+本文なし。追加質問へ戻る。`step` が `STRUCTURED` のときだけ有効。
+
+`200` InquiryView（`step: TRIAGED`、`structured` は `null`、`questions` は戻る前と同じ）。`revisionsLeft` は元に戻さない。
 
 ### 6. `GET /api/inquiries/{id}/answer-stream`
 
@@ -199,6 +218,16 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 | `[拒否]` | 0次回答で `AI_REFUSED` |
 | `[判定エラー]` | 種別の判定（2）で `AI_UNAVAILABLE` |
 
-モックの構造化は発話を `goal` にそのまま入れる。0次回答はタグを `goal` から読む。
+モックの構造化は発話を `goal` にそのまま入れる。0次回答はタグを `goal` から読む（`goal` は書き直しや作り直しで変わらないため、タグの振る舞いは最後まで保たれる）。
+
+モックの言い直し（`summary`）は、タグを取り除いた発話と追加質問への回答から作る。
+
+| 種別 | 言い直しの形 |
+| --- | --- |
+| `SPEC_QUESTION` | 「（発話）」について、いまの仕組みがどうなっているかを知りたい。 |
+| `SUSPECTED_BUG` | 「（発話）」という状況が起きている。これが意図した動きかどうかを確認したい。 |
+| `WORK_REQUEST` | 固定3問の回答を使い「（何を）を（いつまでに）までに対応してほしい。対象は（対象）。」。「わからない」の項目は省く |
+
+「わからない」以外の追加質問への回答は、言い直しの末尾に「（質問文: 回答）」の形で足す。作り直し（5a）では、伝えられた一言を「補足: （一言）」として言い直しに足す。
 
 モックの一次情報は `backend/src/main/resources/mock-knowledge/` の固定ファイル（サンプルのコード、FAQ、用語対応表）。正常系の出典はこのファイルの実在する行を指し、出典の照合は実際に動く。

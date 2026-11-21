@@ -26,7 +26,7 @@ class ConcurrentAnswerTest {
         String utterance = "[遅延] 求人の掲載期限の仕様";
         var id = service.create(utterance).id();
         service.answerQuestions(id, List.of());
-        service.confirmStructured(id, new InquiryService.StructuredInput(null, utterance, null, null, null));
+        service.confirmStructured(id, null);
 
         CountDownLatch firstProgress = new CountDownLatch(1);
         CompletableFuture<InquiryView> first =
@@ -45,7 +45,7 @@ class ConcurrentAnswerTest {
         String utterance = "[遅延] 求人の掲載期限の仕様";
         var id = service.create(utterance).id();
         service.answerQuestions(id, List.of());
-        service.confirmStructured(id, new InquiryService.StructuredInput(null, utterance, null, null, null));
+        service.confirmStructured(id, null);
 
         CountDownLatch firstProgress = new CountDownLatch(1);
         CompletableFuture<InquiryView> generating =

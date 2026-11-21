@@ -8,12 +8,18 @@ export interface FlowError extends ErrorBody {
 /** 画面全体の状態。 */
 export interface FlowState {
   mock: boolean;
+  /** 担当者に送った後の案内文（GET /api/config） */
+  filedGuidance: string | null;
   draft: string;
   view: InquiryView | null;
   busy: boolean;
   error: FlowError | null;
-  /** 種別の判定でAIが失敗して保存された問い合わせの id。担当者へ送る操作に使う。 */
+  /** 判定のAI失敗で保存された問い合わせの id。担当者へ送る操作に使う。 */
   savedInquiryId: string | null;
+  /** 追加質問への回答（順番どおり。「わからない」は null）。 */
+  answers: (string | null)[];
+  /** 受け取りの「変更」で選択肢を開いているか */
+  categoryOpen: boolean;
   progress: string[];
   /** 進捗ストリームの購読回数。再試行で増やし、購読し直すきっかけにする。 */
   streamAttempt: number;
@@ -21,27 +27,38 @@ export interface FlowState {
 
 /** 状態を変える操作。 */
 export type FlowAction =
-  | { type: "configLoaded"; mock: boolean }
+  | { type: "configLoaded"; mock: boolean; filedGuidance: string | null }
   | { type: "draftChanged"; draft: string }
   | { type: "requestStarted" }
   | { type: "viewReceived"; view: InquiryView }
   | { type: "requestFailed"; error: ErrorBody }
+  | { type: "answerGiven"; index: number; answer: string | null }
+  | { type: "answersRewound"; index: number }
+  | { type: "categoryToggled" }
   | { type: "streamProgress"; message: string }
   | { type: "streamFailed"; error: ErrorBody }
   | { type: "streamRetried" }
   | { type: "reset" };
 
-/** 最初の状態。 */
-export const initialState: FlowState = {
-  mock: false,
-  draft: "",
-  view: null,
-  busy: false,
-  error: null,
-  savedInquiryId: null,
-  progress: [],
-  streamAttempt: 0,
-};
+/**
+ * 最初の状態を作る。
+ * @param draft 入力欄の初期値（URL の `?text=`）
+ */
+export function createInitialState(draft = ""): FlowState {
+  return {
+    mock: false,
+    filedGuidance: null,
+    draft,
+    view: null,
+    busy: false,
+    error: null,
+    savedInquiryId: null,
+    answers: [],
+    categoryOpen: false,
+    progress: [],
+    streamAttempt: 0,
+  };
+}
 
 /**
  * 画面の状態遷移を1か所にまとめた reducer。
@@ -51,7 +68,11 @@ export const initialState: FlowState = {
 export function flowReducer(state: FlowState, action: FlowAction): FlowState {
   switch (action.type) {
     case "configLoaded":
-      return { ...state, mock: action.mock };
+      return {
+        ...state,
+        mock: action.mock,
+        filedGuidance: action.filedGuidance,
+      };
     case "draftChanged":
       return { ...state, draft: action.draft };
     case "requestStarted":
@@ -63,6 +84,9 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         busy: false,
         error: null,
         savedInquiryId: null,
+        categoryOpen: false,
+        // 追加質問に（戻って）入り直したら、質問を最初から聞き直す
+        answers: action.view.step === "TRIAGED" ? [] : state.answers,
         progress: action.view.step === "ANSWERING" ? state.progress : [],
       };
     case "requestFailed":
@@ -72,6 +96,20 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         error: { ...action.error, source: "action" },
         savedInquiryId: action.error.inquiryId ?? state.savedInquiryId,
       };
+    case "answerGiven":
+      return {
+        ...state,
+        answers: [...state.answers.slice(0, action.index), action.answer],
+        error: null,
+      };
+    case "answersRewound":
+      return {
+        ...state,
+        answers: state.answers.slice(0, action.index),
+        error: null,
+      };
+    case "categoryToggled":
+      return { ...state, categoryOpen: !state.categoryOpen };
     case "streamProgress":
       return { ...state, progress: [...state.progress, action.message] };
     case "streamFailed":
@@ -88,6 +126,10 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         streamAttempt: state.streamAttempt + 1,
       };
     case "reset":
-      return { ...initialState, mock: state.mock };
+      return {
+        ...createInitialState(),
+        mock: state.mock,
+        filedGuidance: state.filedGuidance,
+      };
   }
 }

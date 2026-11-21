@@ -53,6 +53,9 @@ class InquiryApiTest {
     @Value("${inquiry.incident-guidance}")
     String incidentGuidance;
 
+    @Value("${inquiry.filed-guidance}")
+    String filedGuidance;
+
     @BeforeEach
     void clearNotices() {
         notifier.notices().clear();
@@ -93,11 +96,25 @@ class InquiryApiTest {
         return send(post("/api/inquiries/" + id + "/answers").contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
-    private ResultActions confirm(String id, String goal) throws Exception {
+    /** 本文なしの確定（AI の言い直しをそのまま確定する）。 */
+    private ResultActions confirm(String id) throws Exception {
+        return send(put("/api/inquiries/" + id + "/structured").contentType(MediaType.APPLICATION_JSON).content("{}"));
+    }
+
+    private ResultActions confirmSummary(String id, String summary) throws Exception {
         return send(put("/api/inquiries/" + id + "/structured")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"targetSystem\":null,\"goal\":\"" + goal + "\",\"whatHappened\":null,"
-                        + "\"expectedResult\":null,\"urgency\":\"NORMAL\"}"));
+                .content(json("summary", summary)));
+    }
+
+    private ResultActions revise(String id, String note) throws Exception {
+        return send(post("/api/inquiries/" + id + "/revision")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json("note", note)));
+    }
+
+    private ResultActions reopen(String id) throws Exception {
+        return send(post("/api/inquiries/" + id + "/reopen"));
     }
 
     private static final String EMPTY_ANSWERS = "{\"answers\":[]}";
@@ -106,7 +123,7 @@ class InquiryApiTest {
     private String toAnswering(String utterance) throws Exception {
         String id = idOf(create(utterance));
         answers(id, EMPTY_ANSWERS).andExpect(status().isOk());
-        confirm(id, utterance).andExpect(status().isOk()).andExpect(jsonPath("$.step").value("ANSWERING"));
+        confirm(id).andExpect(status().isOk()).andExpect(jsonPath("$.step").value("ANSWERING"));
         return id;
     }
 
@@ -169,7 +186,7 @@ class InquiryApiTest {
                 .andExpect(jsonPath("$.step").value("STRUCTURED"))
                 .andExpect(jsonPath("$.structured.goal").value(SPEC))
                 .andExpect(jsonPath("$.answer").doesNotExist());
-        confirm(id, SPEC).andExpect(jsonPath("$.step").value("ANSWERING"));
+        confirm(id).andExpect(jsonPath("$.step").value("ANSWERING"));
 
         String done = doneView(stream(id));
         assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("ANSWERED");
@@ -252,7 +269,7 @@ class InquiryApiTest {
         answers(id, "{\"answers\":[{\"questionId\":\"wr-what\",\"answer\":\"延長\"},"
                         + "{\"questionId\":\"wr-when\",\"answer\":\"来週\"},{\"questionId\":\"wr-target\",\"answer\":null}]}")
                 .andExpect(jsonPath("$.step").value("STRUCTURED"));
-        confirm(id, WORK)
+        confirm(id)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.step").value("CLOSED"))
                 .andExpect(jsonPath("$.outcome").value("FILED"))
@@ -299,7 +316,7 @@ class InquiryApiTest {
                 .andExpect(jsonPath("$.category").value("SUSPECTED_BUG"))
                 .andExpect(jsonPath("$.incidentGuidance").doesNotExist());
 
-        confirm(id, INCIDENT).andExpect(jsonPath("$.step").value("ANSWERING"));
+        confirm(id).andExpect(jsonPath("$.step").value("ANSWERING"));
         String done = doneView(stream(id));
         assertThat((String) JsonPath.read(done, "$.outcome")).isEqualTo("FILED");
     }
@@ -507,7 +524,7 @@ class InquiryApiTest {
         answers(structured, EMPTY_ANSWERS);
         String answering = toAnswering(SPEC);
 
-        confirm(triaged, SPEC).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_STATE"));
+        confirm(triaged).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_STATE"));
         send(post("/api/inquiries/" + triaged + "/resolution")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"resolved\":true}"))
@@ -517,7 +534,7 @@ class InquiryApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json("category", "WORK_REQUEST")))
                 .andExpect(status().isConflict());
-        confirm(answering, SPEC).andExpect(status().isConflict());
+        confirm(answering).andExpect(status().isConflict());
 
         send(post("/api/inquiries/" + triaged + "/send-now")).andExpect(status().isOk());
         send(post("/api/inquiries/" + triaged + "/send-now"))
@@ -587,31 +604,183 @@ class InquiryApiTest {
     }
 
     @Test
-    void 空のgoalでの確定は400になる() throws Exception {
+    void 不正な確定の本文は400になる() throws Exception {
         String id = idOf(create(SPEC));
         answers(id, EMPTY_ANSWERS);
 
-        confirm(id, "").andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"));
+        confirmSummary(id, "").andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"));
+        confirmSummary(id, "   ").andExpect(status().isBadRequest());
+        confirmSummary(id, "あ".repeat(2001)).andExpect(status().isBadRequest());
+        // 旧形式の5項目は受け付けない
+        send(put("/api/inquiries/" + id + "/structured")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetSystem\":null,\"goal\":\"x\",\"whatHappened\":null,"
+                                + "\"expectedResult\":null,\"urgency\":\"NORMAL\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION"));
+        send(get("/api/inquiries/" + id)).andExpect(jsonPath("$.step").value("STRUCTURED"));
     }
 
     @Test
-    void 本人が修正した整形結果が確定され元のAI出力も残る() throws Exception {
+    void 本文なしの確定はAIの言い直しをそのまま確定する() throws Exception {
+        String id = idOf(create(SPEC));
+        String structured = answers(id, EMPTY_ANSWERS)
+                .andReturn()
+                .getResponse()
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        String aiSummary = JsonPath.read(structured, "$.structured.summary");
+
+        confirm(id).andExpect(jsonPath("$.structured.summary").value(aiSummary));
+
+        assertThat(jdbc.queryForObject(
+                        "select structured_confirmed->>'summary' from inquiries where id = ?::uuid", String.class, id))
+                .isEqualTo(aiSummary);
+    }
+
+    @Test
+    void summaryありの確定はsummaryだけを置き換えgoalとタグの振る舞いは保たれる() throws Exception {
+        String utterance = "[幽霊出典] " + SPEC;
+        String id = idOf(create(utterance));
+        answers(id, EMPTY_ANSWERS);
+
+        confirmSummary(id, "自分で書き直した文章")
+                .andExpect(jsonPath("$.step").value("ANSWERING"))
+                .andExpect(jsonPath("$.structured.summary").value("自分で書き直した文章"))
+                .andExpect(jsonPath("$.structured.goal").value(utterance));
+        String done = doneView(stream(id));
+
+        // goal が変わらないため、タグ（幽霊出典）の振る舞いが最後まで保たれる
+        assertThat((Boolean) JsonPath.read(done, "$.answer.grounded")).isFalse();
+        assertThat(jdbc.queryForObject(
+                        "select structured_by_ai->>'summary' from inquiries where id = ?::uuid", String.class, id))
+                .isNotEqualTo("自分で書き直した文章");
+    }
+
+    // ---- 言い直し（summary） ----
+
+    @Test
+    void summaryは種別ごとの形で作られタグを含まず回答が末尾に足される() throws Exception {
+        String spec = idOf(create("[質問なし] 期限の仕様"));
+        answers(spec, EMPTY_ANSWERS)
+                .andExpect(jsonPath("$.structured.summary").value("「期限の仕様」について、いまの仕組みがどうなっているかを知りたい。"));
+
+        String withAnswers = idOf(create("期限の仕様"));
+        answers(withAnswers, "{\"answers\":[{\"questionId\":\"q1\",\"answer\":\"求人管理画面\"},"
+                        + "{\"questionId\":\"q2\",\"answer\":null}]}")
+                .andExpect(jsonPath("$.structured.summary")
+                        .value("「期限の仕様」について、いまの仕組みがどうなっているかを知りたい。（どの画面での話ですか: 求人管理画面）"));
+
+        String bug = idOf(create("[質問なし] [遅延] 表示がおかしい"));
+        answers(bug, EMPTY_ANSWERS)
+                .andExpect(jsonPath("$.structured.summary")
+                        .value("「表示がおかしい」という状況が起きている。これが意図した動きかどうかを確認したい。"))
+                .andExpect(jsonPath("$.structured.goal").value("[質問なし] [遅延] 表示がおかしい"));
+
+        String work = idOf(create(WORK));
+        answers(work, "{\"answers\":[{\"questionId\":\"wr-what\",\"answer\":\"期間の延長\"},"
+                        + "{\"questionId\":\"wr-when\",\"answer\":\"来週\"},{\"questionId\":\"wr-target\",\"answer\":null}]}")
+                .andExpect(jsonPath("$.structured.summary").value("期間の延長を来週までに対応してほしい。"));
+        String work2 = idOf(create(WORK));
+        answers(work2, "{\"answers\":[{\"questionId\":\"wr-what\",\"answer\":\"期間の延長\"},"
+                        + "{\"questionId\":\"wr-target\",\"answer\":\"求人A\"}]}")
+                .andExpect(jsonPath("$.structured.summary").value("期間の延長を対応してほしい。対象は求人A。"));
+    }
+
+    // ---- 作り直し（5a）・追加質問へ戻る（5b） ----
+
+    @Test
+    void 作り直しで補足が入り残り回数が減り3回目は409になり一言が保存される() throws Exception {
+        String id = idOf(create(SPEC));
+        String base = JsonPath.read(
+                answers(id, EMPTY_ANSWERS)
+                        .andExpect(jsonPath("$.revisionsLeft").value(2))
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString(java.nio.charset.StandardCharsets.UTF_8),
+                "$.structured.summary");
+
+        revise(id, "消えたのは一昨日から")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.revisionsLeft").value(1))
+                .andExpect(jsonPath("$.structured.summary").value(base + " 補足: 消えたのは一昨日から"))
+                .andExpect(jsonPath("$.structured.goal").value(SPEC));
+        revise(id, "画面は管理画面")
+                .andExpect(jsonPath("$.revisionsLeft").value(0))
+                .andExpect(jsonPath("$.structured.summary").value(base + " 補足: 消えたのは一昨日から 補足: 画面は管理画面"));
+        revise(id, "三回目").andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_STATE"));
+
+        assertThat(jdbc.queryForObject(
+                        "select revision_notes::text from inquiries where id = ?::uuid", String.class, id))
+                .contains("消えたのは一昨日から", "画面は管理画面");
+        assertThat(row(id).get("revisions_left")).isEqualTo(0);
+        assertThat(jdbc.queryForObject(
+                        "select count(*) from inquiries, jsonb_array_elements(usages) u"
+                                + " where id = ?::uuid and u->>'step' = 'revise'",
+                        Integer.class,
+                        id))
+                .isEqualTo(2);
+        // 使い切っても、そのまま確定して先へ進める
+        confirm(id).andExpect(jsonPath("$.step").value("ANSWERING"));
+    }
+
+    @Test
+    void 作り直しの一言の検証() throws Exception {
         String id = idOf(create(SPEC));
         answers(id, EMPTY_ANSWERS);
 
-        confirm(id, "修正した目的").andExpect(jsonPath("$.structured.goal").value("修正した目的"));
+        revise(id, "").andExpect(status().isBadRequest());
+        revise(id, "あ".repeat(1001)).andExpect(status().isBadRequest());
+        send(get("/api/inquiries/" + id)).andExpect(jsonPath("$.revisionsLeft").value(2));
+    }
 
-        assertThat(jdbc.queryForObject(
-                        "select structured_by_ai->>'goal' from inquiries where id = ?::uuid", String.class, id))
-                .isEqualTo(SPEC);
-        assertThat(jdbc.queryForObject(
-                        "select structured_confirmed->>'goal' from inquiries where id = ?::uuid", String.class, id))
-                .isEqualTo("修正した目的");
+    @Test
+    void 追加質問へ戻ると同じ質問が返りもう一度回答して確定まで進める() throws Exception {
+        String created = create(SPEC);
+        String id = idOf(created);
+        List<String> questionIds = JsonPath.read(created, "$.questions[*].id");
+        answers(id, EMPTY_ANSWERS);
+        revise(id, "違う").andExpect(jsonPath("$.revisionsLeft").value(1));
+
+        reopen(id)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.step").value("TRIAGED"))
+                .andExpect(jsonPath("$.structured").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.questions[*].id").value(org.hamcrest.Matchers.contains(questionIds.toArray())))
+                .andExpect(jsonPath("$.revisionsLeft").value(1));
+
+        answers(id, "{\"answers\":[{\"questionId\":\"q1\",\"answer\":\"その他\"}]}")
+                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.revisionsLeft").value(1))
+                .andExpect(jsonPath("$.structured.summary").value(org.hamcrest.Matchers.containsString("その他")));
+        confirm(id).andExpect(jsonPath("$.step").value("ANSWERING"));
+    }
+
+    @Test
+    void 不正な段階の作り直しと追加質問へ戻る操作は409になる() throws Exception {
+        String triaged = idOf(create(SPEC));
+        revise(triaged, "x").andExpect(status().isConflict());
+        reopen(triaged).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_STATE"));
+
+        String answering = toAnswering(SPEC);
+        revise(answering, "x").andExpect(status().isConflict());
+        reopen(answering).andExpect(status().isConflict());
+
+        String closed = idOf(create(SPEC));
+        send(post("/api/inquiries/" + closed + "/send-now"));
+        revise(closed, "x").andExpect(status().isConflict());
+        reopen(closed).andExpect(status().isConflict());
     }
 
     @Test
     void configはモック動作中を返す() throws Exception {
-        send(get("/api/config")).andExpect(status().isOk()).andExpect(jsonPath("$.mock").value(true));
+        send(get("/api/config"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mock").value(true))
+                .andExpect(jsonPath("$.filedGuidance").value(filedGuidance));
+        // 設定ファイルの日本語が文字化けせずに読めていること
+        assertThat(filedGuidance).startsWith("担当者が内容を確認して連絡します。");
+        assertThat(incidentGuidance).startsWith("障害の連絡は専用の経路");
     }
 
     // ---- (i) SSE ----

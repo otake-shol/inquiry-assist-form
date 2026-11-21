@@ -12,6 +12,7 @@ export function makeView(overrides: Partial<InquiryView> = {}): InquiryView {
     categoryByAi: "SPEC_QUESTION",
     category: "SPEC_QUESTION",
     questions: [],
+    revisionsLeft: 2,
     structured: null,
     answer: null,
     incidentGuidance: null,
@@ -28,6 +29,7 @@ export function makeStructuredView(
   return makeView({
     step: "STRUCTURED",
     structured: {
+      summary: "求人の掲載期限を、何日まで延ばせるかを知りたい。",
       targetSystem: "求人管理画面",
       goal: "掲載期限を延ばせる日数を知りたい",
       whatHappened: null,

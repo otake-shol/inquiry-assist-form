@@ -4,7 +4,6 @@ import type {
   ErrorBody,
   InquiryCategory,
   InquiryView,
-  StructuredInquiry,
 } from "./types.ts";
 
 /** API が返したエラー（`{code, message}`）を持つ例外。 */
@@ -94,16 +93,39 @@ export function submitAnswers(
   });
 }
 
-/** `PUT /api/inquiries/{id}/structured`。整形結果を確定する。 */
+/**
+ * `PUT /api/inquiries/{id}/structured`。言い直しを確定する。
+ * @param id 問い合わせ ID
+ * @param summary 本人が書き直した文章（省略すると AI の言い直しをそのまま確定する）
+ */
 export function confirmStructured(
   id: string,
-  structured: StructuredInquiry,
+  summary?: string,
 ): Promise<InquiryView> {
   return request<InquiryView>(
     "PUT",
     `/api/inquiries/${id}/structured`,
-    structured,
+    summary === undefined ? {} : { summary },
   );
+}
+
+/**
+ * `POST /api/inquiries/{id}/revision`。違う点を一言伝えて言い直しを作り直してもらう。
+ * @param id 問い合わせ ID
+ * @param note 違う点の一言
+ */
+export function reviseStructured(
+  id: string,
+  note: string,
+): Promise<InquiryView> {
+  return request<InquiryView>("POST", `/api/inquiries/${id}/revision`, {
+    note,
+  });
+}
+
+/** `POST /api/inquiries/{id}/reopen`。追加質問へ戻る。 */
+export function reopenQuestions(id: string): Promise<InquiryView> {
+  return request<InquiryView>("POST", `/api/inquiries/${id}/reopen`);
 }
 
 /** `POST /api/inquiries/{id}/resolution`。解決したかどうかを送る。 */

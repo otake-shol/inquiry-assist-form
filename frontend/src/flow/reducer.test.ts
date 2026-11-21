@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { makeView } from "../test/fakes.ts";
-import { flowReducer, initialState, type FlowState } from "./reducer.ts";
+import { createInitialState, flowReducer, type FlowState } from "./reducer.ts";
+
+const initialState = createInitialState();
 
 describe("flowReducer", () => {
   it("要求の開始で busy になりエラーが消え、失敗で busy が戻る", () => {
@@ -76,5 +78,46 @@ describe("flowReducer", () => {
       ...initialState,
       mock: true,
     });
+  });
+
+  it("回答は順に積まれ、答え直すと以降が消える", () => {
+    let state = flowReducer(initialState, {
+      type: "answerGiven",
+      index: 0,
+      answer: "詳細",
+    });
+    state = flowReducer(state, { type: "answerGiven", index: 1, answer: null });
+    expect(state.answers).toEqual(["詳細", null]);
+    expect(
+      flowReducer(state, { type: "answersRewound", index: 1 }).answers,
+    ).toEqual(["詳細"]);
+    // 同じ位置に答え直すと、それより後ろは残らない
+    expect(
+      flowReducer(state, { type: "answerGiven", index: 0, answer: "一覧" })
+        .answers,
+    ).toEqual(["一覧"]);
+  });
+
+  it("追加質問の段階の view を受け取ると回答を最初から聞き直し、後の段階では保つ", () => {
+    const answered: FlowState = {
+      ...initialState,
+      answers: ["詳細"],
+      categoryOpen: true,
+    };
+    const reopened = flowReducer(answered, {
+      type: "viewReceived",
+      view: makeView({ step: "TRIAGED" }),
+    });
+    expect(reopened.answers).toEqual([]);
+    expect(reopened.categoryOpen).toBe(false);
+    const structured = flowReducer(answered, {
+      type: "viewReceived",
+      view: makeView({ step: "STRUCTURED" }),
+    });
+    expect(structured.answers).toEqual(["詳細"]);
+  });
+
+  it("入力欄の初期値を渡せる", () => {
+    expect(createInitialState("掲載期限").draft).toBe("掲載期限");
   });
 });

@@ -1,20 +1,39 @@
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import * as api from "./api/client.ts";
 import {
   subscribeAnswerStream,
   type SubscribeAnswerStream,
 } from "./api/stream.ts";
-import type { InquiryView } from "./api/types.ts";
-import { AnsweredStep, AnsweringStep } from "./components/AnswerSteps.tsx";
-import { ClosedStep } from "./components/ClosedStep.tsx";
+import type { AnswerInput, InquiryView, Question } from "./api/types.ts";
+import {
+  AnsweredRow,
+  InputBox,
+  QuestionPrompt,
+  QuestionsIntro,
+  Receipt,
+  UtteranceRow,
+} from "./components/Conversation.tsx";
 import { ErrorNotice } from "./components/ErrorNotice.tsx";
-import { InputStep } from "./components/InputStep.tsx";
 import { MockBar } from "./components/MockBar.tsx";
-import { Stepper } from "./components/Stepper.tsx";
-import { StructureStep } from "./components/StructureStep.tsx";
-import { TriageStep } from "./components/TriageStep.tsx";
-import { flowReducer, initialState } from "./flow/reducer.ts";
-import { canSendNow, progressIndexOf, screenOf } from "./flow/screen.ts";
+import {
+  Closing,
+  FiledNotice,
+  Researching,
+  Result,
+} from "./components/Outcome.tsx";
+import {
+  ConfirmedRestatement,
+  Restatement,
+} from "./components/Restatement.tsx";
+import { createInitialState, flowReducer } from "./flow/reducer.ts";
+import {
+  canSendNow,
+  pageSections,
+  readTextParam,
+  sectionKey,
+  type Section,
+} from "./flow/page.ts";
+import { TEXT } from "./text/labels.ts";
 
 /** App の props。 */
 interface AppProps {
@@ -23,25 +42,65 @@ interface AppProps {
 }
 
 /**
- * 問い合わせフォーム全体。状態は reducer に集約し、表示する画面は InquiryView から決める。
+ * 質問と回答を API の回答の形に並べる。
+ * @param questions 追加質問
+ * @param answers 回答（質問と同じ順）
+ */
+function toAnswerInputs(
+  questions: Question[],
+  answers: (string | null)[],
+): AnswerInput[] {
+  return questions.map((q, i) => ({ questionId: q.id, answer: answers[i] }));
+}
+
+/** 動きを減らす設定か。 */
+function prefersReducedMotion(): boolean {
+  return (
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+  );
+}
+
+/**
+ * 問い合わせフォーム全体。1枚のページが会話のように下へ伸び、済んだやり取りは要約として上に残る。
+ * 何を並べるかは InquiryView と回答済みの数から `pageSections` が決める。
  * @param props 購読関数の差し替え口
  */
 export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
-  const [state, dispatch] = useReducer(flowReducer, initialState);
-  const { view, busy, error, progress, draft, mock, streamAttempt } = state;
-  const screen = screenOf(view);
+  const [state, dispatch] = useReducer(flowReducer, undefined, () =>
+    createInitialState(readTextParam(window.location.search)),
+  );
+  const {
+    view,
+    busy,
+    error,
+    progress,
+    draft,
+    mock,
+    answers,
+    categoryOpen,
+    streamAttempt,
+    filedGuidance,
+    savedInquiryId,
+  } = state;
   const viewId = view?.id;
+  const step = view?.step;
 
   useEffect(() => {
     // 取得に失敗したら非モック扱いで続行する
     api
       .getConfig()
-      .then((config) => dispatch({ type: "configLoaded", mock: config.mock }))
+      .then((config) =>
+        dispatch({
+          type: "configLoaded",
+          mock: config.mock,
+          filedGuidance: config.filedGuidance ?? null,
+        }),
+      )
       .catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (screen !== "ANSWERING" || viewId === undefined) return;
+    if (step !== "ANSWERING" || viewId === undefined) return;
     let unsubscribe: (() => void) | null = null;
     // StrictMode の開発時二重実行で接続が二重にならないよう、購読開始を1タスク遅らせる
     const timer = setTimeout(() => {
@@ -56,7 +115,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
       clearTimeout(timer);
       unsubscribe?.();
     };
-  }, [screen, viewId, streamAttempt, subscribe]);
+  }, [step, viewId, streamAttempt, subscribe]);
 
   /**
    * API 呼び出しを実行し、結果の InquiryView かエラーを状態に反映する。通信中は busy にする。
@@ -75,40 +134,89 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
     }
   }, []);
 
-  // 保存済みの問い合わせ（作成後、または判定失敗で保存された分）があれば担当者へ送れる
-  const sendNowId =
-    view !== null && canSendNow(view)
-      ? view.id
-      : (state.savedInquiryId ?? undefined);
-  const streamError = error?.source === "stream" ? error : null;
+  // 質問が0個なら何も出さずに先へ進む。失敗したときは自動で繰り返さない。
+  const autoSubmitted = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      view === null ||
+      view.step !== "TRIAGED" ||
+      view.category === null ||
+      view.questions.length > 0 ||
+      busy ||
+      error !== null
+    ) {
+      return;
+    }
+    const key = `${view.id}:${view.category}`;
+    if (autoSubmitted.current === key) return;
+    autoSubmitted.current = key;
+    void run(() => api.submitAnswers(view.id, []));
+  }, [view, busy, error, run]);
 
-  return (
-    <div className="app">
-      <header>
-        <h1>問い合わせアシスト</h1>
-      </header>
-      {mock && (
-        <MockBar
-          canPick={screen === "INPUT" && !busy}
-          onPick={(text) => dispatch({ type: "draftChanged", draft: text })}
-        />
-      )}
-      <Stepper current={progressIndexOf(screen)} />
-      <main>
-        {error !== null && (
-          <ErrorNotice
-            error={error}
-            hasInquiry={sendNowId !== undefined}
-            busy={busy}
-            onRetry={
-              screen === "ANSWERING" && streamError !== null
-                ? () => dispatch({ type: "streamRetried" })
-                : undefined
-            }
-          />
-        )}
-        {screen === "INPUT" && (
-          <InputStep
+  const sections = pageSections(view, answers.length);
+  const lastKey = sectionKey(sections[sections.length - 1]);
+  const lastRef = useRef<HTMLDivElement | null>(null);
+
+  // 新しい部分が現れたら、そこまで滑らかにスクロールし、フォーカスを移す（読み上げにも伝わる）
+  useEffect(() => {
+    const element = lastRef.current;
+    if (element === null) return;
+    element.scrollIntoView?.({
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+      block: "nearest",
+    });
+    element
+      .querySelector<HTMLElement>("[data-autofocus]")
+      ?.focus({ preventScroll: true });
+  }, [lastKey]);
+
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (error === null) return;
+    errorRef.current?.scrollIntoView?.({
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+      block: "nearest",
+    });
+  }, [error]);
+
+  const streamError = error?.source === "stream" ? error : null;
+  const sendNowId =
+    view !== null && canSendNow(view) ? view.id : savedInquiryId;
+  const allAnswered =
+    view !== null &&
+    view.step === "TRIAGED" &&
+    view.category !== null &&
+    answers.length === view.questions.length;
+
+  /**
+   * 追加質問に答える。最後の質問に答えたら自動で送信する。
+   * @param current 質問の持ち主の問い合わせ
+   * @param index 答えた質問の位置
+   * @param answer 回答（「わからない」は null）
+   */
+  const answerQuestion = (
+    current: InquiryView,
+    index: number,
+    answer: string | null,
+  ) => {
+    const next = [...answers.slice(0, index), answer];
+    dispatch({ type: "answerGiven", index, answer });
+    if (next.length === current.questions.length) {
+      void run(() =>
+        api.submitAnswers(current.id, toAnswerInputs(current.questions, next)),
+      );
+    }
+  };
+
+  /**
+   * ページの1部分を描く。
+   * @param section 描く部分
+   */
+  const renderSection = (section: Section) => {
+    switch (section.kind) {
+      case "input":
+        return (
+          <InputBox
             draft={draft}
             busy={busy}
             onChange={(value) =>
@@ -116,59 +224,155 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
             }
             onSubmit={() => void run(() => api.createInquiry(draft.trim()))}
           />
-        )}
-        {view !== null && screen === "TRIAGE" && (
-          <TriageStep
-            view={view}
+        );
+      case "utterance":
+        return <UtteranceRow text={view!.utterance} />;
+      case "receipt":
+        return (
+          <Receipt
+            category={view!.category}
+            canChange={view!.step === "TRIAGED" && view!.category !== null}
+            open={categoryOpen}
             busy={busy}
-            onChangeCategory={(category) =>
-              void run(() => api.changeCategory(view.id, category))
-            }
-            onSubmit={(answers) =>
-              void run(() => api.submitAnswers(view.id, answers))
+            onToggle={() => dispatch({ type: "categoryToggled" })}
+            onSelect={(category) =>
+              category === view!.category
+                ? dispatch({ type: "categoryToggled" })
+                : void run(() => api.changeCategory(view!.id, category))
             }
           />
-        )}
-        {view !== null &&
-          view.structured !== null &&
-          screen === "STRUCTURE" && (
-            <StructureStep
-              structured={view.structured}
-              busy={busy}
-              onConfirm={(structured) =>
-                void run(() => api.confirmStructured(view.id, structured))
-              }
-            />
-          )}
-        {screen === "ANSWERING" && (
-          <AnsweringStep progress={progress} stopped={streamError !== null} />
-        )}
-        {view !== null && view.answer !== null && screen === "ANSWERED" && (
-          <AnsweredStep
-            answer={view.answer}
+        );
+      case "questionsIntro":
+        return <QuestionsIntro count={section.count} />;
+      case "answered":
+        return (
+          <AnsweredRow
+            question={view!.questions[section.index]}
+            answer={answers[section.index]}
+            interactive={section.interactive}
+            busy={busy}
+            onRewind={() =>
+              dispatch({ type: "answersRewound", index: section.index })
+            }
+          />
+        );
+      case "question":
+        return (
+          <QuestionPrompt
+            question={view!.questions[section.index]}
+            busy={busy}
+            onAnswer={(answer) => answerQuestion(view!, section.index, answer)}
+          />
+        );
+      case "restatement":
+        return section.confirmed ? (
+          <ConfirmedRestatement summary={view!.structured!.summary} />
+        ) : (
+          <Restatement
+            summary={view!.structured!.summary}
+            revisionsLeft={view!.revisionsLeft}
+            busy={busy}
+            canGoBack={view!.questions.length > 0}
+            onConfirm={() => void run(() => api.confirmStructured(view!.id))}
+            onRevise={(note) =>
+              void run(() => api.reviseStructured(view!.id, note))
+            }
+            onRewrite={(summary) =>
+              void run(() => api.confirmStructured(view!.id, summary))
+            }
+            onGoBack={() => void run(() => api.reopenQuestions(view!.id))}
+            onSendAsIs={() => void run(() => api.sendNow(view!.id))}
+          />
+        );
+      case "researching":
+        return (
+          <Researching progress={progress} stopped={streamError !== null} />
+        );
+      case "filedNotice":
+        return <FiledNotice />;
+      case "result":
+        return (
+          <Result
+            answer={view!.answer!}
+            awaitingResolution={view!.step === "ANSWERED"}
             busy={busy}
             onResolve={(resolved) =>
-              void run(() => api.resolve(view.id, resolved))
+              void run(() => api.resolve(view!.id, resolved))
             }
           />
-        )}
-        {view !== null && screen === "CLOSED" && (
-          <ClosedStep
-            view={view}
+        );
+      case "closing":
+        return (
+          <Closing
+            view={view!}
+            filedGuidance={filedGuidance}
             onRestart={() => dispatch({ type: "reset" })}
           />
+        );
+    }
+  };
+
+  let retry: (() => void) | undefined;
+  let retryLabel: string | undefined;
+  if (step === "ANSWERING" && streamError !== null) {
+    retry = () => dispatch({ type: "streamRetried" });
+    retryLabel = TEXT.retryResearch;
+  } else if (allAnswered && error !== null && error.source === "action") {
+    retry = () =>
+      void run(() =>
+        api.submitAnswers(view!.id, toAnswerInputs(view!.questions, answers)),
+      );
+    retryLabel = TEXT.resendAnswers;
+  }
+
+  return (
+    <div className="app">
+      <header>
+        <h1>{TEXT.appTitle}</h1>
+      </header>
+      {mock && (
+        <MockBar
+          canPick={view === null && !busy}
+          onPick={(text) => dispatch({ type: "draftChanged", draft: text })}
+        />
+      )}
+      <main className="conversation">
+        {sections.map((section, index) => {
+          const key = sectionKey(section);
+          return (
+            <div
+              key={key}
+              className="section"
+              ref={index === sections.length - 1 ? lastRef : undefined}
+            >
+              {renderSection(section)}
+            </div>
+          );
+        })}
+        <div aria-live="polite" className="working">
+          {busy ? TEXT.working : ""}
+        </div>
+        {error !== null && (
+          <div ref={errorRef}>
+            <ErrorNotice
+              error={error}
+              hasInquiry={sendNowId !== null}
+              busy={busy}
+              onRetry={retry}
+              retryLabel={retryLabel}
+            />
+          </div>
         )}
       </main>
-      {sendNowId !== undefined && (
+      {sendNowId !== null && (
         <footer className="send-now">
-          <p>待たずに人に見てもらいたいときはこちら。</p>
+          <p>{TEXT.sendNowHint}</p>
           <button
             type="button"
-            className="secondary"
             disabled={busy}
             onClick={() => void run(() => api.sendNow(sendNowId))}
           >
-            今すぐ担当者に送る
+            {TEXT.sendNow}
           </button>
         </footer>
       )}

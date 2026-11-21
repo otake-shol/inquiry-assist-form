@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+const INPUT_LABEL =
+  "うまくまとまっていなくて大丈夫です。起きていること、知りたいことをそのまま書いてください。";
+
 /**
  * 実際の API（モック）につないで正常系を最後まで通し、
  * コンソールエラーとページエラーが出ないことを確認する。
@@ -17,32 +20,37 @@ test("仕様確認の正常系を最後まで通せる", async ({ page }) => {
 
   // 入力
   await page
-    .getByLabel("困りごと")
+    .getByLabel(INPUT_LABEL)
     .fill("求人の掲載期限は、何日まで延長できますか？");
   await page.getByRole("button", { name: "送信する" }).click();
+  await expect(
+    page.getByText("仕様の確認・相談として受け取りました"),
+  ).toBeVisible();
 
-  // 追加質問（全問「わからない」で進める）
-  await expect(page.getByText("仕様の確認・相談として扱います")).toBeVisible();
-  const unknowns = page.getByLabel("わからない");
-  const count = await unknowns.count();
-  for (let i = 0; i < count; i++) {
-    await unknowns.nth(i).check();
+  // 追加質問（1問ずつ「わからない」で進める。数は決め打ちしない）
+  const confirm = page.getByRole("button", { name: "合っています" });
+  const unknown = page.getByRole("button", { name: "わからない", exact: true });
+  for (let i = 0; i < 5; i++) {
+    await expect(unknown.or(confirm)).toBeVisible();
+    if (await confirm.isVisible()) break;
+    await unknown.click();
   }
-  await page.getByRole("button", { name: /次へ進む/ }).click();
 
-  // 整形結果の確認
-  await expect(page.getByLabel("やりたいこと（必須）")).not.toHaveValue("");
-  await page.getByRole("button", { name: "この内容で進める" }).click();
+  // 言い直し
+  await expect(page.getByText("つまり、こういうことですね。")).toBeVisible();
+  await confirm.click();
 
-  // 0次回答
-  await expect(page.getByRole("region", { name: "0次回答" })).toBeVisible({
+  // 調べた結果
+  await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.getByText("技術的な詳細（担当者向けメモ）")).toBeVisible();
-  await page.getByRole("button", { name: "解決した" }).click();
+  await expect(page.getByText("担当者向けの詳しい内容")).toBeVisible();
+  await page.getByRole("button", { name: "解決しました" }).click();
 
-  // 完了
-  await expect(page.getByText("解決として記録しました")).toBeVisible();
+  // 終わり
+  await expect(
+    page.getByText("解決してよかったです。この内容は記録しておきます。"),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "新しい問い合わせを書く" }),
   ).toBeVisible();

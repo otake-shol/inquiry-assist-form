@@ -17,6 +17,7 @@ import java.util.UUID;
  * @param categoryByAi AI が判定した種別
  * @param category 本人が確認・変更した後の種別
  * @param questions 現在の追加質問
+ * @param revisionsLeft 言い直しを作り直せる残り回数
  * @param structured 整形後の問い。{@code STRUCTURED} 以降で非 null
  * @param answer 0次回答。完了後に非 null
  * @param incidentGuidance 障害の案内文。{@code INCIDENT_REDIRECTED} のときだけ非 null
@@ -31,6 +32,7 @@ public record InquiryView(
         InquiryCategory categoryByAi,
         InquiryCategory category,
         List<QuestionView> questions,
+        int revisionsLeft,
         StructuredView structured,
         AnswerView answer,
         String incidentGuidance,
@@ -49,6 +51,7 @@ public record InquiryView(
     /**
      * 整形後の問い。
      *
+     * @param summary 本人に見せる言い直しの文章
      * @param targetSystem 対象システム。不明なら null
      * @param goal やりたいこと・知りたいこと
      * @param whatHappened 起きたこと
@@ -56,6 +59,7 @@ public record InquiryView(
      * @param urgency 緊急度
      */
     public record StructuredView(
+            String summary,
             String targetSystem,
             String goal,
             String whatHappened,

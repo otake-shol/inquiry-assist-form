@@ -26,7 +26,7 @@ class MockInquiryAssistantTest {
     private final CitationVerifier verifier = new CitationVerifier(new MockKnowledgeSearch());
 
     private StructuredInquiry inquiry(InquiryCategory category, String goal) {
-        return new StructuredInquiry(category, null, goal, null, null, null);
+        return new StructuredInquiry("言い直し", category, null, goal, null, null, null);
     }
 
     @ParameterizedTest

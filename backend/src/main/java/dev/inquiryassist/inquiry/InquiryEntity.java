@@ -52,6 +52,9 @@ class InquiryEntity {
             long cacheReadTokens,
             boolean mock) {}
 
+    /** 言い直しを作り直せる回数の初期値。 */
+    static final int INITIAL_REVISIONS = 2;
+
     @Id
     UUID id;
 
@@ -118,6 +121,13 @@ class InquiryEntity {
 
     @Column(name = "sent_immediately", nullable = false)
     boolean sentImmediately;
+
+    @Column(name = "revisions_left", nullable = false)
+    int revisionsLeft = INITIAL_REVISIONS;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "revision_notes", nullable = false)
+    List<String> revisionNotes = new ArrayList<>();
 
     @Column(name = "filed_at")
     Instant filedAt;

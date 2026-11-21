@@ -26,6 +26,9 @@ public class LoggingFilingNotifier implements FilingNotifier {
                 memo == null ? 0 : memo.findings().size(),
                 memo == null ? 0 : memo.notFound().size(),
                 memo == null ? 0 : memo.nextChecks().size());
+        if (notice.structured() != null) {
+            log.info("  言い直し: {}", notice.structured().summary());
+        }
         if (memo != null) {
             memo.findings().forEach(f -> log.info("  分かったこと: {}", f));
             memo.notFound().forEach(f -> log.info("  見つからなかったこと: {}", f));

@@ -33,6 +33,18 @@ public interface InquiryAssistant {
             String utterance, InquiryCategory category, List<AnsweredQuestion> answers);
 
     /**
+     * 本人が違う点を一言で伝えたときに、言い直しを作り直す。
+     *
+     * @param utterance 本人が書いた元の発話
+     * @param current 直前の整形後の問い
+     * @param note 本人が伝えた、違う点の一言
+     * @return 作り直した整形後の問い
+     * @throws AiRefusalException モデルが回答を拒否した場合
+     * @throws AiUnavailableException モデルを呼び出せなかった場合
+     */
+    AiResult<StructuredInquiry> revise(String utterance, StructuredInquiry current, String note);
+
+    /**
      * 整形後の問いに対する0次回答を作る。一次情報の検索はここに集約する。
      *
      * <p>返す出典は未照合。呼び出し側が照合し、{@link ZeroAnswer#withVerifiedCitations} で絞り込む。

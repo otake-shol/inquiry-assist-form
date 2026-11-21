@@ -3,7 +3,6 @@ package dev.inquiryassist.web;
 import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.InquiryCategory;
-import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.inquiry.InquiryService;
 import dev.inquiryassist.inquiry.InquiryView;
 import dev.inquiryassist.inquiry.InvalidStateException;
@@ -14,6 +13,7 @@ import jakarta.validation.constraints.Size;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,13 +47,8 @@ public class InquiryController {
     /** 追加質問への回答。 */
     public record AnswersRequest(@NotNull List<@NotNull @Valid AnswerItem> answers) {}
 
-    /** 整形結果の確定。 */
-    public record StructuredRequest(
-            @Size(max = 4000) String targetSystem,
-            @NotBlank @Size(max = 4000) String goal,
-            @Size(max = 4000) String whatHappened,
-            @Size(max = 4000) String expectedResult,
-            StructuredInquiry.Urgency urgency) {}
+    /** 言い直しの作り直し。 */
+    public record RevisionRequest(@NotBlank @Size(max = 1000) String note) {}
 
     /** 解決の判定。 */
     public record ResolutionRequest(@NotNull Boolean resolved) {}
@@ -108,22 +103,49 @@ public class InquiryController {
     }
 
     /**
-     * 整形結果を確定する。
+     * 言い直しを確定する。本文は {@code {}}（または本文なし）で AI の言い直しをそのまま確定し、
+     * {@code {"summary": "…"}} で本人が書き直した文章に置き換える。それ以外の項目（旧形式の5項目など）は受け付けない。
      *
      * @param id 問い合わせの識別子
-     * @param request 確定する整形結果
+     * @param body リクエスト本文
      * @return 更新後の問い合わせ
      */
     @PutMapping("/api/inquiries/{id}/structured")
-    public InquiryView structured(@PathVariable UUID id, @Valid @RequestBody StructuredRequest request) {
-        return service.confirmStructured(
-                id,
-                new InquiryService.StructuredInput(
-                        request.targetSystem(),
-                        request.goal(),
-                        request.whatHappened(),
-                        request.expectedResult(),
-                        request.urgency()));
+    public InquiryView structured(@PathVariable UUID id, @RequestBody(required = false) Map<String, Object> body) {
+        Object summary = null;
+        if (body != null) {
+            if (!Set.of("summary").containsAll(body.keySet())) {
+                throw new IllegalArgumentException("summary 以外の項目は受け付けません");
+            }
+            summary = body.get("summary");
+            if (summary != null && !(summary instanceof String)) {
+                throw new IllegalArgumentException("summary は文字列");
+            }
+        }
+        return service.confirmStructured(id, (String) summary);
+    }
+
+    /**
+     * 本人が違う点を一言で伝え、言い直しを作り直す。
+     *
+     * @param id 問い合わせの識別子
+     * @param request 違う点の一言
+     * @return 更新後の問い合わせ
+     */
+    @PostMapping("/api/inquiries/{id}/revision")
+    public InquiryView revision(@PathVariable UUID id, @Valid @RequestBody RevisionRequest request) {
+        return service.revise(id, request.note());
+    }
+
+    /**
+     * 追加質問へ戻る。
+     *
+     * @param id 問い合わせの識別子
+     * @return 更新後の問い合わせ
+     */
+    @PostMapping("/api/inquiries/{id}/reopen")
+    public InquiryView reopen(@PathVariable UUID id) {
+        return service.reopen(id);
     }
 
     /**

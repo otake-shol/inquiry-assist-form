@@ -48,6 +48,8 @@ public class InquiryService {
     /** 障害の固定質問の識別子。 */
     public static final String INCIDENT_CHECK = "incident-check";
 
+    private static final int MAX_SUMMARY_LENGTH = 2000;
+    private static final int MAX_NOTE_LENGTH = 1000;
     private static final String INCIDENT_NOT_STOPPED = "いいえ";
 
     private static final List<StoredQuestion> WORK_REQUEST_QUESTIONS = List.of(
@@ -64,22 +66,6 @@ public class InquiryService {
      * @param answer 回答。「わからない」は null
      */
     public record AnswerInput(String questionId, String answer) {}
-
-    /**
-     * 本人が確認・修正した整形結果。
-     *
-     * @param targetSystem 対象システム
-     * @param goal やりたいこと・知りたいこと。必須
-     * @param whatHappened 起きたこと
-     * @param expectedResult 期待した結果
-     * @param urgency 緊急度。null なら NORMAL
-     */
-    public record StructuredInput(
-            String targetSystem,
-            String goal,
-            String whatHappened,
-            String expectedResult,
-            StructuredInquiry.Urgency urgency) {}
 
     private final InquiryAssistant assistant;
     private final CitationVerifier verifier;
@@ -207,28 +193,68 @@ public class InquiryService {
     }
 
     /**
-     * 本人が確認・修正した整形結果を確定する。作業依頼はここで起票し、それ以外は0次回答の生成待ちになる。
+     * 言い直しを確定する。作業依頼はここで起票し、それ以外は0次回答の生成待ちになる。
      *
      * @param id 問い合わせの識別子
-     * @param input 確定する整形結果
+     * @param summary 本人が書き直した文章。AI の言い直しをそのまま確定する場合は null
      * @return 更新後の問い合わせ
      * @throws InvalidStateException {@code STRUCTURED} でない場合
-     * @throws IllegalArgumentException goal が空の場合
+     * @throws IllegalArgumentException summary が空白のみ、または2000文字を超える場合
      */
-    public InquiryView confirmStructured(UUID id, StructuredInput input) {
+    public InquiryView confirmStructured(UUID id, String summary) {
+        if (summary != null && (summary.isBlank() || summary.length() > MAX_SUMMARY_LENGTH)) {
+            throw new IllegalArgumentException("summary は1〜" + MAX_SUMMARY_LENGTH + "文字");
+        }
         InquiryEntity inquiry = load(id);
         requireStep(inquiry, InquiryStep.STRUCTURED);
-        inquiry.structuredConfirmed = new StructuredInquiry(
-                inquiry.category(),
-                input.targetSystem(),
-                input.goal(),
-                input.whatHappened(),
-                input.expectedResult(),
-                input.urgency());
+        inquiry.structuredConfirmed =
+                summary == null ? inquiry.structuredByAi : inquiry.structuredByAi.withSummary(summary);
         if (inquiry.category() == InquiryCategory.WORK_REQUEST) {
             return toView(commit(inquiry, file(inquiry, false)));
         }
         inquiry.step = InquiryStep.ANSWERING;
+        return toView(commit(inquiry, null));
+    }
+
+    /**
+     * 本人の一言をもとに言い直しを作り直す。AI が失敗した場合は残り回数を減らさず、何も保存しない。
+     *
+     * @param id 問い合わせの識別子
+     * @param note 本人が伝えた、違う点の一言
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code STRUCTURED} でない、または残り回数が0の場合
+     * @throws IllegalArgumentException note が空白のみ、または1000文字を超える場合
+     */
+    public InquiryView revise(UUID id, String note) {
+        if (note == null || note.isBlank() || note.length() > MAX_NOTE_LENGTH) {
+            throw new IllegalArgumentException("note は1〜" + MAX_NOTE_LENGTH + "文字");
+        }
+        InquiryEntity inquiry = load(id);
+        requireStep(inquiry, InquiryStep.STRUCTURED);
+        if (inquiry.revisionsLeft <= 0) {
+            throw new InvalidStateException("言い直しを作り直せる回数を使い切りました");
+        }
+        AiResult<StructuredInquiry> result = assistant.revise(inquiry.utterance, inquiry.structuredByAi, note);
+        inquiry.structuredByAi = result.value();
+        inquiry.revisionNotes.add(note);
+        inquiry.revisionsLeft--;
+        inquiry.addUsage("revise", result.usage());
+        return toView(commit(inquiry, null));
+    }
+
+    /**
+     * 追加質問へ戻る。整形結果は破棄し、質問は同じものを返す。作り直しの残り回数は戻さない。
+     *
+     * @param id 問い合わせの識別子
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code STRUCTURED} でない場合
+     */
+    public InquiryView reopen(UUID id) {
+        InquiryEntity inquiry = load(id);
+        requireStep(inquiry, InquiryStep.STRUCTURED);
+        inquiry.structuredByAi = null;
+        inquiry.structuredConfirmed = null;
+        inquiry.step = InquiryStep.TRIAGED;
         return toView(commit(inquiry, null));
     }
 
@@ -428,9 +454,11 @@ public class InquiryService {
                 e.followUps.stream()
                         .map(q -> new InquiryView.QuestionView(q.id(), q.text(), q.options()))
                         .toList(),
+                e.revisionsLeft,
                 structured == null
                         ? null
                         : new InquiryView.StructuredView(
+                                structured.summary(),
                                 structured.targetSystem(),
                                 structured.goal(),
                                 structured.whatHappened(),
