@@ -34,7 +34,7 @@ class RevisionFailureTest {
 
     @Test
     void AIが失敗した作り直しは残り回数を減らさず一言も残さない() {
-        var id = service.create("期限の仕様").id();
+        var id = service.create("期限の仕様", null).id();
         service.answerQuestions(id, List.of());
 
         doThrow(new AiUnavailableException("失敗", null)).when(assistant).revise(any(), any(), any());

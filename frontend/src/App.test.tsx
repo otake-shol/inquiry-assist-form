@@ -952,3 +952,198 @@ describe("入力とモック表示", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
+
+describe("対象システム", () => {
+  const systems = [
+    { id: "job-admin", label: "求人管理画面" },
+    { id: "billing", label: "請求管理" },
+  ];
+  const withSystems = { "GET /api/config": { body: { mock: false, systems } } };
+  const bug = {
+    category: "SUSPECTED_BUG",
+    categoryByAi: "SUSPECTED_BUG",
+  } as const;
+
+  /** 作成の本文を取り出す。 */
+  const createBody = (calls: RecordedCall[]) =>
+    findCall(calls, "POST", "/api/inquiries")?.body;
+
+  it("(a) 選んで送ると systemId が送られ、もう一度押すと解除される", async () => {
+    const user = userEvent.setup();
+    const calls = installFakeFetch({
+      ...withSystems,
+      "POST /api/inquiries": { status: 201, body: makeView() },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    const job = await screen.findByRole("button", { name: "求人管理画面" });
+    expect(job).toHaveAttribute("aria-pressed", "false");
+    await user.click(job);
+    expect(job).toHaveAttribute("aria-pressed", "true");
+    // もう一度押すと解除。別のものを選べば付け替わる
+    await user.click(job);
+    expect(job).toHaveAttribute("aria-pressed", "false");
+    await user.click(job);
+    await user.click(screen.getByRole("button", { name: "請求管理" }));
+    expect(job).toHaveAttribute("aria-pressed", "false");
+    await user.click(screen.getByRole("button", { name: "請求管理" }));
+    await user.click(job);
+    await user.type(screen.getByLabelText(INPUT_LABEL), "掲載期限");
+    await user.click(screen.getByRole("button", { name: "送信する" }));
+
+    expect(createBody(calls)).toEqual({
+      utterance: "掲載期限",
+      systemId: "job-admin",
+    });
+  });
+
+  it("(a) 未選択と「わからない」はどちらも systemId: null で送られる", async () => {
+    for (const choose of [false, true]) {
+      const user = userEvent.setup();
+      const calls = installFakeFetch({
+        ...withSystems,
+        "POST /api/inquiries": { status: 201, body: makeView() },
+      });
+      const { unmount } = render(
+        <App subscribe={new FakeStream().subscribe} />,
+      );
+
+      const unknown = await screen.findByRole("button", { name: "わからない" });
+      if (choose) {
+        await user.click(unknown);
+        expect(unknown).toHaveAttribute("aria-pressed", "true");
+      }
+      await user.type(screen.getByLabelText(INPUT_LABEL), "掲載期限");
+      await user.click(screen.getByRole("button", { name: "送信する" }));
+
+      await waitFor(() =>
+        expect(createBody(calls)).toEqual({
+          utterance: "掲載期限",
+          systemId: null,
+        }),
+      );
+      unmount();
+    }
+  });
+
+  it("(b) systems が空なら選択を出さない", async () => {
+    installFakeFetch({
+      "GET /api/config": { body: { mock: false, systems: [] } },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    expect(await screen.findByLabelText(INPUT_LABEL)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: /どのシステムの話ですか/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "わからない" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("(c) 受け取りに対象システムが出て、推測のときは推測と分かる", async () => {
+    const user = userEvent.setup();
+    installFakeFetch({
+      ...withSystems,
+      "POST /api/inquiries": {
+        status: 201,
+        body: makeView({
+          ...bug,
+          system: systems[0],
+          systemGuessed: true,
+          questions: [Q_SCREEN],
+        }),
+      },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await send(user);
+    expect(
+      await screen.findByText(
+        "求人管理画面の話だと推測しました。不具合かもしれない件として受け取りました",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("(d) 「変更」から対象システムを直すと PUT …/system が呼ばれ、質問が差し替わる", async () => {
+    const user = userEvent.setup();
+    const calls = installFakeFetch({
+      ...withSystems,
+      "POST /api/inquiries": {
+        status: 201,
+        body: makeView({
+          ...bug,
+          system: systems[0],
+          systemGuessed: true,
+          questions: [Q_SCREEN, Q_KIND],
+        }),
+      },
+      "PUT /api/inquiries/inq-1/system": {
+        body: makeView({
+          ...bug,
+          system: systems[1],
+          systemGuessed: false,
+          questions: [Q_KIND],
+        }),
+      },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await send(user);
+    await screen.findByText(Q_SCREEN.text);
+    await user.click(screen.getByRole("button", { name: "変更" }));
+    const panel = screen.getByRole("group", { name: "どのシステムの話ですか" });
+    // 推測された値は「選択済み」の扱いにならない
+    expect(
+      within(panel).getByRole("button", { name: "求人管理画面" }),
+    ).toHaveAttribute("aria-pressed", "false");
+    await user.click(within(panel).getByRole("button", { name: "請求管理" }));
+
+    expect(findCall(calls, "PUT", "/api/inquiries/inq-1/system")?.body).toEqual(
+      {
+        systemId: "billing",
+      },
+    );
+    expect(
+      await screen.findByText(
+        "請求管理の、不具合かもしれない件として受け取りました",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(Q_SCREEN.text)).not.toBeInTheDocument();
+    expect(screen.getByText("1つだけ教えてください")).toBeInTheDocument();
+  });
+
+  it("(d) 「わからない」に戻すと systemId: null で直せる", async () => {
+    const user = userEvent.setup();
+    const calls = installFakeFetch({
+      ...withSystems,
+      "POST /api/inquiries": {
+        status: 201,
+        body: makeView({ ...bug, system: systems[0], questions: [Q_SCREEN] }),
+      },
+      "PUT /api/inquiries/inq-1/system": {
+        body: makeView({ ...bug, system: null, questions: [Q_SCREEN, Q_KIND] }),
+      },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await send(user);
+    expect(
+      await screen.findByText(
+        "求人管理画面の、不具合かもしれない件として受け取りました",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "変更" }));
+    const panel = screen.getByRole("group", { name: "どのシステムの話ですか" });
+    await user.click(within(panel).getByRole("button", { name: "わからない" }));
+
+    expect(findCall(calls, "PUT", "/api/inquiries/inq-1/system")?.body).toEqual(
+      {
+        systemId: null,
+      },
+    );
+    expect(
+      await screen.findByText("不具合かもしれない件として受け取りました"),
+    ).toBeInTheDocument();
+  });
+});

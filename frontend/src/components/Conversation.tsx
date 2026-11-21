@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import type { InquiryCategory, Question } from "../api/types.ts";
+import type { InquiryCategory, Question, SystemOption } from "../api/types.ts";
+import { UNKNOWN_SYSTEM } from "../flow/reducer.ts";
 import { MAX_UTTERANCE_LENGTH } from "../flow/page.ts";
 import {
   CATEGORY_LABELS,
@@ -13,7 +14,12 @@ import {
 interface InputBoxProps {
   draft: string;
   busy: boolean;
+  /** 対象システムの選択肢（空なら選択を出さない） */
+  systems: SystemOption[];
+  /** 選んだ対象システム（未選択は null、「わからない」は UNKNOWN_SYSTEM） */
+  systemChoice: string | null;
   onChange: (draft: string) => void;
+  onChooseSystem: (choice: string | null) => void;
   onSubmit: () => void;
 }
 
@@ -21,7 +27,15 @@ interface InputBoxProps {
  * 最初の自由記述の入力欄。分類も件名も求めない。
  * @param props 入力値と送信の受け口
  */
-export function InputBox({ draft, busy, onChange, onSubmit }: InputBoxProps) {
+export function InputBox({
+  draft,
+  busy,
+  systems,
+  systemChoice,
+  onChange,
+  onChooseSystem,
+  onSubmit,
+}: InputBoxProps) {
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     onSubmit();
@@ -37,6 +51,37 @@ export function InputBox({ draft, busy, onChange, onSubmit }: InputBoxProps) {
         value={draft}
         onChange={(event) => onChange(event.target.value)}
       />
+      {systems.length > 0 && (
+        <div
+          className="system-choices"
+          role="group"
+          aria-label={TEXT.systemLegend}
+        >
+          <p className="system-legend" aria-hidden="true">
+            {TEXT.systemLegend}
+          </p>
+          <div className="choices">
+            {[...systems, { id: UNKNOWN_SYSTEM, label: TEXT.unknown }].map(
+              (option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className="choice"
+                  aria-pressed={systemChoice === option.id}
+                  onClick={() =>
+                    // もう一度押すと解除する
+                    onChooseSystem(
+                      systemChoice === option.id ? null : option.id,
+                    )
+                  }
+                >
+                  {option.label}
+                </button>
+              ),
+            )}
+          </div>
+        </div>
+      )}
       <div className="actions">
         <button
           type="submit"
@@ -65,12 +110,17 @@ export function UtteranceRow({ text }: { text: string }) {
 /** 受け取りの1行の props。 */
 interface ReceiptProps {
   category: InquiryCategory | null;
+  system: SystemOption | null;
+  systemGuessed: boolean;
+  /** 対象システムの選択肢 */
+  systems: SystemOption[];
   /** 「変更」を出せるか（追加質問の段階で、受け取った内容があるとき） */
   canChange: boolean;
   open: boolean;
   busy: boolean;
   onToggle: () => void;
   onSelect: (category: InquiryCategory) => void;
+  onSelectSystem: (systemId: string | null) => void;
 }
 
 /**
@@ -79,16 +129,20 @@ interface ReceiptProps {
  */
 export function Receipt({
   category,
+  system,
+  systemGuessed,
+  systems,
   canChange,
   open,
   busy,
   onToggle,
   onSelect,
+  onSelectSystem,
 }: ReceiptProps) {
   return (
     <div className="system">
       <p className="receipt">
-        {receiptText(category)}
+        {receiptText(category, system, systemGuessed)}
         {canChange && (
           <>
             {"　"}
@@ -116,6 +170,30 @@ export function Receipt({
               onClick={() => onSelect(candidate)}
             >
               {CATEGORY_LABELS[candidate]}
+            </button>
+          ))}
+        </div>
+      )}
+      {canChange && open && systems.length > 0 && (
+        <div
+          role="group"
+          aria-label={TEXT.systemChangeLegend}
+          className="choices"
+        >
+          {[...systems, { id: null, label: TEXT.unknown }].map((option) => (
+            <button
+              key={option.id ?? "unknown"}
+              type="button"
+              className="choice"
+              aria-pressed={
+                option.id === null
+                  ? system === null
+                  : system?.id === option.id && !systemGuessed
+              }
+              disabled={busy}
+              onClick={() => onSelectSystem(option.id)}
+            >
+              {option.label}
             </button>
           ))}
         </div>

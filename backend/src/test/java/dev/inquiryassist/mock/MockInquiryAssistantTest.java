@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.inquiryassist.core.AccessScope;
 import dev.inquiryassist.core.AiRefusalException;
+import dev.inquiryassist.core.AiResult;
+import dev.inquiryassist.core.SystemOption;
+import dev.inquiryassist.core.TriageResult;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.CitationVerifier;
 import dev.inquiryassist.core.InquiryCategory;
@@ -25,6 +28,15 @@ class MockInquiryAssistantTest {
     private final AccessScope scope = new AccessScope("u", Set.of("job-board", "faq", "glossary"));
     private final CitationVerifier verifier = new CitationVerifier(new MockKnowledgeSearch());
 
+    private static final List<SystemOption> SYSTEMS = List.of(
+            new SystemOption("job-admin", "求人管理画面"),
+            new SystemOption("applicant-list", "応募者向けの一覧"),
+            new SystemOption("billing", "請求管理"));
+
+    private AiResult<TriageResult> triage(String utterance) {
+        return assistant.triage(utterance, SYSTEMS, null);
+    }
+
     private StructuredInquiry inquiry(InquiryCategory category, String goal) {
         return new StructuredInquiry("言い直し", category, null, goal, null, null, null);
     }
@@ -41,31 +53,64 @@ class MockInquiryAssistantTest {
         "期限の仕様を教えて, SPEC_QUESTION"
     })
     void キーワードの優先順位で種別を判定する(String utterance, InquiryCategory expected) {
-        assertThat(assistant.triage(utterance).value().category()).isEqualTo(expected);
+        assertThat(triage(utterance).value().category()).isEqualTo(expected);
     }
 
     @Test
     void 正常系は追加質問が2問で選択肢つき() {
-        var questions = assistant.triage("期限の仕様を教えて").value().questions();
+        var questions = triage("期限の仕様を教えて").value().questions();
 
         assertThat(questions).hasSize(2);
         assertThat(questions).allSatisfy(q -> assertThat(q.options()).isNotEmpty());
     }
 
     @Test
+    void 発話に候補の名前があれば対象システムを推測し画面を尋ねる質問を省く() {
+        var result = triage("求人管理画面の期限の仕様を教えて").value();
+
+        assertThat(result.guessedSystemId()).isEqualTo("job-admin");
+        assertThat(result.questions()).extracting(q -> q.id()).containsExactly("q2");
+    }
+
+    @Test
+    void 推測できなければ対象システムはなく画面を尋ねる質問も出す() {
+        var result = triage("期限の仕様を教えて").value();
+
+        assertThat(result.guessedSystemId()).isNull();
+        assertThat(result.questions()).extracting(q -> q.id()).containsExactly("q1", "q2");
+    }
+
+    @Test
+    void 本人が選んでいれば推測せず画面を尋ねる質問を省く() {
+        var result = assistant.triage("請求管理の期限の仕様", SYSTEMS, SYSTEMS.get(0)).value();
+
+        assertThat(result.guessedSystemId()).isNull();
+        assertThat(result.questions()).extracting(q -> q.id()).containsExactly("q2");
+    }
+
+    @Test
+    void 整形では確定した対象システムの名前をtargetSystemに入れる() {
+        var withSystem = assistant.structure("x", InquiryCategory.SPEC_QUESTION, List.of(), SYSTEMS.get(2)).value();
+        var without = assistant.structure("x", InquiryCategory.SPEC_QUESTION, List.of(), null).value();
+
+        assertThat(withSystem.targetSystem()).isEqualTo("請求管理");
+        assertThat(without.targetSystem()).isNull();
+    }
+
+    @Test
     void 質問なしタグは追加質問を出さない() {
-        assertThat(assistant.triage("[質問なし] 期限の仕様を教えて").value().questions()).isEmpty();
+        assertThat(triage("[質問なし] 期限の仕様を教えて").value().questions()).isEmpty();
     }
 
     @Test
     void 作業依頼と障害ではAIの追加質問を出さない() {
-        assertThat(assistant.triage("延長をお願いします").value().questions()).isEmpty();
-        assertThat(assistant.triage("障害です").value().questions()).isEmpty();
+        assertThat(triage("延長をお願いします").value().questions()).isEmpty();
+        assertThat(triage("障害です").value().questions()).isEmpty();
     }
 
     @Test
     void 判定エラータグは種別の判定でAI利用不可になる() {
-        assertThatThrownBy(() -> assistant.triage("[判定エラー] 期限の仕様"))
+        assertThatThrownBy(() -> triage("[判定エラー] 期限の仕様"))
                 .isInstanceOf(AiUnavailableException.class);
     }
 

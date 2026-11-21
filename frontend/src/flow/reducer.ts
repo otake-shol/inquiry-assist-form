@@ -1,4 +1,15 @@
-import type { ErrorBody, InquiryView } from "../api/types.ts";
+import type { ErrorBody, InquiryView, SystemOption } from "../api/types.ts";
+
+/** 対象システムで「わからない」を明示的に選んだ状態。 */
+export const UNKNOWN_SYSTEM = "__unknown__";
+
+/**
+ * 選択状態を API に送る systemId に変える。未選択と「わからない」はどちらも null。
+ * @param choice 画面での選択（未選択は null）
+ */
+export function systemIdOf(choice: string | null): string | null {
+  return choice === null || choice === UNKNOWN_SYSTEM ? null : choice;
+}
 
 /** 画面に出すエラー。`source` は発生元（通信の操作か、進捗ストリームか）。 */
 export interface FlowError extends ErrorBody {
@@ -10,6 +21,10 @@ export interface FlowState {
   mock: boolean;
   /** 担当者に送った後の案内文（GET /api/config） */
   filedGuidance: string | null;
+  /** 対象システムの選択肢（GET /api/config） */
+  systems: SystemOption[];
+  /** 入力時に選んだ対象システム（未選択は null、「わからない」は UNKNOWN_SYSTEM） */
+  systemChoice: string | null;
   draft: string;
   view: InquiryView | null;
   busy: boolean;
@@ -27,7 +42,13 @@ export interface FlowState {
 
 /** 状態を変える操作。 */
 export type FlowAction =
-  | { type: "configLoaded"; mock: boolean; filedGuidance: string | null }
+  | {
+      type: "configLoaded";
+      mock: boolean;
+      filedGuidance: string | null;
+      systems: SystemOption[];
+    }
+  | { type: "systemChosen"; choice: string | null }
   | { type: "draftChanged"; draft: string }
   | { type: "requestStarted" }
   | { type: "viewReceived"; view: InquiryView }
@@ -48,6 +69,8 @@ export function createInitialState(draft = ""): FlowState {
   return {
     mock: false,
     filedGuidance: null,
+    systems: [],
+    systemChoice: null,
     draft,
     view: null,
     busy: false,
@@ -72,7 +95,10 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         ...state,
         mock: action.mock,
         filedGuidance: action.filedGuidance,
+        systems: action.systems,
       };
+    case "systemChosen":
+      return { ...state, systemChoice: action.choice };
     case "draftChanged":
       return { ...state, draft: action.draft };
     case "requestStarted":
@@ -130,6 +156,7 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         ...createInitialState(),
         mock: state.mock,
         filedGuidance: state.filedGuidance,
+        systems: state.systems,
       };
   }
 }

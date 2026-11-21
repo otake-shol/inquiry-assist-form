@@ -132,6 +132,24 @@ class InquiryEntity {
     @Column(name = "filed_at")
     Instant filedAt;
 
+    @Column(name = "system_id")
+    String systemId;
+
+    @Column(name = "system_label")
+    String systemLabel;
+
+    @Column(name = "system_guessed", nullable = false)
+    boolean systemGuessed;
+
+    @Column(name = "read_at")
+    Instant readAt;
+
+    @Column(name = "slack_notified", nullable = false)
+    boolean slackNotified;
+
+    @Column(name = "slack_error")
+    String slackError;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false)
     List<StoredUsage> usages = new ArrayList<>();

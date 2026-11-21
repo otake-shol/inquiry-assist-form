@@ -18,6 +18,8 @@ import java.util.UUID;
  * @param category 本人が確認・変更した後の種別
  * @param questions 現在の追加質問
  * @param revisionsLeft 言い直しを作り直せる残り回数
+ * @param system 対象システム。決まっていなければ null
+ * @param systemGuessed 対象システムを AI が推測した値か
  * @param structured 整形後の問い。{@code STRUCTURED} 以降で非 null
  * @param answer 0次回答。完了後に非 null
  * @param incidentGuidance 障害の案内文。{@code INCIDENT_REDIRECTED} のときだけ非 null
@@ -33,11 +35,21 @@ public record InquiryView(
         InquiryCategory category,
         List<QuestionView> questions,
         int revisionsLeft,
+        SystemView system,
+        boolean systemGuessed,
         StructuredView structured,
         AnswerView answer,
         String incidentGuidance,
         boolean sentImmediately,
         boolean mock) {
+
+    /**
+     * 対象システム。
+     *
+     * @param id 識別子
+     * @param label 画面に出す名前
+     */
+    public record SystemView(String id, String label) {}
 
     /**
      * 追加質問。

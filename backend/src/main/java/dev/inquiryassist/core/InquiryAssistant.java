@@ -12,12 +12,18 @@ public interface InquiryAssistant {
     /**
      * 最初の自由記述から種別を判定し、追加質問を作る。コード検索は行わない。
      *
+     * <p>対象システムは本人が選んでいればそれを使い、推測しない。選んでいなければ候補から推測して返す。
+     * 対象システムが決まっている場合は、画面や対象を尋ねる質問を出さない。
+     *
      * @param utterance 本人が書いた元の発話
-     * @return 種別と追加質問
+     * @param candidates 対象システムの候補
+     * @param selected 本人が選んだ対象システム。選んでいなければ {@code null}
+     * @return 種別、追加質問、推測した対象システム
      * @throws AiRefusalException モデルが回答を拒否した場合
      * @throws AiUnavailableException モデルを呼び出せなかった場合
      */
-    AiResult<TriageResult> triage(String utterance);
+    AiResult<TriageResult> triage(
+            String utterance, List<SystemOption> candidates, SystemOption selected);
 
     /**
      * 発話と追加質問への回答から、整形後の問いを作る。
@@ -25,12 +31,16 @@ public interface InquiryAssistant {
      * @param utterance 本人が書いた元の発話
      * @param category 本人が確認した種別
      * @param answers 追加質問と回答
+     * @param system 確定した対象システム。決まっていなければ {@code null}。{@code targetSystem} にはその名前を入れる
      * @return 整形後の問い
      * @throws AiRefusalException モデルが回答を拒否した場合
      * @throws AiUnavailableException モデルを呼び出せなかった場合
      */
     AiResult<StructuredInquiry> structure(
-            String utterance, InquiryCategory category, List<AnsweredQuestion> answers);
+            String utterance,
+            InquiryCategory category,
+            List<AnsweredQuestion> answers,
+            SystemOption system);
 
     /**
      * 本人が違う点を一言で伝えたときに、言い直しを作り直す。

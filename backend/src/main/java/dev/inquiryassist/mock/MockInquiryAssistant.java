@@ -10,11 +10,13 @@ import dev.inquiryassist.core.FollowUpQuestion;
 import dev.inquiryassist.core.InquiryAssistant;
 import dev.inquiryassist.core.InquiryCategory;
 import dev.inquiryassist.core.StructuredInquiry;
+import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.TechnicalMemo;
 import dev.inquiryassist.core.TriageResult;
 import dev.inquiryassist.core.Usage;
 import dev.inquiryassist.core.ZeroAnswer;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
@@ -69,18 +71,27 @@ public class MockInquiryAssistant implements InquiryAssistant {
      * @return 種別と追加質問。作業依頼と障害は固定質問を呼び出し側が持つため質問なし
      */
     @Override
-    public AiResult<TriageResult> triage(String utterance) {
+    public AiResult<TriageResult> triage(
+            String utterance, List<SystemOption> candidates, SystemOption selected) {
         if (utterance.contains(TAG_TRIAGE_ERROR)) {
             throw new AiUnavailableException("モックの種別判定エラー", null);
         }
         InquiryCategory category = classify(utterance);
         boolean askable = category == InquiryCategory.SPEC_QUESTION || category == InquiryCategory.SUSPECTED_BUG;
-        List<FollowUpQuestion> questions = askable && !utterance.contains(TAG_NO_QUESTIONS)
-                ? List.of(
-                        new FollowUpQuestion("q1", "どの画面での話ですか", List.of("求人管理画面", "応募者向けの一覧", "その他")),
-                        new FollowUpQuestion("q2", "求人の状態はどれですか", List.of("掲載中", "下書き", "掲載終了")))
-                : List.of();
-        return new AiResult<>(new TriageResult(category, questions), Usage.ofMock());
+        // 本人が選んでいれば推測しない。選んでいなければ、発話に候補の名前が含まれるものを推測とする
+        SystemOption guessed = selected != null
+                ? null
+                : candidates.stream().filter(c -> utterance.contains(c.label())).findFirst().orElse(null);
+        boolean systemKnown = selected != null || guessed != null;
+        List<FollowUpQuestion> questions = new ArrayList<>();
+        if (askable && !utterance.contains(TAG_NO_QUESTIONS)) {
+            if (!systemKnown) {
+                questions.add(new FollowUpQuestion("q1", "どの画面での話ですか", List.of("求人管理画面", "応募者向けの一覧", "その他")));
+            }
+            questions.add(new FollowUpQuestion("q2", "求人の状態はどれですか", List.of("掲載中", "下書き", "掲載終了")));
+        }
+        return new AiResult<>(
+                new TriageResult(category, questions, guessed == null ? null : guessed.id()), Usage.ofMock());
     }
 
     /**
@@ -93,12 +104,12 @@ public class MockInquiryAssistant implements InquiryAssistant {
      */
     @Override
     public AiResult<StructuredInquiry> structure(
-            String utterance, InquiryCategory category, List<AnsweredQuestion> answers) {
+            String utterance, InquiryCategory category, List<AnsweredQuestion> answers, SystemOption system) {
         return new AiResult<>(
                 new StructuredInquiry(
                         summarize(utterance, category, answers),
                         category,
-                        null,
+                        system == null ? null : system.label(),
                         utterance,
                         null,
                         null,

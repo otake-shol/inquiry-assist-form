@@ -231,3 +231,72 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 「わからない」以外の追加質問への回答は、言い直しの末尾に「（質問文: 回答）」の形で足す。作り直し（5a）では、伝えられた一言を「補足: （一言）」として言い直しに足す。
 
 モックの一次情報は `backend/src/main/resources/mock-knowledge/` の固定ファイル（サンプルのコード、FAQ、用語対応表）。正常系の出典はこのファイルの実在する行を指し、出典の照合は実際に動く。
+
+## 対象システム
+
+本人は最初の入力と同時に、対象システムを一覧から選べる。選ばない（「わからない」）場合はAIが発話から推測する。
+
+- `GET /api/config` の応答に `systems`（`[{ "id": "job-admin", "label": "求人管理画面" }]`）を加える。一覧は設定 `inquiry.systems` で定義する。
+- `POST /api/inquiries` の本文に `systemId`（任意。一覧の id、または `null`）を加える。一覧にない id は `VALIDATION`。
+- InquiryView に `system`（`{ "id", "label" }` または `null`）と `systemGuessed`（AIが推測した値なら `true`）を加える。
+  - 本人が選んだ場合: `system` はその値、`systemGuessed` は `false`
+  - 選ばなかった場合: 受付が推測できれば `system` はその値で `systemGuessed` は `true`、推測できなければ `system` は `null`
+- `PUT /api/inquiries/{id}/system`: リクエスト `{ "systemId": "job-admin" }` または `{ "systemId": null }`。本人が対象システムを直す。`step` が `TRIAGED` のときだけ有効。`200` InquiryView（`systemGuessed` は `false`）。
+- 確定した対象システムの `label` を `structured.targetSystem` に入れる。
+- 対象システムが決まっている（選択または推測）場合、聞き手は画面や対象を尋ねる質問を出さない。
+
+モックの推測は発話に一覧の `label` が含まれるかで行う。モックの一覧は `job-admin`（求人管理画面）、`applicant-list`（応募者向けの一覧）、`billing`（請求管理）の3件。モックの正常系の質問は、対象システムが未定なら2問（「どの画面での話ですか」「求人の状態はどれですか」）、決まっていれば後者の1問だけにする。
+
+## オペレータへの通知
+
+問い合わせが担当者に送られた時点（`outcome` が `FILED` になった時点）で、オペレータに2つの方法で知らせる。自己解決と障害の案内では通知しない。
+
+- **ツール内の通知**: オペレータ画面の一覧に未読として現れ、開いている画面には即時に届く。
+- **Slack への投稿**: 対象システムに対応するチャンネルへ投稿する。投稿先は設定で決める。
+  - `inquiry.systems[].slack-webhook-url`: 対象システムごとの Incoming Webhook の URL
+  - `inquiry.slack.default-webhook-url`: 対象システムが未定、または個別の設定がない場合の投稿先
+  - `inquiry.public-base-url`: 投稿に載せるオペレータ画面へのリンクの基点
+  - 投稿に載せるリンクは `{public-base-url}/operator/{id}`。画面はこの URL を直接開くと、オペレータ画面でその問い合わせを開いた状態になる（下記「オペレータ画面の URL」）。
+  - どちらの URL も未設定なら投稿せず、その旨をログに出す（ローカルとモックの既定）。
+  - 投稿の内容: 種別、対象システム、言い直しの文章（なければ元の発話の先頭）、「今すぐ送る」による送付かどうか、オペレータ画面の該当問い合わせへのリンク。調査内容の全文とコードの抜粋は載せない。
+  - Slack への投稿が失敗しても、担当者への送付は取り消さない。失敗はログと記録に残す。
+
+オペレータ向けの API は `/api/operator` 配下に置く。認証は後のフェーズ（SSO）で加え、それまではローカルでの利用に限る。
+
+### `GET /api/operator/inquiries`
+
+担当者に送られた問い合わせの一覧（新しい順）。クエリ `unreadOnly=true` で未読だけに絞る。
+
+`200` `{ "unreadCount": 2, "items": [{ "id", "filedAt", "category", "system": { "id", "label" } | null, "summary", "sentImmediately", "read": false }] }`。`summary` は言い直しの文章、なければ元の発話の先頭80文字。
+
+### `GET /api/operator/inquiries/{id}`
+
+`200` 問い合わせの全内容。`id`、`filedAt`、`askerId`、`utterance`、`categoryByAi`、`category`、`system`、`systemGuessed`、`followUps`（`[{ "text", "answer" }]`）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`。担当者に送られていない問い合わせは `NOT_FOUND`。
+
+`slackStatus` は Slack への投稿の状態で、次の4つのいずれか。真偽値ひとつでは「投稿先が未設定」と「投稿に失敗」を区別できず、未設定の環境ですべての問い合わせが失敗に見えるため、状態を分ける。
+
+| 値 | 意味 | 画面での扱い |
+| --- | --- | --- |
+| `POSTED` | 投稿できた | 「Slack に投稿済み」と控えめに示す |
+| `SKIPPED` | 投稿先が未設定のため投稿していない | 何も表示しない |
+| `PENDING` | 投稿先はあるが、まだ結果が出ていない | 何も表示しない |
+| `FAILED` | 投稿を試みて失敗した | 「Slack への投稿に失敗しました」と目立たせる |
+
+`SKIPPED` かどうかは、その問い合わせの対象システムに対する投稿先（個別の設定、なければ既定）が、読み出しの時点で設定されているかで決める。
+
+### オペレータ画面の URL
+
+| パス | 画面 |
+| --- | --- |
+| `/operator` | 一覧。問い合わせは未選択 |
+| `/operator/{id}` | 一覧と、その問い合わせの詳細を開いた状態 |
+
+一覧で問い合わせを選ぶと URL が `/operator/{id}` に変わり、ブラウザの「戻る」で前の選択に戻れる。`{id}` が存在しない、または担当者に送られていない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。`/operator` で始まらないパスは本人向けの画面。
+
+### `POST /api/operator/inquiries/{id}/read`
+
+既読にする。`200` 上と同じ全内容（`read: true`）。
+
+### `GET /api/operator/stream`
+
+`text/event-stream`。接続中、問い合わせが担当者に送られるたびに event `filed` を流す。data は一覧の1件と同じ形。接続を保つため、一定間隔でコメント行を送る。

@@ -12,6 +12,7 @@ import dev.inquiryassist.core.InquiryAssistant;
 import dev.inquiryassist.core.InquiryCategory;
 import dev.inquiryassist.core.KnowledgeSearch;
 import dev.inquiryassist.core.StructuredInquiry;
+import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.TriageResult;
 import dev.inquiryassist.core.ZeroAnswer;
 import dev.inquiryassist.inquiry.InquiryEntity.StoredCitation;
@@ -24,7 +25,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -39,6 +43,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Service
 public class InquiryService {
+
+    private static final Logger log = LoggerFactory.getLogger(InquiryService.class);
 
     /** 作業依頼の固定質問の識別子。 */
     public static final String WR_WHAT = "wr-what";
@@ -75,6 +81,8 @@ public class InquiryService {
     private final TransactionTemplate transaction;
     private final String incidentGuidance;
     private final Environment environment;
+    private final InquiryProperties properties;
+    private final ApplicationEventPublisher events;
     private final Set<UUID> generating = ConcurrentHashMap.newKeySet();
 
     /**
@@ -86,6 +94,8 @@ public class InquiryService {
      * @param transaction 保存時のトランザクション
      * @param incidentGuidance 障害の案内文
      * @param environment モック動作中かの判定に使う
+     * @param properties 対象システムの一覧など
+     * @param events 起票の確定後にイベントを発行する
      */
     public InquiryService(
             InquiryAssistant assistant,
@@ -95,7 +105,9 @@ public class InquiryService {
             FilingNotifier notifier,
             TransactionTemplate transaction,
             @Value("${inquiry.incident-guidance}") String incidentGuidance,
-            Environment environment) {
+            Environment environment,
+            InquiryProperties properties,
+            ApplicationEventPublisher events) {
         this.assistant = assistant;
         this.verifier = new CitationVerifier(knowledgeSearch);
         this.repository = repository;
@@ -104,21 +116,30 @@ public class InquiryService {
         this.transaction = transaction;
         this.incidentGuidance = incidentGuidance;
         this.environment = environment;
+        this.properties = properties;
+        this.events = events;
     }
 
     /**
      * 種別を判定して追加質問を作り、問い合わせを新規に保存する。
      *
      * @param utterance 本人が書いた元の発話
+     * @param systemId 本人が選んだ対象システムの識別子。選ばなければ null（AI が推測する）
      * @return {@code TRIAGED} の問い合わせ
+     * @throws IllegalArgumentException 一覧にない systemId の場合
      * @throws TriageFailedException 種別の判定でAIが失敗した場合。元の発話は種別なしで保存済み
      */
-    public InquiryView create(String utterance) {
+    public InquiryView create(String utterance, String systemId) {
         AccessScope scope = users.currentScope();
+        InquiryProperties.SystemEntry selected = systemId == null ? null : findSystem(systemId);
         InquiryEntity inquiry = new InquiryEntity(scope.userId(), utterance, Instant.now());
+        if (selected != null) {
+            inquiry.systemId = selected.id();
+            inquiry.systemLabel = selected.label();
+        }
         AiResult<TriageResult> triage;
         try {
-            triage = assistant.triage(utterance);
+            triage = assistant.triage(utterance, candidates(), selected == null ? null : option(selected));
         } catch (AiRefusalException | AiUnavailableException e) {
             // 失敗しても発話は失わない。種別なし・質問なしで保存し、「今すぐ送る」だけを可能にする
             inquiry.mock = environment.acceptsProfiles(Profiles.of("mock"));
@@ -126,6 +147,17 @@ public class InquiryService {
             throw new TriageFailedException(inquiry.id, e);
         }
         InquiryCategory category = triage.value().category();
+        if (selected == null && triage.value().guessedSystemId() != null) {
+            // 一覧にない id を返された場合は推測なしとして扱う
+            properties.systems().stream()
+                    .filter(s -> s.id().equals(triage.value().guessedSystemId()))
+                    .findFirst()
+                    .ifPresent(s -> {
+                        inquiry.systemId = s.id();
+                        inquiry.systemLabel = s.label();
+                        inquiry.systemGuessed = true;
+                    });
+        }
         inquiry.categoryByAi = category;
         inquiry.categoryConfirmed = category;
         inquiry.addUsage("triage", triage.usage());
@@ -135,6 +167,26 @@ public class InquiryService {
                     .toList());
         }
         inquiry.followUps = questionsFor(inquiry, category);
+        return toView(commit(inquiry, null));
+    }
+
+    /**
+     * 本人が対象システムを直す。AI の推測は上書きされ、推測ではなくなる。追加質問は作り直さない。
+     *
+     * @param id 問い合わせの識別子
+     * @param systemId 対象システムの識別子。null で「わからない」に戻す
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code TRIAGED} でない、または種別の判定に失敗した問い合わせの場合
+     * @throws IllegalArgumentException 一覧にない systemId の場合
+     */
+    public InquiryView changeSystem(UUID id, String systemId) {
+        InquiryProperties.SystemEntry system = systemId == null ? null : findSystem(systemId);
+        InquiryEntity inquiry = load(id);
+        requireStep(inquiry, InquiryStep.TRIAGED);
+        requireTriaged(inquiry);
+        inquiry.systemId = system == null ? null : system.id();
+        inquiry.systemLabel = system == null ? null : system.label();
+        inquiry.systemGuessed = false;
         return toView(commit(inquiry, null));
     }
 
@@ -342,11 +394,30 @@ public class InquiryService {
         return toView(load(id));
     }
 
+    private InquiryProperties.SystemEntry findSystem(String systemId) {
+        return properties.systems().stream()
+                .filter(s -> s.id().equals(systemId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("一覧にない対象システムです: " + systemId));
+    }
+
+    private List<SystemOption> candidates() {
+        return properties.systems().stream().map(InquiryService::option).toList();
+    }
+
+    private static SystemOption option(InquiryProperties.SystemEntry entry) {
+        return new SystemOption(entry.id(), entry.label());
+    }
+
     private void structure(InquiryEntity inquiry) {
         List<AnsweredQuestion> answered = inquiry.followUps.stream()
                 .map(q -> new AnsweredQuestion(new FollowUpQuestion(q.id(), q.text(), q.options()), q.answer()))
                 .toList();
-        AiResult<StructuredInquiry> result = assistant.structure(inquiry.utterance, inquiry.category(), answered);
+        AiResult<StructuredInquiry> result = assistant.structure(
+                inquiry.utterance,
+                inquiry.category(),
+                answered,
+                inquiry.systemId == null ? null : new SystemOption(inquiry.systemId, inquiry.systemLabel));
         inquiry.structuredByAi = result.value();
         inquiry.addUsage("structure", result.usage());
         inquiry.step = InquiryStep.STRUCTURED;
@@ -359,7 +430,13 @@ public class InquiryService {
         inquiry.sentImmediately = immediately;
         inquiry.filedAt = Instant.now();
         return new FilingNotifier.FilingNotice(
-                inquiry.id, inquiry.category(), inquiry.utterance, inquiry.structured(), inquiry.technicalMemo, immediately);
+                inquiry.id,
+                inquiry.category(),
+                inquiry.utterance,
+                inquiry.systemLabel,
+                inquiry.structured(),
+                inquiry.technicalMemo,
+                immediately);
     }
 
     /**
@@ -368,17 +445,27 @@ public class InquiryService {
      */
     private InquiryEntity commit(InquiryEntity inquiry, FilingNotifier.FilingNotice notice) {
         inquiry.updatedAt = Instant.now();
+        InquiryEntity saved;
         try {
-            return transaction.execute(status -> {
-                InquiryEntity saved = repository.saveAndFlush(inquiry);
+            saved = transaction.execute(status -> {
+                InquiryEntity s = repository.saveAndFlush(inquiry);
                 if (notice != null) {
                     notifier.notifyFiled(notice);
                 }
-                return saved;
+                return s;
             });
         } catch (OptimisticLockingFailureException e) {
             throw new InvalidStateException("他の操作と競合しました。最新の状態を取得し直してください");
         }
+        if (notice != null) {
+            // 保存の確定後に配る。配信側の失敗で、確定済みの起票を失敗にしない
+            try {
+                events.publishEvent(new InquiryFiledEvent(OperatorService.toItem(saved)));
+            } catch (RuntimeException e) {
+                log.error("起票の通知イベントの配信に失敗 id={}", saved.id, e);
+            }
+        }
+        return saved;
     }
 
     private InquiryEntity load(UUID id) {
@@ -455,6 +542,8 @@ public class InquiryService {
                         .map(q -> new InquiryView.QuestionView(q.id(), q.text(), q.options()))
                         .toList(),
                 e.revisionsLeft,
+                e.systemId == null ? null : new InquiryView.SystemView(e.systemId, e.systemLabel),
+                e.systemGuessed,
                 structured == null
                         ? null
                         : new InquiryView.StructuredView(

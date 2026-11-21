@@ -1,4 +1,4 @@
-import type { ErrorBody, InquiryView } from "./types.ts";
+import type { ErrorBody, InquiryView, OperatorItem } from "./types.ts";
 
 /** 0次回答ストリームのイベント受け口。 */
 export interface AnswerStreamHandlers {
@@ -59,4 +59,62 @@ export const subscribeAnswerStream: SubscribeAnswerStream = (id, handlers) => {
   });
 
   return close;
+};
+
+/** オペレータ通知ストリームのイベント受け口。 */
+export interface OperatorStreamHandlers {
+  /** 担当者に送られた問い合わせが届いた */
+  onFiled: (item: OperatorItem) => void;
+  /** 切断から再接続できた（一覧を取り直す合図） */
+  onReconnected: () => void;
+}
+
+/**
+ * オペレータ通知ストリームを購読する関数。戻り値は購読解除関数。
+ * テストでは偽物を注入できる。
+ */
+export type SubscribeOperatorStream = (
+  handlers: OperatorStreamHandlers,
+) => () => void;
+
+/** 切断後に再接続するまでの待ち時間（ミリ秒）。 */
+const RECONNECT_DELAY_MS = 3000;
+
+/**
+ * EventSource で `/api/operator/stream` を購読する本番実装。
+ * 切断したら一定時間後に自分で接続し直し、つながったら `onReconnected` を呼ぶ。
+ * @param handlers イベントの受け口
+ * @returns 購読解除関数
+ */
+export const subscribeOperatorStream: SubscribeOperatorStream = (handlers) => {
+  let source: EventSource | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  let dropped = false;
+
+  const connect = () => {
+    source = new EventSource("/api/operator/stream");
+    source.addEventListener("open", () => {
+      if (dropped) {
+        dropped = false;
+        handlers.onReconnected();
+      }
+    });
+    source.addEventListener("filed", (event) => {
+      handlers.onFiled(JSON.parse((event as MessageEvent<string>).data));
+    });
+    source.addEventListener("error", () => {
+      if (stopped) return;
+      dropped = true;
+      source?.close();
+      timer = setTimeout(connect, RECONNECT_DELAY_MS);
+    });
+  };
+  connect();
+
+  return () => {
+    stopped = true;
+    if (timer !== null) clearTimeout(timer);
+    source?.close();
+  };
 };

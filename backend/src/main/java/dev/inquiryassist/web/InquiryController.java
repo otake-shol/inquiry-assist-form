@@ -36,7 +36,10 @@ public class InquiryController {
     private static final long STREAM_TIMEOUT_MILLIS = 5 * 60 * 1000L;
 
     /** 新規の問い合わせ。 */
-    public record CreateRequest(@NotBlank @Size(max = 4000) String utterance) {}
+    public record CreateRequest(@NotBlank @Size(max = 4000) String utterance, String systemId) {}
+
+    /** 対象システムの変更。{@code systemId} が null なら「わからない」に戻す。 */
+    public record SystemRequest(String systemId) {}
 
     /** 種別の変更。 */
     public record CategoryRequest(@NotNull InquiryCategory category) {}
@@ -71,7 +74,19 @@ public class InquiryController {
     @PostMapping("/api/inquiries")
     @ResponseStatus(HttpStatus.CREATED)
     public InquiryView create(@Valid @RequestBody CreateRequest request) {
-        return service.create(request.utterance());
+        return service.create(request.utterance(), request.systemId());
+    }
+
+    /**
+     * 対象システムを直す。
+     *
+     * @param id 問い合わせの識別子
+     * @param request 対象システムの識別子（null で「わからない」）
+     * @return 更新後の問い合わせ
+     */
+    @PutMapping("/api/inquiries/{id}/system")
+    public InquiryView changeSystem(@PathVariable UUID id, @RequestBody SystemRequest request) {
+        return service.changeSystem(id, request.systemId());
     }
 
     /**

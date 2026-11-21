@@ -25,7 +25,7 @@ import {
   ConfirmedRestatement,
   Restatement,
 } from "./components/Restatement.tsx";
-import { createInitialState, flowReducer } from "./flow/reducer.ts";
+import { createInitialState, flowReducer, systemIdOf } from "./flow/reducer.ts";
 import {
   canSendNow,
   pageSections,
@@ -81,6 +81,8 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
     streamAttempt,
     filedGuidance,
     savedInquiryId,
+    systems,
+    systemChoice,
   } = state;
   const viewId = view?.id;
   const step = view?.step;
@@ -94,6 +96,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
           type: "configLoaded",
           mock: config.mock,
           filedGuidance: config.filedGuidance ?? null,
+          systems: config.systems ?? [],
         }),
       )
       .catch(() => {});
@@ -147,7 +150,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
     ) {
       return;
     }
-    const key = `${view.id}:${view.category}`;
+    const key = `${view.id}:${view.category}:${view.system?.id ?? ""}`;
     if (autoSubmitted.current === key) return;
     autoSubmitted.current = key;
     void run(() => api.submitAnswers(view.id, []));
@@ -219,10 +222,19 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
           <InputBox
             draft={draft}
             busy={busy}
+            systems={systems}
+            systemChoice={systemChoice}
             onChange={(value) =>
               dispatch({ type: "draftChanged", draft: value })
             }
-            onSubmit={() => void run(() => api.createInquiry(draft.trim()))}
+            onChooseSystem={(choice) =>
+              dispatch({ type: "systemChosen", choice })
+            }
+            onSubmit={() =>
+              void run(() =>
+                api.createInquiry(draft.trim(), systemIdOf(systemChoice)),
+              )
+            }
           />
         );
       case "utterance":
@@ -231,6 +243,9 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
         return (
           <Receipt
             category={view!.category}
+            system={view!.system}
+            systemGuessed={view!.systemGuessed}
+            systems={systems}
             canChange={view!.step === "TRIAGED" && view!.category !== null}
             open={categoryOpen}
             busy={busy}
@@ -239,6 +254,12 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
               category === view!.category
                 ? dispatch({ type: "categoryToggled" })
                 : void run(() => api.changeCategory(view!.id, category))
+            }
+            onSelectSystem={(systemId) =>
+              systemId === (view!.system?.id ?? null) &&
+              !(view!.systemGuessed && systemId !== null)
+                ? dispatch({ type: "categoryToggled" })
+                : void run(() => api.changeSystem(view!.id, systemId))
             }
           />
         );

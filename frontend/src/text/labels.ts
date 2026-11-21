@@ -1,4 +1,9 @@
-import type { InquiryCategory, InquiryView, SourceType } from "../api/types.ts";
+import type {
+  InquiryCategory,
+  InquiryView,
+  SourceType,
+  SystemOption,
+} from "../api/types.ts";
 
 /**
  * 画面に出す文言を集約する。言葉づかいの仕様は docs/ux-principles.md。
@@ -22,13 +27,26 @@ export const CATEGORY_ORDER: InquiryCategory[] = [
 ];
 
 /**
- * 受け取りの1行の文言。
+ * 受け取りの1行の文言。対象システムが決まっていれば添える。
+ * AIが推測したときは「推測しました」と分かる言い方にする。
  * @param category 受け取った内容の分類（判定できなかった場合は null）
+ * @param system 対象システム（決まっていなければ null）
+ * @param guessed system がAIの推測か
  */
-export function receiptText(category: InquiryCategory | null): string {
+export function receiptText(
+  category: InquiryCategory | null,
+  system: SystemOption | null = null,
+  guessed = false,
+): string {
+  const base =
+    category === null
+      ? "内容を受け取りました"
+      : `${CATEGORY_LABELS[category]}として受け取りました`;
+  if (system === null) return base;
+  if (guessed) return `${system.label}の話だと推測しました。${base}`;
   return category === null
-    ? "内容を受け取りました"
-    : `${CATEGORY_LABELS[category]}として受け取りました`;
+    ? `${system.label}の話として内容を受け取りました`
+    : `${system.label}の、${base}`;
 }
 
 /**
@@ -53,6 +71,8 @@ export const TEXT = {
   inputLabel:
     "うまくまとまっていなくて大丈夫です。起きていること、知りたいことをそのまま書いてください。",
   send: "送信する",
+  systemLegend: "どのシステムの話ですか（選ばなくても大丈夫です）",
+  systemChangeLegend: "どのシステムの話ですか",
   change: "変更",
   changeLegend: "どの内容として受け取りますか",
   unknown: "わからない",

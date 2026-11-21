@@ -24,7 +24,7 @@ class ConcurrentAnswerTest {
     @Test
     void 生成中の問い合わせの2回目の生成はINVALID_STATEで拒否され1回目は完了する() throws Exception {
         String utterance = "[遅延] 求人の掲載期限の仕様";
-        var id = service.create(utterance).id();
+        var id = service.create(utterance, null).id();
         service.answerQuestions(id, List.of());
         service.confirmStructured(id, null);
 
@@ -43,7 +43,7 @@ class ConcurrentAnswerTest {
     @Test
     void 生成中に今すぐ送ると生成側の保存は競合として拒否され起票は1件だけになる() throws Exception {
         String utterance = "[遅延] 求人の掲載期限の仕様";
-        var id = service.create(utterance).id();
+        var id = service.create(utterance, null).id();
         service.answerQuestions(id, List.of());
         service.confirmStructured(id, null);
 

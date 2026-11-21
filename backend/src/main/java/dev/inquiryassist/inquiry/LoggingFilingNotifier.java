@@ -18,9 +18,10 @@ public class LoggingFilingNotifier implements FilingNotifier {
     public void notifyFiled(FilingNotice notice) {
         TechnicalMemo memo = notice.memo();
         log.info(
-                "起票 id={} category={} sentImmediately={} structured={} memo(findings={}, notFound={}, nextChecks={})",
+                "起票 id={} category={} system={} sentImmediately={} structured={} memo(findings={}, notFound={}, nextChecks={})",
                 notice.inquiryId(),
                 notice.category(),
+                notice.systemLabel(),
                 notice.sentImmediately(),
                 notice.structured() != null ? notice.structured() : "（整形前。元の発話: " + notice.utterance() + "）",
                 memo == null ? 0 : memo.findings().size(),

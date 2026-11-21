@@ -4,6 +4,8 @@ import type {
   ErrorBody,
   InquiryCategory,
   InquiryView,
+  OperatorDetail,
+  OperatorList,
 } from "./types.ts";
 
 /** API が返したエラー（`{code, message}`）を持つ例外。 */
@@ -69,8 +71,28 @@ export function getConfig(): Promise<AppConfig> {
 }
 
 /** `POST /api/inquiries`。種別を判定し追加質問を作る。 */
-export function createInquiry(utterance: string): Promise<InquiryView> {
-  return request<InquiryView>("POST", "/api/inquiries", { utterance });
+export function createInquiry(
+  utterance: string,
+  systemId: string | null = null,
+): Promise<InquiryView> {
+  return request<InquiryView>("POST", "/api/inquiries", {
+    utterance,
+    systemId,
+  });
+}
+
+/**
+ * `PUT /api/inquiries/{id}/system`。対象システムを直す。
+ * @param id 問い合わせ ID
+ * @param systemId 選んだシステムの id（「わからない」は null）
+ */
+export function changeSystem(
+  id: string,
+  systemId: string | null,
+): Promise<InquiryView> {
+  return request<InquiryView>("PUT", `/api/inquiries/${id}/system`, {
+    systemId,
+  });
 }
 
 /** `PUT /api/inquiries/{id}/category`。種別を変更する。 */
@@ -138,4 +160,19 @@ export function resolve(id: string, resolved: boolean): Promise<InquiryView> {
 /** `POST /api/inquiries/{id}/send-now`。今すぐ担当者に送る。 */
 export function sendNow(id: string): Promise<InquiryView> {
   return request<InquiryView>("POST", `/api/inquiries/${id}/send-now`);
+}
+
+/** `GET /api/operator/inquiries`。担当者に送られた問い合わせの一覧。 */
+export function getOperatorList(): Promise<OperatorList> {
+  return request<OperatorList>("GET", "/api/operator/inquiries");
+}
+
+/** `GET /api/operator/inquiries/{id}`。問い合わせの全内容。 */
+export function getOperatorDetail(id: string): Promise<OperatorDetail> {
+  return request<OperatorDetail>("GET", `/api/operator/inquiries/${id}`);
+}
+
+/** `POST /api/operator/inquiries/{id}/read`。既読にして全内容を受け取る。 */
+export function markRead(id: string): Promise<OperatorDetail> {
+  return request<OperatorDetail>("POST", `/api/operator/inquiries/${id}/read`);
 }

@@ -7,8 +7,20 @@ import java.util.List;
  *
  * @param category AIが判定した種別。本人が画面で変更できる
  * @param questions 追加質問。最大 {@link #MAX_QUESTIONS} 個。障害では空
+ * @param guessedSystemId 発話から推測した対象システムの識別子。推測できなければ {@code null}
  */
-public record TriageResult(InquiryCategory category, List<FollowUpQuestion> questions) {
+public record TriageResult(
+        InquiryCategory category, List<FollowUpQuestion> questions, String guessedSystemId) {
+
+    /**
+     * 対象システムを推測しない結果を作る。
+     *
+     * @param category AIが判定した種別
+     * @param questions 追加質問
+     */
+    public TriageResult(InquiryCategory category, List<FollowUpQuestion> questions) {
+        this(category, questions, null);
+    }
 
     /** 追加質問の上限。1往復で終えるため少なく保つ。 */
     public static final int MAX_QUESTIONS = 3;

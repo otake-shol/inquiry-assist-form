@@ -25,6 +25,12 @@ export type Urgency = "LOW" | "NORMAL" | "HIGH";
 /** 出典の種類。 */
 export type SourceType = "CODE" | "FAQ" | "DOCUMENT" | "GLOSSARY";
 
+/** 対象システムの選択肢。 */
+export interface SystemOption {
+  id: string;
+  label: string;
+}
+
 /** 追加質問。`options` が空なら自由記述。 */
 export interface Question {
   id: string;
@@ -80,6 +86,10 @@ export interface InquiryView {
   category: InquiryCategory | null;
   questions: Question[];
   /** 言い直しを作り直せる残り回数 */
+  /** 対象システム（選択または推測。決まっていなければ null） */
+  system: SystemOption | null;
+  /** system がAIの推測なら true */
+  systemGuessed: boolean;
   revisionsLeft: number;
   structured: StructuredInquiry | null;
   answer: ZeroAnswer | null;
@@ -99,6 +109,8 @@ export interface AppConfig {
   mock: boolean;
   /** 担当者に送った後の案内文 */
   filedGuidance?: string;
+  /** 対象システムの選択肢（空または省略なら選択を出さない） */
+  systems?: SystemOption[];
 }
 
 /** エラー本文。通信失敗など HTTP 外の失敗は code が `NETWORK`。 */
@@ -107,4 +119,57 @@ export interface ErrorBody {
   message: string;
   /** 種別の判定でAIが失敗したとき、保存された問い合わせの id */
   inquiryId?: string;
+}
+
+/** オペレータ向けの一覧の1件。`filed` イベントの data も同じ形。 */
+export interface OperatorItem {
+  id: string;
+  filedAt: string;
+  category: InquiryCategory | null;
+  system: SystemOption | null;
+  summary: string;
+  sentImmediately: boolean;
+  read: boolean;
+}
+
+/** `GET /api/operator/inquiries` の応答。 */
+export interface OperatorList {
+  unreadCount: number;
+  items: OperatorItem[];
+}
+
+/** 照合の結果つきの出典。 */
+export interface OperatorCitation extends Citation {
+  verified: boolean;
+}
+
+/** オペレータ向けの0次回答。出典は照合に落ちたものも含む。 */
+export interface OperatorAnswer {
+  grounded: boolean;
+  askerExplanation: string | null;
+  memo: AnswerMemo;
+  citations: OperatorCitation[];
+}
+
+/** Slack への投稿の状態。 */
+export type SlackStatus = "POSTED" | "SKIPPED" | "PENDING" | "FAILED";
+
+/** 問い合わせの全内容（オペレータ向け）。 */
+export interface OperatorDetail {
+  id: string;
+  filedAt: string;
+  askerId: string;
+  utterance: string;
+  categoryByAi: InquiryCategory | null;
+  category: InquiryCategory | null;
+  system: SystemOption | null;
+  systemGuessed: boolean;
+  followUps: { text: string; answer: string | null }[];
+  structured: StructuredInquiry | null;
+  revisionNotes: string[];
+  answer: OperatorAnswer | null;
+  sentImmediately: boolean;
+  read: boolean;
+  /** Slack への投稿の状態 */
+  slackStatus: SlackStatus;
 }
