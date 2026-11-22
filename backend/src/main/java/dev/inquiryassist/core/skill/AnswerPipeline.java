@@ -22,10 +22,18 @@ import java.util.List;
  */
 public final class AnswerPipeline {
 
-    /** 照合を始めるときの進捗の文言。 */
+    /** 照合を始めるときの進捗の文言（日本語）。 */
     public static final String PROGRESS_VERIFYING = "根拠を確かめています";
-    /** 説明を呼ぶときの進捗の文言。 */
+    /** 説明を呼ぶときの進捗の文言（日本語）。 */
     public static final String PROGRESS_EXPLAINING = "答えをまとめています";
+    /** 照合を始めるときの進捗の文言（英語）。 */
+    public static final String PROGRESS_VERIFYING_EN = "Checking the evidence";
+    /** 説明を呼ぶときの進捗の文言（英語）。 */
+    public static final String PROGRESS_EXPLAINING_EN = "Putting the answer together";
+
+    private static boolean english(String language) {
+        return language != null && language.toLowerCase(java.util.Locale.ROOT).startsWith("en");
+    }
 
     /**
      * パイプラインの結果。
@@ -58,19 +66,20 @@ public final class AnswerPipeline {
      * @param inquiry 本人が確認した整形後の問い
      * @param scope 投稿者の閲覧範囲
      * @param progress 進捗の通知先
+     * @param language 本人の言語。調査と説明をこの言語で書かせ、照合と説明の進捗の文言もこの言語で出す
      * @return 0次回答と、照合結果・利用量
      * @throws AiRefusalException 調査でモデルが回答を拒否した場合
      * @throws AiUnavailableException 調査でモデルを呼び出せなかった場合
      * @throws ExplanationFailedException 説明が失敗した場合。調査と照合の結果を持つ
      */
-    public Result run(StructuredInquiry inquiry, AccessScope scope, ProgressListener progress) {
+    public Result run(StructuredInquiry inquiry, AccessScope scope, ProgressListener progress, String language) {
         List<SkillUsage> usages = new ArrayList<>();
 
         long investigationStart = System.nanoTime();
-        AiResult<Investigation> investigation = investigator.investigate(inquiry, scope, progress);
+        AiResult<Investigation> investigation = investigator.investigate(inquiry, scope, progress, language);
         usages.add(new SkillUsage(Skill.INVESTIGATOR, investigation.usage(), false, millisSince(investigationStart)));
 
-        progress.onProgress(PROGRESS_VERIFYING);
+        progress.onProgress(english(language) ? PROGRESS_VERIFYING_EN : PROGRESS_VERIFYING);
         VerifiedInvestigation verified = verifier.verify(investigation.value(), scope);
 
         TechnicalMemo memo = memoOf(verified);
@@ -78,11 +87,11 @@ public final class AnswerPipeline {
             return new Result(ZeroAnswer.ungrounded(memo), verified, usages);
         }
 
-        progress.onProgress(PROGRESS_EXPLAINING);
+        progress.onProgress(english(language) ? PROGRESS_EXPLAINING_EN : PROGRESS_EXPLAINING);
         AiResult<Explanation> explanation;
         long explanationStart = System.nanoTime();
         try {
-            explanation = explainer.explain(inquiry, verified.confirmed());
+            explanation = explainer.explain(inquiry, verified.confirmed(), language);
         } catch (AiRefusalException | AiUnavailableException e) {
             List<SkillUsage> failedUsages = new ArrayList<>(usages);
             // 失敗した呼び出しも費用と時間がかかっているため、時間を記録する

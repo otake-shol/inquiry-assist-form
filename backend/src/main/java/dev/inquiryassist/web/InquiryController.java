@@ -82,8 +82,8 @@ public class InquiryController {
      */
     @PostMapping("/api/inquiries")
     @ResponseStatus(HttpStatus.CREATED)
-    public InquiryView create(@Valid @RequestBody(required = false) CreateRequest request) {
-        return request == null ? service.create(null, null) : service.create(request.text(), request.urgency());
+    public InquiryView create(@Valid @RequestBody(required = false) CreateRequest request, @ViewerLang String lang) {
+        return request == null ? service.create(null, null, lang) : service.create(request.text(), request.urgency(), lang);
     }
 
     /**
@@ -94,7 +94,7 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/intake/answers")
-    public InquiryView answerIntake(@PathVariable UUID id, @Valid @RequestBody IntakeAnswerRequest request) {
+    public InquiryView answerIntake(@PathVariable UUID id, @Valid @RequestBody IntakeAnswerRequest request, @ViewerLang String lang) {
         return service.answerIntake(
                 id,
                 new IntakeReply(
@@ -102,7 +102,8 @@ public class InquiryController {
                         request.optionId(),
                         request.text(),
                         Boolean.TRUE.equals(request.unknown()),
-                        Boolean.TRUE.equals(request.skipped())));
+                        Boolean.TRUE.equals(request.skipped())),
+                lang);
     }
 
     /**
@@ -113,8 +114,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/intake/back")
-    public InquiryView back(@PathVariable UUID id, @Valid @RequestBody IntakeBackRequest request) {
-        return service.back(id, request.questionId());
+    public InquiryView back(@PathVariable UUID id, @Valid @RequestBody IntakeBackRequest request, @ViewerLang String lang) {
+        return service.back(id, request.questionId(), lang);
     }
 
     /**
@@ -125,8 +126,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/intake/text")
-    public InquiryView writeText(@PathVariable UUID id, @Valid @RequestBody IntakeTextRequest request) {
-        return service.writeText(id, request.text());
+    public InquiryView writeText(@PathVariable UUID id, @Valid @RequestBody IntakeTextRequest request, @ViewerLang String lang) {
+        return service.writeText(id, request.text(), lang);
     }
 
     /**
@@ -136,8 +137,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/intake/compose")
-    public InquiryView compose(@PathVariable UUID id) {
-        return service.compose(id);
+    public InquiryView compose(@PathVariable UUID id, @ViewerLang String lang) {
+        return service.compose(id, lang);
     }
 
     /**
@@ -148,8 +149,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PutMapping("/api/inquiries/{id}/urgency")
-    public InquiryView changeUrgency(@PathVariable UUID id, @Valid @RequestBody UrgencyRequest request) {
-        return service.changeUrgency(id, request.urgency());
+    public InquiryView changeUrgency(@PathVariable UUID id, @Valid @RequestBody UrgencyRequest request, @ViewerLang String lang) {
+        return service.changeUrgency(id, request.urgency(), lang);
     }
 
     /**
@@ -161,7 +162,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PutMapping("/api/inquiries/{id}/structured")
-    public InquiryView structured(@PathVariable UUID id, @RequestBody(required = false) Map<String, Object> body) {
+    public InquiryView structured(
+            @PathVariable UUID id, @RequestBody(required = false) Map<String, Object> body, @ViewerLang String lang) {
         Object summary = null;
         if (body != null) {
             if (!Set.of("summary").containsAll(body.keySet())) {
@@ -172,7 +174,7 @@ public class InquiryController {
                 throw new IllegalArgumentException("summary は文字列");
             }
         }
-        return service.confirmStructured(id, (String) summary);
+        return service.confirmStructured(id, (String) summary, lang);
     }
 
     /**
@@ -183,8 +185,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/revision")
-    public InquiryView revision(@PathVariable UUID id, @Valid @RequestBody RevisionRequest request) {
-        return service.revise(id, request.note());
+    public InquiryView revision(@PathVariable UUID id, @Valid @RequestBody RevisionRequest request, @ViewerLang String lang) {
+        return service.revise(id, request.note(), lang);
     }
 
     /**
@@ -194,8 +196,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/reopen")
-    public InquiryView reopen(@PathVariable UUID id) {
-        return service.reopen(id);
+    public InquiryView reopen(@PathVariable UUID id, @ViewerLang String lang) {
+        return service.reopen(id, lang);
     }
 
     /**
@@ -207,10 +209,10 @@ public class InquiryController {
      * @return SSE のストリーム
      */
     @GetMapping(path = "/api/inquiries/{id}/answer-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter answerStream(@PathVariable UUID id) {
-        service.get(id);
+    public SseEmitter answerStream(@PathVariable UUID id, @ViewerLang String lang) {
+        service.get(id, lang);
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
-        Thread.ofVirtual().name("answer-" + id).start(() -> runAnswer(id, emitter));
+        Thread.ofVirtual().name("answer-" + id).start(() -> runAnswer(id, emitter, lang));
         return emitter;
     }
 
@@ -222,8 +224,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/resolution")
-    public InquiryView resolution(@PathVariable UUID id, @Valid @RequestBody ResolutionRequest request) {
-        return service.resolve(id, request.resolved(), request.note());
+    public InquiryView resolution(@PathVariable UUID id, @Valid @RequestBody ResolutionRequest request, @ViewerLang String lang) {
+        return service.resolve(id, request.resolved(), request.note(), lang);
     }
 
     /**
@@ -233,8 +235,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/send-now")
-    public InquiryView sendNow(@PathVariable UUID id) {
-        return service.sendNow(id);
+    public InquiryView sendNow(@PathVariable UUID id, @ViewerLang String lang) {
+        return service.sendNow(id, lang);
     }
 
     /**
@@ -244,8 +246,8 @@ public class InquiryController {
      * @return 更新後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/withdraw")
-    public InquiryView withdraw(@PathVariable UUID id) {
-        return service.withdraw(id);
+    public InquiryView withdraw(@PathVariable UUID id, @ViewerLang String lang) {
+        return service.withdraw(id, lang);
     }
 
     /**
@@ -254,8 +256,8 @@ public class InquiryController {
      * @return 一覧と、未読の返信がある件数
      */
     @GetMapping("/api/inquiries")
-    public InquiryList list() {
-        return service.list();
+    public InquiryList list(@ViewerLang String lang) {
+        return service.list(lang);
     }
 
     /**
@@ -266,8 +268,8 @@ public class InquiryController {
      * @return 追記後の問い合わせ
      */
     @PostMapping("/api/inquiries/{id}/messages")
-    public InquiryView addMessage(@PathVariable UUID id, @Valid @RequestBody MessageRequest request) {
-        return service.addMessage(id, request.body());
+    public InquiryView addMessage(@PathVariable UUID id, @Valid @RequestBody MessageRequest request, @ViewerLang String lang) {
+        return service.addMessage(id, request.body(), lang);
     }
 
     /**
@@ -277,13 +279,13 @@ public class InquiryController {
      * @return 問い合わせ
      */
     @GetMapping("/api/inquiries/{id}")
-    public InquiryView get(@PathVariable UUID id) {
-        return service.get(id);
+    public InquiryView get(@PathVariable UUID id, @ViewerLang String lang) {
+        return service.get(id, lang);
     }
 
-    private void runAnswer(UUID id, SseEmitter emitter) {
+    private void runAnswer(UUID id, SseEmitter emitter, String lang) {
         try {
-            InquiryView done = service.generateAnswer(id, message -> send(emitter, "progress", Map.of("message", message)));
+            InquiryView done = service.generateAnswer(id, message -> send(emitter, "progress", Map.of("message", message)), lang);
             send(emitter, "done", done);
         } catch (AiRefusalException e) {
             send(emitter, "failed", new ErrorBody("AI_REFUSED", e.getMessage()));

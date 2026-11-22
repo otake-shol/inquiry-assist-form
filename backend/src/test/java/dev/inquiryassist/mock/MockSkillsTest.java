@@ -118,7 +118,7 @@ class MockSkillsTest {
     @Test
     void 聞き手は1問を返し_idはq1で選択肢のidはo1から() {
         var questions = interviewer
-                .ask("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, scope)
+                .ask("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, scope, "ja")
                 .value()
                 .questions();
 
@@ -131,14 +131,14 @@ class MockSkillsTest {
 
     @Test
     void 聞き手は文章がなくても質問を返す() {
-        assertThat(interviewer.ask(null, null, SYSTEMS.get(0), POSTING, scope).value().questions()).hasSize(1);
+        assertThat(interviewer.ask(null, null, SYSTEMS.get(0), POSTING, scope, "ja").value().questions()).hasSize(1);
     }
 
     @Test
     void 質問なしタグは詳しい質問を出さず質問エラータグは聞き手が失敗する() {
-        assertThat(interviewer.ask("[質問なし] 仕様", InquiryType.HOW_IT_WORKS, null, null, scope).value().questions())
+        assertThat(interviewer.ask("[質問なし] 仕様", InquiryType.HOW_IT_WORKS, null, null, scope, "ja").value().questions())
                 .isEmpty();
-        assertThatThrownBy(() -> interviewer.ask("[質問エラー] 仕様", InquiryType.HOW_IT_WORKS, null, null, scope))
+        assertThatThrownBy(() -> interviewer.ask("[質問エラー] 仕様", InquiryType.HOW_IT_WORKS, null, null, scope, "ja"))
                 .isInstanceOf(AiUnavailableException.class);
     }
 
@@ -195,9 +195,9 @@ class MockSkillsTest {
     @Test
     void 言い直しは確定したシステムの名前をtargetSystemに入れgoalは本人が書いた文章のまま() {
         var withSystem = restater
-                .restate("[遅延] x", InquiryType.HOW_IT_WORKS, SYSTEMS.get(1), null, List.of(), List.of())
+                .restate("[遅延] x", InquiryType.HOW_IT_WORKS, SYSTEMS.get(1), null, List.of(), List.of(), "ja")
                 .value();
-        var without = restater.restate("x", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of()).value();
+        var without = restater.restate("x", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of(), "ja").value();
 
         assertThat(withSystem.targetSystem()).isEqualTo("請求管理");
         assertThat(withSystem.goal()).isEqualTo("[遅延] x");
@@ -219,13 +219,13 @@ class MockSkillsTest {
     }
 
     private String summary(InquiryType type, SystemOption system, FunctionOption function) {
-        return restater.restate(null, type, system, function, List.of(), List.of()).value().summary();
+        return restater.restate(null, type, system, function, List.of(), List.of(), "ja").value().summary();
     }
 
     @Test
     void 言い直しは文章のタグを取り除いて続け_goalにはそのまま入れる() {
         var result = restater
-                .restate("[質問なし] [遅延] 期限", InquiryType.HOW_TO, null, null, List.of(), List.of())
+                .restate("[質問なし] [遅延] 期限", InquiryType.HOW_TO, null, null, List.of(), List.of(), "ja")
                 .value();
 
         assertThat(result.summary()).isEqualTo("使い方を知りたい。 書かれた内容: 期限");
@@ -234,7 +234,7 @@ class MockSkillsTest {
 
     @Test
     void 言い直しは文章がなければgoalに種類ごとの文を入れる() {
-        var result = restater.restate(null, InquiryType.DO_FOR_ME, null, null, List.of(), List.of()).value();
+        var result = restater.restate(null, InquiryType.DO_FOR_ME, null, null, List.of(), List.of(), "ja").value();
 
         assertThat(result.goal()).isEqualTo("作業をしてほしい。");
     }
@@ -248,7 +248,7 @@ class MockSkillsTest {
                         SYSTEMS.get(0),
                         POSTING,
                         answers("いつから起きていますか", "今日から", "どの場面での話ですか", null, "対象の取引先はどこですか", "A社"),
-                        List.of())
+                        List.of(), "ja")
                 .value();
 
         assertThat(result.summary())
@@ -265,7 +265,7 @@ class MockSkillsTest {
                         SYSTEMS.get(0),
                         null,
                         answers("いつから起きていますか", "今日から"),
-                        List.of("一昨日から"))
+                        List.of("一昨日から"), "ja")
                 .value();
 
         assertThat(result.summary())
@@ -275,10 +275,10 @@ class MockSkillsTest {
 
     @Test
     void 訂正があれば伝えられた順に補足を足しgoalを変えない() {
-        var first = restater.restate("期限", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of()).value();
+        var first = restater.restate("期限", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of(), "ja").value();
 
         var revised = restater
-                .restate("期限", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of("一昨日から", "画面は管理画面"))
+                .restate("期限", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of("一昨日から", "画面は管理画面"), "ja")
                 .value();
 
         assertThat(revised.summary()).isEqualTo(first.summary() + " 補足: 一昨日から 補足: 画面は管理画面");
@@ -287,7 +287,7 @@ class MockSkillsTest {
 
     @Test
     void 言い直しエラータグは言い直しが失敗する() {
-        assertThatThrownBy(() -> restater.restate("[言い直しエラー] x", null, null, null, List.of(), List.of()))
+        assertThatThrownBy(() -> restater.restate("[言い直しエラー] x", null, null, null, List.of(), List.of(), "ja"))
                 .isInstanceOf(AiUnavailableException.class);
     }
 
@@ -297,7 +297,7 @@ class MockSkillsTest {
     void 正常系は事実2件がすべて確かめられ説明は事実の文をつないだものになる() {
         List<String> progress = new ArrayList<>();
 
-        var result = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "期限の仕様"), scope, progress::add);
+        var result = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "期限の仕様"), scope, progress::add, "ja");
 
         assertThat(progress).hasSize(5).endsWith(AnswerPipeline.PROGRESS_VERIFYING, AnswerPipeline.PROGRESS_EXPLAINING);
         assertThat(result.answer().grounded()).isTrue();
@@ -312,7 +312,7 @@ class MockSkillsTest {
 
     @Test
     void おかしいかもしれないの説明は現在の動作として書き仕様の正否を断定しない() {
-        var answer = pipeline().run(inquiry(InquiryType.LOOKS_WRONG, "表示がおかしい"), scope, m -> {}).answer();
+        var answer = pipeline().run(inquiry(InquiryType.LOOKS_WRONG, "表示がおかしい"), scope, m -> {}, "ja").answer();
 
         assertThat(answer.askerExplanation())
                 .startsWith("現在の実装では、")
@@ -323,8 +323,8 @@ class MockSkillsTest {
 
     @Test
     void 説明は通常は問いに答えていると判定し的外れタグでは答えていないと判定する() {
-        var normal = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "期限"), scope, m -> {}).answer();
-        var offTopic = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[的外れ] 期限"), scope, m -> {}).answer();
+        var normal = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "期限"), scope, m -> {}, "ja").answer();
+        var offTopic = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[的外れ] 期限"), scope, m -> {}, "ja").answer();
 
         assertThat(normal.grounded()).isTrue();
         assertThat(normal.answered()).isTrue();
@@ -338,11 +338,11 @@ class MockSkillsTest {
     @Test
     void 一部幽霊タグは確かめられた事実だけから説明を書き落ちた事実は説明に現れない() {
         Investigation raw = investigator
-                .investigate(inquiry(InquiryType.HOW_IT_WORKS, "[一部幽霊] 期限"), scope, m -> {})
+                .investigate(inquiry(InquiryType.HOW_IT_WORKS, "[一部幽霊] 期限"), scope, m -> {}, "ja")
                 .value();
         String ghostStatement = raw.findings().get(1).statement();
 
-        var answer = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[一部幽霊] 期限"), scope, m -> {}).answer();
+        var answer = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[一部幽霊] 期限"), scope, m -> {}, "ja").answer();
 
         assertThat(answer.grounded()).isTrue();
         assertThat(answer.askerExplanation()).contains(raw.findings().get(0).statement()).doesNotContain(ghostStatement);
@@ -353,7 +353,7 @@ class MockSkillsTest {
 
     @Test
     void 幽霊出典タグは事実が全部落ちて根拠なしになりunconfirmedに残る() {
-        var answer = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[幽霊出典] 期限"), scope, m -> {}).answer();
+        var answer = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[幽霊出典] 期限"), scope, m -> {}, "ja").answer();
 
         assertThat(answer.grounded()).isFalse();
         assertThat(answer.askerExplanation()).isNull();
@@ -363,7 +363,7 @@ class MockSkillsTest {
 
     @Test
     void 根拠なしタグは事実を返さず根拠なしになる() {
-        var answer = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[根拠なし] 期限"), scope, m -> {}).answer();
+        var answer = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[根拠なし] 期限"), scope, m -> {}, "ja").answer();
 
         assertThat(answer.grounded()).isFalse();
         assertThat(answer.memo().unconfirmed()).isEmpty();
@@ -372,11 +372,11 @@ class MockSkillsTest {
 
     @Test
     void エラータグは調査で_拒否タグは調査で_説明エラータグは説明で失敗する() {
-        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[エラー] x"), scope, m -> {}))
+        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[エラー] x"), scope, m -> {}, "ja"))
                 .isInstanceOf(AiUnavailableException.class);
-        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[拒否] x"), scope, m -> {}))
+        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[拒否] x"), scope, m -> {}, "ja"))
                 .isInstanceOf(AiRefusalException.class);
-        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[説明エラー] x"), scope, m -> {}))
+        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[説明エラー] x"), scope, m -> {}, "ja"))
                 .isInstanceOf(dev.inquiryassist.core.skill.ExplanationFailedException.class)
                 .satisfies(e -> {
                     var failed = (dev.inquiryassist.core.skill.ExplanationFailedException) e;
@@ -389,7 +389,7 @@ class MockSkillsTest {
         List<Long> times = new ArrayList<>();
         long start = System.nanoTime();
 
-        investigator.investigate(inquiry(InquiryType.HOW_IT_WORKS, "[遅延] x"), scope, m -> times.add(System.nanoTime()));
+        investigator.investigate(inquiry(InquiryType.HOW_IT_WORKS, "[遅延] x"), scope, m -> times.add(System.nanoTime()), "ja");
 
         long previous = start;
         for (long t : times) {
@@ -403,17 +403,113 @@ class MockSkillsTest {
     void 遅延タグがなければ待たない() {
         long start = System.nanoTime();
 
-        investigator.investigate(inquiry(InquiryType.HOW_IT_WORKS, "x"), scope, m -> {});
+        investigator.investigate(inquiry(InquiryType.HOW_IT_WORKS, "x"), scope, m -> {}, "ja");
 
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(DELAY);
     }
 
     @Test
     void 調査は調べない種類を渡すと拒否し_種類が決まっていなければ調べる() {
-        assertThatThrownBy(() -> investigator.investigate(inquiry(InquiryType.CHANGE_REQUEST, "x"), scope, m -> {}))
+        assertThatThrownBy(() -> investigator.investigate(inquiry(InquiryType.CHANGE_REQUEST, "x"), scope, m -> {}, "ja"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThat(investigator.investigate(inquiry(null, "x"), scope, m -> {}).value().findings()).hasSize(2);
-        assertThat(investigator.investigate(inquiry(InquiryType.DO_FOR_ME, "x"), scope, m -> {}).value().findings())
+        assertThat(investigator.investigate(inquiry(null, "x"), scope, m -> {}, "ja").value().findings()).hasSize(2);
+        assertThat(investigator.investigate(inquiry(InquiryType.DO_FOR_ME, "x"), scope, m -> {}, "ja").value().findings())
                 .hasSize(2);
+    }
+
+    // ---- 英語（契約書「モックのシナリオ」の英語の節） ----
+
+    private static final List<SystemOption> BILINGUAL = List.of(
+            new SystemOption(
+                    "job-admin",
+                    "求人管理画面",
+                    List.of("求人管理画面", "Job admin"),
+                    List.of(new FunctionOption("posting", "求人の掲載", List.of("求人の掲載", "Posting")))),
+            new SystemOption("billing", "請求管理", List.of("請求管理", "Billing"), List.of()));
+
+    @ParameterizedTest
+    @CsvSource({
+        "Could you change this please, CHANGE_REQUEST", // 変えてほしい系より、依頼の語は後
+        "I have a feature request, CHANGE_REQUEST",
+        "Please extend the deadline, DO_FOR_ME",
+        "It looks WRONG to me, LOOKS_WRONG",
+        "There is a Bug, LOOKS_WRONG",
+        "How to register a posting, HOW_TO",
+        "How do I register, HOW_TO",
+        "What is the deadline rule, HOW_IT_WORKS"
+    })
+    void 受付は英語のキーワードも大文字と小文字を区別せずに種類を決める(String text, InquiryType expected) {
+        // 依頼の語（please）は変えてほしい（improve）より後に判定するため、"Could you change this please" は依頼
+        InquiryType actual = reception.receive(text, SYSTEMS, Placement.NONE).value().type();
+        assertThat(actual).isEqualTo(text.startsWith("Could you change") ? InquiryType.DO_FOR_ME : expected);
+    }
+
+    @Test
+    void 受付はどの言語のシステムと機能の名前でも大文字と小文字を区別せずに置く() {
+        var result = reception.receive("billing is wrong", BILINGUAL, Placement.NONE).value();
+        assertThat(result.systemId()).isEqualTo("billing");
+        var fn = reception.receive("The POSTING in JOB ADMIN", BILINGUAL, Placement.NONE).value();
+        assertThat(fn.systemId()).isEqualTo("job-admin");
+        assertThat(fn.functionId()).isEqualTo("posting");
+        // 日本語の名前も、英語の設定のままで読み取れる
+        assertThat(reception.receive("請求管理の件", BILINGUAL, Placement.NONE).value().systemId()).isEqualTo("billing");
+    }
+
+    @Test
+    void 聞き手は英語なら質問と選択肢を英語で返し_それ以外は日本語() {
+        var en = interviewer.ask("x", InquiryType.HOW_IT_WORKS, null, null, scope, "en").value().questions().get(0);
+        assertThat(en.text()).isEqualTo("In what situation does this happen?");
+        assertThat(en.options()).containsExactly("When opening a screen", "When saving", "When viewing a list");
+        var enUs = interviewer.ask("x", InquiryType.HOW_IT_WORKS, null, null, scope, "en-US").value().questions().get(0);
+        assertThat(enUs.text()).isEqualTo("In what situation does this happen?");
+        var ja = interviewer.ask("x", InquiryType.HOW_IT_WORKS, null, null, scope, "ja").value().questions().get(0);
+        assertThat(ja.text()).isEqualTo("どの場面での話ですか");
+        var other = interviewer.ask("x", InquiryType.HOW_IT_WORKS, null, null, scope, "fr").value().questions().get(0);
+        assertThat(other.text()).isEqualTo("どの場面での話ですか");
+    }
+
+    @Test
+    void 言い直しは英語なら英語で組み立て_本人の文章はそのまま() {
+        var result = restater.restate(
+                        "Deadline question",
+                        InquiryType.HOW_IT_WORKS,
+                        new SystemOption("job-admin", "Job admin"),
+                        null,
+                        List.of(),
+                        List.of("since Monday"),
+                        "en")
+                .value();
+        assertThat(result.summary())
+                .startsWith("About Job admin: I want to know how it currently works.")
+                .contains("What was written: Deadline question")
+                .contains("Note: since Monday");
+    }
+
+    @Test
+    void 調査は英語なら事実と次に確認することと進捗を英語で返し_根拠の引用は変えない() {
+        var progress = new ArrayList<String>();
+        var inv = investigator
+                .investigate(inquiry(InquiryType.HOW_IT_WORKS, "deadline"), scope, progress::add, "en")
+                .value();
+        var jaInv = investigator
+                .investigate(inquiry(InquiryType.HOW_IT_WORKS, "deadline"), scope, m -> {}, "ja")
+                .value();
+
+        assertThat(progress).containsExactly("Searching the code", "Checking the FAQ", "Matching the glossary");
+        assertThat(inv.findings()).extracting(Finding::statement).allSatisfy(s -> assertThat(s).matches("^[\\x00-\\x7F]+$"));
+        assertThat(inv.nextChecks()).allSatisfy(s -> assertThat(s).matches("^[\\x00-\\x7F]+$"));
+        // 根拠は、言語によらず同じ
+        assertThat(inv.findings().stream().map(Finding::evidence).toList())
+                .isEqualTo(jaInv.findings().stream().map(Finding::evidence).toList());
+    }
+
+    @Test
+    void 説明は英語ならつなぎの文も英語() {
+        var pipelineResult = new AnswerPipeline(investigator, verifier, explainer)
+                .run(inquiry(InquiryType.LOOKS_WRONG, "looks wrong"), scope, m -> {}, "en");
+        String text = pipelineResult.answer().askerExplanation();
+        assertThat(text).startsWith("In the current implementation: ");
+        assertThat(text).endsWith("Whether this behavior is intended will be confirmed by the support team.");
+        assertThat(text).matches("^[\\x00-\\x7F]+$");
     }
 }

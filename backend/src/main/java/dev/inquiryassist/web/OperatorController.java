@@ -58,8 +58,8 @@ public class OperatorController {
      * @return 一覧（業務が止まっている件が先頭）と、未読数
      */
     @GetMapping("/inquiries")
-    public OperatorList list(@RequestParam(defaultValue = "false") boolean unreadOnly) {
-        return operators.list(unreadOnly);
+    public OperatorList list(@RequestParam(defaultValue = "false") boolean unreadOnly, @ViewerLang String lang) {
+        return operators.list(unreadOnly, lang);
     }
 
     /**
@@ -69,8 +69,8 @@ public class OperatorController {
      * @return 全内容
      */
     @GetMapping("/inquiries/{id}")
-    public OperatorDetail get(@PathVariable UUID id) {
-        return operators.get(id);
+    public OperatorDetail get(@PathVariable UUID id, @ViewerLang String lang) {
+        return operators.get(id, lang);
     }
 
     /**
@@ -80,8 +80,8 @@ public class OperatorController {
      * @return 既読後の全内容
      */
     @PostMapping("/inquiries/{id}/read")
-    public OperatorDetail read(@PathVariable UUID id) {
-        return operators.markRead(id);
+    public OperatorDetail read(@PathVariable UUID id, @ViewerLang String lang) {
+        return operators.markRead(id, lang);
     }
 
     /**
@@ -92,8 +92,8 @@ public class OperatorController {
      * @return 返信後の全内容
      */
     @PostMapping("/inquiries/{id}/replies")
-    public OperatorDetail reply(@PathVariable UUID id, @Valid @RequestBody ReplyRequest request) {
-        return operators.reply(id, request.kind(), request.body());
+    public OperatorDetail reply(@PathVariable UUID id, @Valid @RequestBody ReplyRequest request, @ViewerLang String lang) {
+        return operators.reply(id, request.kind(), request.body(), lang);
     }
 
     /**
@@ -104,8 +104,8 @@ public class OperatorController {
      * @return 見送り後の全内容
      */
     @PostMapping("/inquiries/{id}/decline")
-    public OperatorDetail decline(@PathVariable UUID id, @Valid @RequestBody DeclineRequest request) {
-        return operators.decline(id, request.reasonKind(), request.reason());
+    public OperatorDetail decline(@PathVariable UUID id, @Valid @RequestBody DeclineRequest request, @ViewerLang String lang) {
+        return operators.decline(id, request.reasonKind(), request.reason(), lang);
     }
 
     /**
@@ -116,8 +116,8 @@ public class OperatorController {
      * @return 変更後の全内容
      */
     @PutMapping("/inquiries/{id}/phase")
-    public OperatorDetail changePhase(@PathVariable UUID id, @Valid @RequestBody PhaseRequest request) {
-        return operators.changePhase(id, request.phase());
+    public OperatorDetail changePhase(@PathVariable UUID id, @Valid @RequestBody PhaseRequest request, @ViewerLang String lang) {
+        return operators.changePhase(id, request.phase(), lang);
     }
 
     /**
@@ -128,8 +128,8 @@ public class OperatorController {
      * @return 変更後の全内容
      */
     @PutMapping("/inquiries/{id}/placement")
-    public OperatorDetail replacePlacement(@PathVariable UUID id, @Valid @RequestBody PlacementRequest request) {
-        return operators.replacePlacement(id, request.type(), request.systemId(), request.functionId());
+    public OperatorDetail replacePlacement(@PathVariable UUID id, @Valid @RequestBody PlacementRequest request, @ViewerLang String lang) {
+        return operators.replacePlacement(id, request.type(), request.systemId(), request.functionId(), lang);
     }
 
     /**
@@ -138,7 +138,7 @@ public class OperatorController {
      * @return SSE のストリーム
      */
     @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream() {
-        return hub.subscribe();
+    public SseEmitter stream(@ViewerLang String lang) {
+        return hub.subscribe(lang);
     }
 }

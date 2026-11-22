@@ -1,11 +1,5 @@
 import type { FlowError } from "../flow/reducer.ts";
-import {
-  AI_ERROR_BEFORE_CREATE_HINT,
-  AI_ERROR_SEND_NOW_HINT,
-  AI_ERROR_TEXT,
-  GENERIC_ERROR_TEXT,
-  TEXT,
-} from "../text/labels.ts";
+import { useMessages } from "../i18n/context.ts";
 
 /** エラー表示の props。 */
 interface ErrorNoticeProps {
@@ -32,24 +26,23 @@ export function ErrorNotice({
   error,
   hasInquiry,
   onRetry,
-  retryLabel = TEXT.retryCompose,
+  retryLabel,
   onSendNow,
   busy,
 }: ErrorNoticeProps) {
-  const aiText = AI_ERROR_TEXT[error.code];
+  const { text: TEXT, errors } = useMessages();
+  const aiText = errors.ai[error.code];
   return (
     <div className="notice error" role="alert">
-      <p>{aiText ?? GENERIC_ERROR_TEXT}</p>
+      <p>{aiText ?? errors.generic}</p>
       {aiText !== undefined && onSendNow === undefined && (
-        <p>
-          {hasInquiry ? AI_ERROR_SEND_NOW_HINT : AI_ERROR_BEFORE_CREATE_HINT}
-        </p>
+        <p>{hasInquiry ? errors.sendNowHint : errors.beforeCreateHint}</p>
       )}
       {(onRetry !== undefined || onSendNow !== undefined) && (
         <div className="actions">
           {onRetry !== undefined && (
             <button type="button" onClick={onRetry} disabled={busy}>
-              {retryLabel}
+              {retryLabel ?? TEXT.retryCompose}
             </button>
           )}
           {onSendNow !== undefined && (

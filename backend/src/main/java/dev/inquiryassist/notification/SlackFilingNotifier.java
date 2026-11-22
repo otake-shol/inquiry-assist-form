@@ -1,7 +1,7 @@
 package dev.inquiryassist.notification;
 
 import dev.inquiryassist.core.Urgency;
-import dev.inquiryassist.core.intake.IntakeCatalog;
+import dev.inquiryassist.inquiry.IntakeLocales;
 import dev.inquiryassist.inquiry.InquiryFiledEvent;
 import dev.inquiryassist.inquiry.InquiryProperties;
 import dev.inquiryassist.inquiry.OperatorItem;
@@ -34,21 +34,21 @@ public class SlackFilingNotifier {
     private static final int MAX_SUMMARY_LENGTH = 500;
 
     private final InquiryProperties properties;
-    private final IntakeCatalog catalog;
+    private final IntakeLocales locales;
     private final OperatorService operators;
     private final JsonMapper json;
     private final HttpClient client;
 
     /**
      * @param properties 投稿先などの設定
-     * @param catalog 緊急度の名前
+     * @param locales 緊急度の名前（既定の言語。Slack は既定の言語で書く）
      * @param operators 投稿結果の記録先
      * @param json 本文の JSON 化
      */
     public SlackFilingNotifier(
-            InquiryProperties properties, IntakeCatalog catalog, OperatorService operators, JsonMapper json) {
+            InquiryProperties properties, IntakeLocales locales, OperatorService operators, JsonMapper json) {
         this.properties = properties;
-        this.catalog = catalog;
+        this.locales = locales;
         this.operators = operators;
         this.json = json;
         this.client = HttpClient.newBuilder()
@@ -112,7 +112,7 @@ public class SlackFilingNotifier {
         text.append("種類: ").append(item.type() == null ? "（未定）" : escape(item.type().label())).append('\n');
         text.append("システム: ").append(placeOf(item)).append('\n');
         if (item.urgency() != Urgency.NORMAL) {
-            text.append("緊急度: ").append(escape(catalog.urgencyLabel(item.urgency()))).append('\n');
+            text.append("緊急度: ").append(escape(locales.catalog(locales.defaultLanguage()).urgencyLabel(item.urgency()))).append('\n');
         }
         text.append("内容: ").append(escape(truncate(item.summary()))).append('\n');
         text.append("送付: ").append(item.sentImmediately() ? "「今すぐ送る」による送付" : "通常の送付").append('\n');

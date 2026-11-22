@@ -113,7 +113,7 @@ final class EvalExecutor {
             }
             case INTERVIEWER -> {
                 var result = interviewer.ask(
-                        body.path("utterance").asString(), type(body), systemOf(body), null, SCOPE);
+                        body.path("utterance").asString(), type(body), systemOf(body), null, SCOPE, "ja");
                 List<Scorer.Question> questions = result.value().questions().stream()
                         .map(q -> new Scorer.Question(q.text(), q.options()))
                         .toList();
@@ -133,7 +133,7 @@ final class EvalExecutor {
                 List<String> corrections = new ArrayList<>();
                 body.path("corrections").forEach(x -> corrections.add(x.asString()));
                 AiResult<StructuredInquiry> result = restater.restate(
-                        body.path("utterance").asString(), type(body), systemOf(body), null, answers, corrections);
+                        body.path("utterance").asString(), type(body), systemOf(body), null, answers, corrections, "ja");
                 StructuredInquiry value = result.value();
                 output.put("summary", value.summary());
                 output.put("targetSystem", value.targetSystem());
@@ -149,7 +149,7 @@ final class EvalExecutor {
                 body.path("facts").forEach(f -> facts.add(new Finding(f.asString(), List.of(evidence))));
                 String question = body.path("question").asString();
                 StructuredInquiry inquiry = new StructuredInquiry(question, type(body), null, question, null, null);
-                var result = explainer.explain(inquiry, facts);
+                var result = explainer.explain(inquiry, facts, "ja");
                 output.put("text", result.value().text());
                 output.put("answersQuestion", result.value().answersQuestion());
                 return new Outcome(

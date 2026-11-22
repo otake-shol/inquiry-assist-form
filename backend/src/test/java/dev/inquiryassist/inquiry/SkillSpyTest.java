@@ -7,16 +7,21 @@ import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mockingDetails;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.skill.ExplainerSkill;
+import dev.inquiryassist.core.skill.InvestigatorSkill;
+import dev.inquiryassist.core.skill.RestaterSkill;
 import dev.inquiryassist.core.skill.InterviewerSkill;
 import dev.inquiryassist.core.skill.ReceptionSkill;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 /** 受付と聞き手を呼ぶ・呼ばないと、説明の失敗後の再試行を、スパイで呼び出しを確かめながら確認する。 */
@@ -31,9 +36,15 @@ class SkillSpyTest extends ApiSupport {
     @MockitoSpyBean
     ExplainerSkill explainer;
 
+    @MockitoSpyBean
+    RestaterSkill restater;
+
+    @MockitoSpyBean
+    InvestigatorSkill investigator;
+
     @BeforeEach
     void reset() {
-        clearInvocations(reception, interviewer, explainer);
+        clearInvocations(reception, interviewer, explainer, restater, investigator);
     }
 
     private long receptionCalls() {
@@ -133,7 +144,7 @@ class SkillSpyTest extends ApiSupport {
     @Test
     void 説明が失敗した後の再試行は調査からやり直し成功すると保存済みの内容が置き換わる() throws Exception {
         String id = toAnswering("期限の仕様", null);
-        doThrow(new AiUnavailableException("一時的な失敗", null)).when(explainer).explain(any(), any());
+        doThrow(new AiUnavailableException("一時的な失敗", null)).when(explainer).explain(any(), any(), any());
 
         String failed = stream(id);
 
@@ -143,7 +154,7 @@ class SkillSpyTest extends ApiSupport {
         assertThat(jdbc.queryForObject("select technical_memo is not null from inquiries where id = ?::uuid", Boolean.class, id))
                 .isTrue();
 
-        doCallRealMethod().when(explainer).explain(any(), any());
+        doCallRealMethod().when(explainer).explain(any(), any(), any());
         String retried = stream(id);
 
         String done = retried.lines()
@@ -165,5 +176,50 @@ class SkillSpyTest extends ApiSupport {
                         id))
                 .containsExactlyInAnyOrder(true, false);
         mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.answer.grounded").value(true));
+    }
+
+    /** スパイに記録された、指定のメソッドの呼び出しの最後の引数（本人の言語）を、呼んだ順に返す。 */
+    private static java.util.List<Object> languagesOf(Object spy, String method) {
+        return mockingDetails(spy).getInvocations().stream()
+                .filter(i -> i.getMethod().getName().equals(method))
+                .map(i -> i.getArguments()[i.getArguments().length - 1])
+                .toList();
+    }
+
+    @Test
+    void 聞き手と言い直しと調査と説明は問い合わせの言語を受け取る() throws Exception {
+        MediaType json = MediaType.APPLICATION_JSON;
+        String id = idOf(text(mvc.perform(post("/api/inquiries")
+                        .header("Accept-Language", "en")
+                        .contentType(json)
+                        .content(json("text", "What is the rule for the deadline?")))
+                .andExpect(status().isCreated())));
+        // 入口の最後まで、英語で進める
+        String current = view(id);
+        while (JsonPath.read(current, "$.intake.next") != null) {
+            String questionId = JsonPath.read(current, "$.intake.next.questionId");
+            String kind = JsonPath.read(current, "$.intake.next.kind");
+            String body = "NOTE".equals(kind)
+                    ? ((Boolean) JsonPath.read(current, "$.intake.next.canSkip")
+                            ? json("questionId", questionId, "skipped", true)
+                            : json("questionId", questionId, "text", "x"))
+                    : json("questionId", questionId, "unknown", true);
+            current = text(mvc.perform(post("/api/inquiries/" + id + "/intake/answers")
+                            .header("Accept-Language", "en")
+                            .contentType(json)
+                            .content(body))
+                    .andExpect(status().isOk()));
+        }
+        mvc.perform(put("/api/inquiries/" + id + "/structured")
+                        .header("Accept-Language", "en")
+                        .contentType(json)
+                        .content("{}"))
+                .andExpect(status().isOk());
+        stream(id);
+
+        assertThat(languagesOf(interviewer, "ask")).isNotEmpty().containsOnly("en");
+        assertThat(languagesOf(restater, "restate")).isNotEmpty().containsOnly("en");
+        assertThat(languagesOf(investigator, "investigate")).containsExactly("en");
+        assertThat(languagesOf(explainer, "explain")).containsExactly("en");
     }
 }

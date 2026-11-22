@@ -5,11 +5,12 @@ import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.TechnicalMemo;
+import dev.inquiryassist.core.intake.Choice;
 import dev.inquiryassist.core.intake.IntakeCatalog;
 import dev.inquiryassist.core.intake.IntakeEntries;
 import dev.inquiryassist.core.intake.IntakeEntry;
 import dev.inquiryassist.core.intake.IntakeNext;
-import dev.inquiryassist.core.intake.IntakePlanner;
+import dev.inquiryassist.core.intake.IntakeTexts;
 import dev.inquiryassist.core.intake.IntakeQuestion;
 import dev.inquiryassist.core.intake.PlacedBy;
 import dev.inquiryassist.core.intake.QuestionKind;
@@ -17,39 +18,37 @@ import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
 import dev.inquiryassist.inquiry.InquiryEntity.StoredCitation;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /**
  * 問い合わせ記録から、本人向けの {@link InquiryView}、担当者向けの一覧と詳細の項目を作る。
  *
- * <p>置き場所の名前は、記録に保存した値ではなく、その時点の設定から引く（設定の名前の変更に追従し、
- * 言語ごとの名前に切り替える段階でも、ここだけを直せばよい）。設定にないものは識別子を名前にする。
+ * <p>置き場所の名前は、記録に保存した値ではなく、その時点の設定から、見る人の言語の名前で引く（設定の名前の変更に追従し、
+ * 言語ごとの名前に切り替えるため）。設定にないものは識別子を名前にする。入口の質問と答えも、設定から来たものと、
+ * 入口の決まった質問は、見る人の言語で返す。AI が作った質問と、本人が書いた文章は、書かれたときの言語のまま。
  */
 @Component
 class InquiryPresenter {
 
     private static final int SUMMARY_FALLBACK_LENGTH = 80;
-    private static final String EMPTY_SUMMARY = "（内容なし）";
 
-    private final IntakeCatalog catalog;
-    private final IntakePlanner planner;
+    private final IntakeLocales locales;
     private final InquiryProperties properties;
     private final SkillImplementations implementations;
 
     /**
-     * @param catalog 種類、システム、機能の名前
-     * @param planner 次の質問を決める処理
+     * @param locales 言語ごとの、種類、システム、機能の名前と、次の質問を決める処理
      * @param properties 実行記録の有効・無効の設定
      * @param implementations スキルごとの実装
      */
     InquiryPresenter(
-            IntakeCatalog catalog,
-            IntakePlanner planner,
+            IntakeLocales locales,
             InquiryProperties properties,
             SkillImplementations implementations) {
-        this.catalog = catalog;
-        this.planner = planner;
+        this.locales = locales;
         this.properties = properties;
         this.implementations = implementations;
     }
@@ -61,7 +60,8 @@ class InquiryPresenter {
      * @return 本人向けの表現。{@code memo.unconfirmed} は常に空
      */
     InquiryView toView(InquiryEntity e) {
-        IntakeNext next = e.awaiting == Awaiting.INTAKE_ANSWER ? planner.next(e.snapshot()) : null;
+        String lang = viewerOf(e);
+        IntakeNext next = e.awaiting == Awaiting.INTAKE_ANSWER ? locales.planner(lang).next(e.snapshot()) : null;
         InquiryView.AnswerView answer = e.answerGrounded == null
                 ? null
                 : new InquiryView.AnswerView(
@@ -83,17 +83,18 @@ class InquiryPresenter {
         return new InquiryView(
                 e.id,
                 e.createdAt,
+                e.language,
                 e.phase,
                 e.turn,
                 e.awaiting,
                 e.ending,
                 e.declined,
                 e.urgency,
-                placed(e, QuestionKind.TYPE),
-                placed(e, QuestionKind.SYSTEM),
-                placed(e, QuestionKind.FUNCTION),
+                placed(e, QuestionKind.TYPE, lang),
+                placed(e, QuestionKind.SYSTEM, lang),
+                placed(e, QuestionKind.FUNCTION, lang),
                 e.utterance(),
-                intakeView(e, next),
+                intakeView(e, next, lang),
                 e.revisionsLeft,
                 structuredView(e),
                 answer,
@@ -110,17 +111,19 @@ class InquiryPresenter {
      * 担当者向けの一覧の1件を作る。
      *
      * @param e 問い合わせ記録
+     * @param lang 見る人の言語
      * @return 一覧の1件
      */
-    OperatorItem toItem(InquiryEntity e) {
+    OperatorItem toItem(InquiryEntity e, String lang) {
         return new OperatorItem(
                 e.id,
                 e.handedOverAt,
-                ref(placed(e, QuestionKind.TYPE)),
-                ref(placed(e, QuestionKind.SYSTEM)),
-                ref(placed(e, QuestionKind.FUNCTION)),
+                e.language,
+                ref(placed(e, QuestionKind.TYPE, lang)),
+                ref(placed(e, QuestionKind.SYSTEM, lang)),
+                ref(placed(e, QuestionKind.FUNCTION, lang)),
                 e.urgency,
-                summaryOf(e),
+                summaryOf(e, lang),
                 e.sentImmediately,
                 e.readAt != null,
                 e.phase,
@@ -132,12 +135,13 @@ class InquiryPresenter {
 
     /**
      * 一覧の要約。言い直しの文章、なければ本人が書いた文章の先頭80文字、それもなければ置き場所の名前
-     * （種類、システム、機能を「・」でつないだもの）。本人向けの一覧と共有する。
+     * （種類、システム、機能を、見る人の言語の区切りでつないだもの）。本人向けの一覧と共有する。
      *
      * @param e 問い合わせ記録
+     * @param lang 見る人の言語
      * @return 要約
      */
-    String summaryOf(InquiryEntity e) {
+    String summaryOf(InquiryEntity e, String lang) {
         StructuredInquiry structured = e.structured();
         if (structured != null) {
             return structured.summary();
@@ -148,12 +152,13 @@ class InquiryPresenter {
         }
         List<String> names = new ArrayList<>();
         for (QuestionKind kind : List.of(QuestionKind.TYPE, QuestionKind.SYSTEM, QuestionKind.FUNCTION)) {
-            InquiryView.PlacedView placed = placed(e, kind);
+            InquiryView.PlacedView placed = placed(e, kind, lang);
             if (placed != null) {
                 names.add(placed.label());
             }
         }
-        return names.isEmpty() ? EMPTY_SUMMARY : String.join("・", names);
+        IntakeTexts texts = locales.texts(lang);
+        return names.isEmpty() ? texts.noContent() : String.join(texts.nameSeparator(), names);
     }
 
     /**
@@ -161,9 +166,10 @@ class InquiryPresenter {
      *
      * @param e 問い合わせ記録
      * @param kind {@code TYPE}、{@code SYSTEM}、{@code FUNCTION} のいずれか
+     * @param lang 見る人の言語
      * @return 決まっていなければ null
      */
-    InquiryView.PlacedView placed(InquiryEntity e, QuestionKind kind) {
+    InquiryView.PlacedView placed(InquiryEntity e, QuestionKind kind, String lang) {
         Placement placement = e.placement();
         if (e.placementOverride != null) {
             // 担当者が置き直した置き場所。入口で本人が選んだ答えは、入口の答え（intake）にそのまま残る
@@ -173,17 +179,18 @@ class InquiryPresenter {
                 case FUNCTION -> placement.functionId();
                 default -> throw new IllegalArgumentException("置き場所の質問ではない: " + kind);
             };
-            return id == null ? null : new InquiryView.PlacedView(id, labelOf(kind, id, placement), PlacedBy.OPERATOR);
+            return id == null ? null : new InquiryView.PlacedView(id, labelOf(kind, id, placement, lang), PlacedBy.OPERATOR);
         }
         IntakeEntry entry = IntakeEntries.find(e.intake, kind);
         if (entry == null || !entry.answer().decides()) {
             return null;
         }
         String id = entry.answer().optionId();
-        return new InquiryView.PlacedView(id, labelOf(kind, id, placement), IntakeEntries.placedBy(e.intake, kind));
+        return new InquiryView.PlacedView(id, labelOf(kind, id, placement, lang), IntakeEntries.placedBy(e.intake, kind));
     }
 
-    private String labelOf(QuestionKind kind, String id, Placement placement) {
+    private String labelOf(QuestionKind kind, String id, Placement placement, String lang) {
+        IntakeCatalog catalog = locales.catalog(lang);
         return switch (kind) {
             case TYPE -> catalog.typeLabel(InquiryType.valueOf(id));
             case SYSTEM -> catalog.systemLabel(id);
@@ -193,23 +200,67 @@ class InquiryPresenter {
     }
 
     /**
-     * 答え終えた質問を、表現にする。
+     * 答え終えた質問を、表現にする。設定から来た質問（置き場所、設定の詳しい質問、補足）の文言と、選択肢で答えた名前は、
+     * 見る人の言語に引き直す。AI が作った質問（聞き手）は、作ったときの言語のまま。
      *
      * @param e 問い合わせ記録
+     * @param lang 見る人の言語
      * @return 聞いた順の答え
      */
-    List<InquiryView.EntryView> entries(InquiryEntity e) {
+    List<InquiryView.EntryView> entries(InquiryEntity e, String lang) {
+        IntakeCatalog catalog = locales.catalog(lang);
+        IntakeTexts texts = locales.texts(lang);
+        Placement chosen = IntakeEntries.placement(e.intake);
+        IntakeCatalog.Cell cell = locales.planner(lang).cellFor(chosen);
         return e.intake.stream()
-                .map(entry -> new InquiryView.EntryView(
-                        entry.questionId(),
-                        entry.kind(),
-                        entry.text(),
-                        new InquiryView.EntryAnswerView(
-                                entry.answer().kind(),
-                                entry.answer().optionId(),
-                                entry.answer().label(),
-                                entry.answer().text())))
+                .map(entry -> {
+                    String text = entry.text();
+                    String label = entry.answer().label();
+                    switch (entry.kind()) {
+                        case TYPE -> {
+                            text = texts.type();
+                            label = labelOrStored(entry, id -> catalog.typeLabel(InquiryType.valueOf(id)));
+                        }
+                        case SYSTEM -> {
+                            text = texts.system();
+                            label = labelOrStored(entry, catalog::systemLabel);
+                        }
+                        case FUNCTION -> {
+                            text = texts.function();
+                            label = labelOrStored(entry, id -> catalog.functionLabel(chosen.systemId(), id));
+                        }
+                        case NOTE -> text = IntakeTexts.isNoteRequired(entry.text()) ? texts.noteRequired() : texts.note();
+                        case DETAIL -> {
+                            IntakeQuestion configured = cell == null
+                                    ? null
+                                    : cell.questions().stream()
+                                            .filter(q -> q.id().equals(entry.questionId()))
+                                            .findFirst()
+                                            .orElse(null);
+                            if (configured != null) {
+                                text = configured.text();
+                                String optionId = entry.answer().optionId();
+                                label = configured.options().stream()
+                                        .filter(o -> o.id().equals(optionId))
+                                        .map(Choice::label)
+                                        .findFirst()
+                                        .orElse(label);
+                            }
+                        }
+                    }
+                    return new InquiryView.EntryView(
+                            entry.questionId(),
+                            entry.kind(),
+                            text,
+                            new InquiryView.EntryAnswerView(
+                                    entry.answer().kind(), entry.answer().optionId(), label, entry.answer().text()));
+                })
                 .toList();
+    }
+
+    /** 選んだ（または読み取った）値の名前を、見る人の言語で引く。値のない答え（わからない、など）は、保存した値のまま。 */
+    private static String labelOrStored(IntakeEntry entry, java.util.function.Function<String, String> lookup) {
+        return entry.answer().decides() ? lookup.apply(entry.answer().optionId()) : entry.answer().label();
     }
 
     /**
@@ -226,16 +277,51 @@ class InquiryPresenter {
                         s.summary(), s.targetSystem(), s.goal(), s.whatHappened(), s.expectedResult());
     }
 
-    private InquiryView.IntakeView intakeView(InquiryEntity e, IntakeNext next) {
+    private InquiryView.IntakeView intakeView(InquiryEntity e, IntakeNext next, String lang) {
         if (e.awaiting != Awaiting.INTAKE_ANSWER) {
-            return new InquiryView.IntakeView(entries(e), null, true);
+            return new InquiryView.IntakeView(entries(e, lang), null, true);
         }
         InquiryView.QuestionView question = null;
         if (next instanceof IntakeNext.Ask ask) {
             IntakeQuestion q = ask.question();
             question = new InquiryView.QuestionView(q.id(), q.kind(), q.text(), q.options(), q.allowsText(), q.canSkip());
         }
-        return new InquiryView.IntakeView(entries(e), question, next instanceof IntakeNext.Complete);
+        return new InquiryView.IntakeView(entries(e, lang), question, next instanceof IntakeNext.Complete);
+    }
+
+    /**
+     * 担当者に初めて渡したときのイベントを作る。Slack 用の既定の言語の一覧の1件と、接続ごとの言語の一覧の1件を持つ。
+     *
+     * @param e 問い合わせ記録
+     * @return イベント
+     */
+    InquiryFiledEvent filedEvent(InquiryEntity e) {
+        Map<String, OperatorItem> items = itemsByLanguage(e);
+        return new InquiryFiledEvent(items.get(locales.defaultLanguage()), items);
+    }
+
+    /**
+     * 担当者に渡した後の更新のイベントを作る。
+     *
+     * @param e 問い合わせ記録
+     * @return イベント
+     */
+    InquiryUpdatedEvent updatedEvent(InquiryEntity e) {
+        Map<String, OperatorItem> items = itemsByLanguage(e);
+        return new InquiryUpdatedEvent(items.get(locales.defaultLanguage()), items);
+    }
+
+    private Map<String, OperatorItem> itemsByLanguage(InquiryEntity e) {
+        Map<String, OperatorItem> items = new LinkedHashMap<>();
+        for (String language : locales.resolver().available()) {
+            items.put(language, toItem(e, language));
+        }
+        return items;
+    }
+
+    /** いま処理しているリクエストの言語。なければ（リクエストの外から呼ばれた場合）既定の言語。 */
+    private String viewerOf(InquiryEntity e) {
+        return e.viewerLanguage != null ? e.viewerLanguage : locales.defaultLanguage();
     }
 
     private static OperatorItem.Ref ref(InquiryView.PlacedView placed) {

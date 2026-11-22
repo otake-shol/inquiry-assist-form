@@ -61,6 +61,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * <p>入口の質問を決める規則（次に何を聞くか、マスの設定のどれを使うか、戻ったときに何を捨てるか）は、
  * Spring に依存しない {@link IntakePlanner} に置いている。ここは、その結果に従ってスキルを呼び、保存する。
  *
+ * <p>各操作の {@code lang} は、見る人の言語（リクエストの言語）。応答の名前と入口の決まった質問をこの言語で返す。
+ * 本人が行う状態を変える操作では、問い合わせの本人の言語もこの言語に合わせ直す（その後に AI が書くものがこの言語になる）。
+ *
  * <p>AI の呼び出しの間は DB トランザクションを持たない。保存時の競合は楽観ロックで検出し、
  * 他の操作と競合した場合は {@link InvalidStateException} にする。
  */
@@ -83,8 +86,7 @@ public class InquiryService {
     private final TransactionTemplate transaction;
     private final SkillImplementations implementations;
     private final InquiryProperties properties;
-    private final IntakeCatalog catalog;
-    private final IntakePlanner planner;
+    private final IntakeLocales locales;
     private final InquiryPresenter presenter;
     private final ApplicationEventPublisher events;
     private final Set<UUID> generating = ConcurrentHashMap.newKeySet();
@@ -100,8 +102,7 @@ public class InquiryService {
      * @param transaction 保存時のトランザクション
      * @param implementations スキルごとの実装（失敗した呼び出しの利用量の補完に使う）
      * @param properties 担当者の表示名など
-     * @param catalog 種類、システム、機能の名前とマスの設定
-     * @param planner 入口の質問を決める処理
+     * @param locales 言語ごとの、種類、システム、機能の名前とマスの設定、入口の質問を決める処理
      * @param presenter 本人向けの表現を作る
      * @param events 担当者へ送った確定後にイベントを発行する
      */
@@ -116,8 +117,7 @@ public class InquiryService {
             TransactionTemplate transaction,
             SkillImplementations implementations,
             InquiryProperties properties,
-            IntakeCatalog catalog,
-            IntakePlanner planner,
+            IntakeLocales locales,
             InquiryPresenter presenter,
             ApplicationEventPublisher events) {
         this.reception = reception;
@@ -130,8 +130,7 @@ public class InquiryService {
         this.transaction = transaction;
         this.implementations = implementations;
         this.properties = properties;
-        this.catalog = catalog;
-        this.planner = planner;
+        this.locales = locales;
         this.presenter = presenter;
         this.events = events;
     }
@@ -145,11 +144,13 @@ public class InquiryService {
      * @throws IllegalArgumentException 文章が空白のみ、または4000文字を超える場合
      * @throws ComposeFailedException 質問がなくなり、問いの組み立てで AI が失敗した場合。答えは保存済み
      */
-    public InquiryView create(String text, Urgency urgency) {
+    public InquiryView create(String text, Urgency urgency, String lang) {
         String written = validatedText(text, true);
         AccessScope scope = users.currentScope();
         InquiryEntity inquiry =
                 new InquiryEntity(scope.userId(), urgency == null ? Urgency.NORMAL : urgency, Instant.now());
+        inquiry.language = lang;
+        inquiry.viewerLanguage = lang;
         inquiry.apply(InquiryStateMachine.created(), Instant.now());
         if (written != null) {
             inquiry.texts.add(written);
@@ -168,12 +169,13 @@ public class InquiryService {
      * @throws IllegalArgumentException 選択肢にない値、答え方が不正、書けない質問への「書かずに進む」の場合
      * @throws ComposeFailedException 問いの組み立てで AI が失敗した場合（緊急度が {@code BLOCKED} の場合を除く）。答えは保存済み
      */
-    public InquiryView answerIntake(UUID id, IntakeReply reply) {
-        InquiryEntity inquiry = load(id);
+    public InquiryView answerIntake(UUID id, IntakeReply reply, String lang) {
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         requireAwaiting(inquiry, Awaiting.INTAKE_ANSWER);
         IntakeEntry entry;
         try {
-            entry = planner.accept(inquiry.snapshot(), reply);
+            entry = planner(inquiry).accept(inquiry.snapshot(), reply);
         } catch (QuestionMismatchException e) {
             throw new InvalidStateException(e.getMessage());
         }
@@ -191,8 +193,9 @@ public class InquiryService {
      * @throws InvalidStateException 入口の質問に答えている状態でない場合
      * @throws IllegalArgumentException 答え終えた質問にない識別子の場合
      */
-    public InquiryView back(UUID id, String questionId) {
-        InquiryEntity inquiry = load(id);
+    public InquiryView back(UUID id, String questionId, String lang) {
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         requireAwaiting(inquiry, Awaiting.INTAKE_ANSWER);
         applyBack(inquiry, questionId);
         settle(inquiry, users.currentScope());
@@ -209,9 +212,10 @@ public class InquiryService {
      * @throws IllegalArgumentException 文章が空白のみ、または4000文字を超える場合
      * @throws ComposeFailedException 質問がなくなり、問いの組み立てで AI が失敗した場合
      */
-    public InquiryView writeText(UUID id, String text) {
+    public InquiryView writeText(UUID id, String text, String lang) {
         String written = validatedText(text, false);
-        InquiryEntity inquiry = load(id);
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         requireAwaiting(inquiry, Awaiting.INTAKE_ANSWER);
         inquiry.texts.add(written);
         // 新しい文章は、まだ答えていない設定の質問について、改めて読み取る
@@ -230,8 +234,9 @@ public class InquiryService {
      * @throws InvalidStateException {@code INTAKE} か 言い直しを確かめている状態でない場合
      * @throws ComposeFailedException 入口を終えて問いを組み立てる場合に AI が失敗したとき
      */
-    public InquiryView changeUrgency(UUID id, Urgency urgency) {
-        InquiryEntity inquiry = load(id);
+    public InquiryView changeUrgency(UUID id, Urgency urgency, String lang) {
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         AccessScope scope = users.currentScope();
         InquiryStateMachine.require(inquiry.state(), Awaiting.INTAKE_ANSWER, Awaiting.QUESTION_CONFIRMATION);
         if (inquiry.awaiting == Awaiting.QUESTION_CONFIRMATION) {
@@ -243,7 +248,7 @@ public class InquiryService {
         }
         // 組み立てに失敗して止まっている問い合わせは、緊急度を変えただけで組み立て直さない（compose で明示的にやり直す）。
         // ただし BLOCKED なら、言い直しを待たずに担当者へ送る
-        boolean wasComplete = planner.next(inquiry.snapshot()) instanceof IntakeNext.Complete;
+        boolean wasComplete = planner(inquiry).next(inquiry.snapshot()) instanceof IntakeNext.Complete;
         inquiry.urgency = urgency;
         IntakeNext next = settle(inquiry, scope);
         if (next instanceof IntakeNext.Complete && (!wasComplete || urgency == Urgency.BLOCKED)) {
@@ -260,10 +265,11 @@ public class InquiryService {
      * @throws InvalidStateException 入口の質問に答えている状態でない、または入口が終わっていない場合
      * @throws ComposeFailedException 組み立てで AI が再び失敗した場合
      */
-    public InquiryView compose(UUID id) {
-        InquiryEntity inquiry = load(id);
+    public InquiryView compose(UUID id, String lang) {
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         requireAwaiting(inquiry, Awaiting.INTAKE_ANSWER);
-        if (!(planner.next(inquiry.snapshot()) instanceof IntakeNext.Complete)) {
+        if (!(planner(inquiry).next(inquiry.snapshot()) instanceof IntakeNext.Complete)) {
             throw new InvalidStateException("入口の質問がまだ残っています");
         }
         return compose(inquiry);
@@ -278,11 +284,12 @@ public class InquiryService {
      * @throws InvalidStateException 言い直しを確かめている状態でない場合
      * @throws IllegalArgumentException summary が空白のみ、または2000文字を超える場合
      */
-    public InquiryView confirmStructured(UUID id, String summary) {
+    public InquiryView confirmStructured(UUID id, String summary, String lang) {
         if (summary != null && (summary.isBlank() || summary.length() > MAX_SUMMARY_LENGTH)) {
             throw new IllegalArgumentException("summary は1〜" + MAX_SUMMARY_LENGTH + "文字");
         }
-        InquiryEntity inquiry = load(id);
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         requireAwaiting(inquiry, Awaiting.QUESTION_CONFIRMATION);
         inquiry.structuredConfirmed =
                 summary == null ? inquiry.structuredByAi : inquiry.structuredByAi.withSummary(summary);
@@ -299,11 +306,12 @@ public class InquiryService {
      * @throws InvalidStateException 言い直しを確かめている状態でない、または残り回数が0の場合
      * @throws IllegalArgumentException note が空白のみ、または1000文字を超える場合
      */
-    public InquiryView revise(UUID id, String note) {
+    public InquiryView revise(UUID id, String note, String lang) {
         if (note == null || note.isBlank() || note.length() > MAX_NOTE_LENGTH) {
             throw new IllegalArgumentException("note は1〜" + MAX_NOTE_LENGTH + "文字");
         }
-        InquiryEntity inquiry = load(id);
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         requireAwaiting(inquiry, Awaiting.QUESTION_CONFIRMATION);
         if (inquiry.revisionsLeft <= 0) {
             throw new InvalidStateException("言い直しを作り直せる回数を使い切りました");
@@ -328,8 +336,9 @@ public class InquiryService {
      * @return 更新後の問い合わせ
      * @throws InvalidStateException 言い直しを確かめている状態でない場合
      */
-    public InquiryView reopen(UUID id) {
-        InquiryEntity inquiry = load(id);
+    public InquiryView reopen(UUID id, String lang) {
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         requireAwaiting(inquiry, Awaiting.QUESTION_CONFIRMATION);
         inquiry.structuredByAi = null;
         inquiry.structuredConfirmed = null;
@@ -356,18 +365,18 @@ public class InquiryService {
      * @throws dev.inquiryassist.core.AiRefusalException モデルが回答を拒否した場合
      * @throws dev.inquiryassist.core.AiUnavailableException モデルを呼び出せなかった場合
      */
-    public InquiryView generateAnswer(UUID id, ProgressListener progress) {
+    public InquiryView generateAnswer(UUID id, ProgressListener progress, String lang) {
         if (!generating.add(id)) {
             throw new InvalidStateException("0次回答を生成中です");
         }
         try {
-            InquiryEntity inquiry = load(id);
+            InquiryEntity inquiry = load(id, lang);
             requireAwaiting(inquiry, Awaiting.INVESTIGATION);
             AccessScope scope = users.currentScope();
             AnswerPipeline.Result result;
             long start = System.nanoTime();
             try {
-                result = pipeline.run(inquiry.structured(), scope, progress);
+                result = pipeline.run(inquiry.structured(), scope, progress, inquiry.language);
             } catch (AiUnavailableException | AiRefusalException e) {
                 // 調査の失敗。分かる場合は、失敗した呼び出しの利用量を記録する
                 inquiry.addUsage(new SkillUsage(
@@ -412,12 +421,13 @@ public class InquiryService {
      * @throws InvalidStateException 結果を確かめている状態でない場合
      * @throws IllegalArgumentException note が空白のみ、4000文字を超える、または解決したのに指定された場合
      */
-    public InquiryView resolve(UUID id, boolean resolved, String note) {
+    public InquiryView resolve(UUID id, boolean resolved, String note, String lang) {
         if (note != null && resolved) {
             throw new IllegalArgumentException("note は、解決していない場合だけ指定できます");
         }
         String trimmed = note == null ? null : MessageBodies.validated(note);
-        InquiryEntity inquiry = load(id);
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         Transition transition = InquiryStateMachine.resolved(inquiry.state(), inquiry.context(null), resolved);
         if (trimmed != null) {
             inquiry.addMessage(MessageAuthor.ASKER, MessageKind.NOTE, properties.dev().userName(), trimmed, Instant.now());
@@ -432,9 +442,10 @@ public class InquiryService {
      * @return 更新後の問い合わせ
      * @throws InvalidStateException いま送れない場合
      */
-    public InquiryView sendNow(UUID id) {
-        InquiryEntity inquiry = load(id);
-        IntakeNext next = inquiry.awaiting == Awaiting.INTAKE_ANSWER ? planner.next(inquiry.snapshot()) : null;
+    public InquiryView sendNow(UUID id, String lang) {
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
+        IntakeNext next = inquiry.awaiting == Awaiting.INTAKE_ANSWER ? planner(inquiry).next(inquiry.snapshot()) : null;
         Transition transition = InquiryStateMachine.sentNow(inquiry.state(), inquiry.context(next));
         return presenter.toView(commit(inquiry, apply(inquiry, transition, true)));
     }
@@ -446,8 +457,9 @@ public class InquiryService {
      * @return 更新後の問い合わせ
      * @throws InvalidStateException 終わっている場合
      */
-    public InquiryView withdraw(UUID id) {
-        InquiryEntity inquiry = load(id);
+    public InquiryView withdraw(UUID id, String lang) {
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         Transition transition = InquiryStateMachine.withdrawn(inquiry.state());
         return presenter.toView(commit(inquiry, apply(inquiry, transition, false)));
     }
@@ -459,8 +471,8 @@ public class InquiryService {
      * @return 問い合わせ
      * @throws InquiryNotFoundException 存在しない、または他人の問い合わせの場合
      */
-    public InquiryView get(UUID id) {
-        InquiryEntity inquiry = load(id);
+    public InquiryView get(UUID id, String lang) {
+        InquiryEntity inquiry = load(id, lang);
         if (inquiry.askerUnreadReply) {
             repository.clearUnreadReply(id);
             // 返す表現では、読んだことになっている
@@ -474,7 +486,7 @@ public class InquiryService {
      *
      * @return 一覧と、未読の返信がある件数
      */
-    public InquiryList list() {
+    public InquiryList list(String lang) {
         String userId = users.currentScope().userId();
         return new InquiryList(
                 repository.countByAskerIdAndAskerUnreadReplyTrue(userId),
@@ -482,7 +494,8 @@ public class InquiryService {
                         .map(e -> new InquiryList.Item(
                                 e.id,
                                 e.createdAt,
-                                presenter.summaryOf(e),
+                                e.language,
+                                presenter.summaryOf(e, lang),
                                 e.urgency,
                                 e.phase,
                                 e.turn,
@@ -506,9 +519,10 @@ public class InquiryService {
      * @throws InquiryNotFoundException 存在しない、または他人の問い合わせの場合
      * @throws InvalidStateException 担当者に渡したことがない、または取り下げた場合
      */
-    public InquiryView addMessage(UUID id, String body) {
+    public InquiryView addMessage(UUID id, String body, String lang) {
         String trimmed = MessageBodies.validated(body);
-        InquiryEntity inquiry = load(id);
+        InquiryEntity inquiry = load(id, lang);
+        inquiry.language = lang;
         Transition transition = InquiryStateMachine.noted(inquiry.state(), inquiry.context(null));
         inquiry.addMessage(MessageAuthor.ASKER, MessageKind.NOTE, properties.dev().userName(), trimmed, Instant.now());
         // 担当者の番の間の追記は番が変わらないので、遷移では未読に戻らない。どの場合も、担当者が見落とさないよう戻す
@@ -521,15 +535,15 @@ public class InquiryService {
      * 結果を保存するので、同じ質問のために何度も呼ばない。
      */
     private IntakeNext settle(InquiryEntity inquiry, AccessScope scope) {
-        IntakeNext next = planner.next(inquiry.snapshot());
+        IntakeNext next = planner(inquiry).next(inquiry.snapshot());
         if (next instanceof IntakeNext.NeedsPrefill prefill) {
             // 読み取りは質問ごとに1回で、結果にかかわらず済みにする。読み取った後は、設定の質問か補足に進む
             prefill(inquiry, prefill.questions());
-            next = planner.next(inquiry.snapshot());
+            next = planner(inquiry).next(inquiry.snapshot());
         }
         if (next instanceof IntakeNext.NeedsInterviewer) {
             inquiry.detailQuestions = askInterviewer(inquiry, scope);
-            next = planner.next(inquiry.snapshot());
+            next = planner(inquiry).next(inquiry.snapshot());
         }
         return next;
     }
@@ -577,10 +591,11 @@ public class InquiryService {
         return restater.restate(
                 inquiry.utterance(),
                 placement.type(),
-                systemOf(placement),
-                functionOf(placement),
+                systemOf(inquiry, placement),
+                functionOf(inquiry, placement),
                 answeredQuestions(inquiry),
-                corrections);
+                corrections,
+                inquiry.language);
     }
 
     /**
@@ -588,15 +603,15 @@ public class InquiryService {
      * 受付が失敗しても、エラーにしない（何も置かず、質問として聞く）。失敗はログと利用量に残す。
      */
     private void place(InquiryEntity inquiry) {
-        if (!planner.needsPlacement(inquiry.intake)) {
+        if (!planner(inquiry).needsPlacement(inquiry.intake)) {
             return;
         }
         long start = System.nanoTime();
         try {
             AiResult<Reception> result = reception.receive(
-                    inquiry.writtenText(), catalog.candidates(), IntakeEntries.chosen(inquiry.intake));
+                    inquiry.writtenText(), catalog(inquiry).candidates(), IntakeEntries.chosen(inquiry.intake));
             inquiry.addUsage(Skill.RECEPTION, result.usage(), millisSince(start));
-            IntakePlanner.Placed placed = planner.place(inquiry.intake, result.value());
+            IntakePlanner.Placed placed = planner(inquiry).place(inquiry.intake, result.value());
             inquiry.intake = new ArrayList<>(placed.entries());
             if (placed.detailsReset()) {
                 inquiry.detailQuestions = null;
@@ -609,7 +624,7 @@ public class InquiryService {
     }
 
     private void applyBack(InquiryEntity inquiry, String questionId) {
-        IntakePlanner.Back back = planner.back(inquiry.intake, questionId);
+        IntakePlanner.Back back = planner(inquiry).back(inquiry.intake, questionId);
         List<IntakeEntry> removed = inquiry.intake.subList(back.entries().size(), inquiry.intake.size());
         inquiry.intake = new ArrayList<>(back.entries());
         if (back.detailsReset()) {
@@ -635,7 +650,7 @@ public class InquiryService {
         try {
             AiResult<Prefill> result = interviewer.prefill(inquiry.writtenText(), questions);
             inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start));
-            inquiry.intake.addAll(planner.acceptPrefill(inquiry.intake, questions, inquiry.writtenText(), result.value()));
+            inquiry.intake.addAll(planner(inquiry).acceptPrefill(inquiry.intake, questions, inquiry.writtenText(), result.value()));
         } catch (AiRefusalException | AiUnavailableException e) {
             log.warn("答えの読み取りが失敗したため、設定の質問をすべて聞きます id={}", inquiry.id, e);
             inquiry.addUsage(new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true, millisSince(start)));
@@ -652,7 +667,12 @@ public class InquiryService {
         Placement placement = inquiry.placement();
         try {
             AiResult<Interview> result = interviewer.ask(
-                    inquiry.writtenText(), placement.type(), systemOf(placement), functionOf(placement), scope);
+                    inquiry.writtenText(),
+                    placement.type(),
+                    systemOf(inquiry, placement),
+                    functionOf(inquiry, placement),
+                    scope,
+                    inquiry.language);
             inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start));
             return new ArrayList<>(
                     result.value().questions().stream().map(IntakeQuestion::detailOf).toList());
@@ -663,17 +683,32 @@ public class InquiryService {
         }
     }
 
-    private SystemOption systemOf(Placement placement) {
+    /** スキルに渡すシステムは、本人の言語の名前にする。言い直しの {@code targetSystem} にもこの名前が入る。 */
+    private SystemOption systemOf(InquiryEntity inquiry, Placement placement) {
         return placement.systemId() == null
                 ? null
-                : new SystemOption(placement.systemId(), catalog.systemLabel(placement.systemId()));
+                : new SystemOption(placement.systemId(), catalog(inquiry).systemLabel(placement.systemId()));
     }
 
-    private FunctionOption functionOf(Placement placement) {
+    private FunctionOption functionOf(InquiryEntity inquiry, Placement placement) {
         return placement.functionId() == null
                 ? null
                 : new FunctionOption(
-                        placement.functionId(), catalog.functionLabel(placement.systemId(), placement.functionId()));
+                        placement.functionId(),
+                        catalog(inquiry).functionLabel(placement.systemId(), placement.functionId()));
+    }
+
+    private IntakePlanner planner(InquiryEntity inquiry) {
+        return locales.planner(inquiry.language);
+    }
+
+    private IntakeCatalog catalog(InquiryEntity inquiry) {
+        return locales.catalog(inquiry.language);
+    }
+
+    /** 担当者への通知（Slack など）は、既定の言語で書く。 */
+    private IntakeCatalog defaultCatalog() {
+        return locales.catalog(locales.defaultLanguage());
     }
 
     /**
@@ -749,10 +784,10 @@ public class InquiryService {
                 placement.type(),
                 inquiry.urgency,
                 inquiry.utterance(),
-                placement.systemId() == null ? null : catalog.systemLabel(placement.systemId()),
+                placement.systemId() == null ? null : defaultCatalog().systemLabel(placement.systemId()),
                 placement.functionId() == null
                         ? null
-                        : catalog.functionLabel(placement.systemId(), placement.functionId()),
+                        : defaultCatalog().functionLabel(placement.systemId(), placement.functionId()),
                 inquiry.structured(),
                 inquiry.technicalMemo,
                 immediately);
@@ -777,10 +812,12 @@ public class InquiryService {
         } catch (OptimisticLockingFailureException e) {
             throw new InvalidStateException("他の操作と競合しました。最新の状態を取得し直してください");
         }
+        // 保存し直した記録は別のインスタンスになりうるため、見る人の言語を引き継ぐ
+        saved.viewerLanguage = inquiry.viewerLanguage;
         if (notice != null) {
             // 保存の確定後に配る。配信側の失敗で、確定済みの更新を失敗にしない
             try {
-                events.publishEvent(new InquiryFiledEvent(presenter.toItem(saved)));
+                events.publishEvent(presenter.filedEvent(saved));
             } catch (RuntimeException e) {
                 log.error("担当者への通知イベントの配信に失敗 id={}", saved.id, e);
             }
@@ -793,18 +830,20 @@ public class InquiryService {
     /** 保存の確定後に、オペレータの画面へ更新を知らせる。配信側の失敗で、確定済みの更新を失敗にしない。 */
     private void publishUpdated(InquiryEntity saved) {
         try {
-            events.publishEvent(new InquiryUpdatedEvent(presenter.toItem(saved)));
+            events.publishEvent(presenter.updatedEvent(saved));
         } catch (RuntimeException e) {
             log.error("更新の通知イベントの配信に失敗 id={}", saved.id, e);
         }
     }
 
-    private InquiryEntity load(UUID id) {
+    private InquiryEntity load(UUID id, String lang) {
         String userId = users.currentScope().userId();
-        return repository
+        InquiryEntity inquiry = repository
                 .findById(id)
                 .filter(i -> i.askerId.equals(userId))
                 .orElseThrow(() -> new InquiryNotFoundException(id));
+        inquiry.viewerLanguage = lang;
+        return inquiry;
     }
 
     private static void requireAwaiting(InquiryEntity inquiry, Awaiting expected) {

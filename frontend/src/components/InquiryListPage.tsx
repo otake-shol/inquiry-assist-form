@@ -1,14 +1,10 @@
 import { useMemo } from "react";
 import type { InquiryList, InquiryListItem } from "../api/types.ts";
-import {
-  ASKER_COLUMNS,
-  ASKER_COLUMN_LABELS,
-  arrangeAskerBoard,
-} from "../flow/board.ts";
-import { OP_TEXT, formatFiledAt } from "../operator/labels.ts";
+import { ASKER_COLUMNS, arrangeAskerBoard } from "../flow/board.ts";
+import { useMessages } from "../i18n/context.ts";
+import { formatFiledAt } from "../operator/labels.ts";
 import { inquiryPathOf } from "../path.ts";
-import { USER_TEXT, askerStatusLabel } from "../text/inquiries.ts";
-import { TEXT } from "../text/labels.ts";
+import { askerStatusLabel } from "../text/inquiries.ts";
 import { BoardColumn } from "./BoardColumn.tsx";
 import { NavLink } from "./Navigation.tsx";
 
@@ -29,24 +25,29 @@ interface InquiryListPageProps {
  * @param props 1件
  */
 function AskerCard({ item }: { item: InquiryListItem }) {
+  const { user: USER_TEXT, op, asker, meta } = useMessages();
   return (
     <li>
       <NavLink
         to={inquiryPathOf(item.id)}
         className={`board-card inquiry-card ${item.unreadReply ? "unread" : ""}`}
       >
-        <span className="inquiry-summary">{item.summary}</span>
+        <span className="inquiry-summary" lang={item.language}>
+          {item.summary}
+        </span>
         <span className="inquiry-meta">
-          <time dateTime={item.createdAt}>{formatFiledAt(item.createdAt)}</time>
+          <time dateTime={item.createdAt}>
+            {formatFiledAt(item.createdAt, meta.locale)}
+          </time>
           {item.messageCount > 0 && (
-            <span>{OP_TEXT.messageCount(item.messageCount)}</span>
+            <span>{op.messageCount(item.messageCount)}</span>
           )}
           {item.unreadReply && (
             <span className="unread-mark">{USER_TEXT.unreadReplyMark}</span>
           )}
         </span>
         <span className="board-note inquiry-status">
-          {askerStatusLabel(item, item.handedOverAt !== null)}
+          {askerStatusLabel(item, item.handedOverAt !== null, asker)}
         </span>
       </NavLink>
     </li>
@@ -60,6 +61,7 @@ function AskerCard({ item }: { item: InquiryListItem }) {
  * @param props 一覧と、新しい問い合わせへの受け口
  */
 export function InquiryListPage({ list, failed, onNew }: InquiryListPageProps) {
+  const { text: TEXT, user: USER_TEXT, asker } = useMessages();
   const board = useMemo(
     () => (list === null ? null : arrangeAskerBoard(list.items)),
     [list],
@@ -85,7 +87,7 @@ export function InquiryListPage({ list, failed, onNew }: InquiryListPageProps) {
             <BoardColumn
               key={column}
               columnId={column}
-              title={ASKER_COLUMN_LABELS[column]}
+              title={asker.columns[column]}
               count={board[column].length}
             >
               {board[column].map((item) => (

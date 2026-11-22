@@ -42,7 +42,8 @@ class InquiryPropertiesTest {
                 skills,
                 new InquiryProperties.Ollama("http://localhost:11434", "30m", 42),
                 new InquiryProperties.Trace(true),
-                new InquiryProperties.Dev("利用者", "担当者"));
+                new InquiryProperties.Dev("利用者", "担当者"),
+                java.util.Map.of());
     }
 
     private static InquiryProperties withCatalog(
@@ -119,7 +120,10 @@ class InquiryPropertiesTest {
         IntakeCatalog catalog = withCatalog(List.of("ja", "en"), systems, cells).catalog();
 
         assertThat(catalog.systems()).extracting(IntakeCatalog.SystemInfo::label).containsExactly("システムA", "システムB");
-        assertThat(catalog.systems().get(0).functions()).containsExactly(new Choice("a-1", "機能A-1"));
+        assertThat(catalog.systems().get(0).aliases()).containsExactly("システムA", "System A");
+        // ほかの言語の名前も、文章から読み取るために持つ
+        assertThat(catalog.systems().get(0).functions())
+                .containsExactly(new Choice("a-1", "機能A-1", List.of("機能A-1", "Function A-1")));
         assertThat(catalog.systems().get(1).functions()).isEmpty();
         IntakeCatalog.Cell cell = catalog.cells().get(0);
         assertThat(cell.system()).isEqualTo("a");
@@ -129,9 +133,26 @@ class InquiryPropertiesTest {
         assertThat(cell.questions()).extracting(q -> q.id()).containsExactly("since", "partner");
         assertThat(cell.questions().get(0).text()).isEqualTo("いつから");
         assertThat(cell.questions().get(0).options())
-                .containsExactly(new Choice("today", "今日"), new Choice("earlier", "前から"));
+                .containsExactly(
+                        new Choice("today", "今日", List.of("今日", "Today")), new Choice("earlier", "前から", List.of("前から")));
         assertThat(cell.questions().get(1).options()).isEmpty();
         assertThat(cell.questions().get(1).allowsText()).isTrue();
+    }
+
+    @Test
+    void 指定した言語の名前で一覧を作り_その言語の名前がない項目は項目ごとに既定の言語に落ちる() {
+        List<InquiryProperties.SystemEntry> systems = List.of(
+                new InquiryProperties.SystemEntry("a", names("ja", "システムA", "en", "System A"), List.of(), null),
+                new InquiryProperties.SystemEntry("b", names("ja", "システムB"), List.of(), null));
+
+        IntakeCatalog en = withCatalog(List.of("ja", "en"), systems, List.of()).catalog("en");
+
+        assertThat(en.systems()).extracting(IntakeCatalog.SystemInfo::label).containsExactly("System A", "システムB");
+        assertThat(en.typeLabel(InquiryType.HOW_TO)).isEqualTo("How to");
+        assertThat(en.urgencyLabel(Urgency.HURRY)).isEqualTo("Urgent");
+        // 名前のない言語は、既定の言語
+        assertThat(withCatalog(List.of("ja", "en"), systems, List.of()).catalog("fr").systems().get(0).label())
+                .isEqualTo("システムA");
     }
 
     @Test

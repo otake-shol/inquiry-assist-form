@@ -2,6 +2,7 @@ package dev.inquiryassist.mock;
 
 import dev.inquiryassist.core.InquiryType;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * モックのシナリオを選ぶ、発話のキーワードとタグの解釈。契約書「モックのシナリオ」に対応する。
@@ -48,10 +49,13 @@ final class MockScenario {
             TAG_OFF_TOPIC,
             TAG_RECEPTION_ERROR,
             TAG_RESTATE_ERROR);
-    private static final List<String> CHANGE_REQUEST_WORDS = List.of("変えてほしい", "要望", "改善");
-    private static final List<String> DO_FOR_ME_WORDS = List.of("依頼", "してほしい", "お願いします", "してください");
-    private static final List<String> LOOKS_WRONG_WORDS = List.of("不具合", "バグ", "おかしい");
-    private static final List<String> HOW_TO_WORDS = List.of("使い方", "やり方", "手順", "どうやって");
+    // 英語の語は、大文字と小文字を区別せずに探す。優先順位は日本語の語と同じ
+    private static final List<String> CHANGE_REQUEST_WORDS =
+            List.of("変えてほしい", "要望", "改善", "feature request", "improve");
+    private static final List<String> DO_FOR_ME_WORDS =
+            List.of("依頼", "してほしい", "お願いします", "してください", "please", "could you");
+    private static final List<String> LOOKS_WRONG_WORDS = List.of("不具合", "バグ", "おかしい", "bug", "wrong", "broken");
+    private static final List<String> HOW_TO_WORDS = List.of("使い方", "やり方", "手順", "どうやって", "how to", "how do i");
 
     private MockScenario() {}
 
@@ -101,6 +105,26 @@ final class MockScenario {
     }
 
     private static boolean containsAny(String text, List<String> words) {
-        return words.stream().anyMatch(text::contains);
+        String lower = text.toLowerCase(Locale.ROOT);
+        return words.stream().anyMatch(w -> lower.contains(w.toLowerCase(Locale.ROOT)));
+    }
+
+    /**
+     * 名前が文章に含まれているかを、大文字と小文字を区別せずに調べる。どの言語の名前でも照合する。
+     *
+     * @param text 文章
+     * @param names 名前（どの言語のものも）
+     * @return どれかが含まれていれば true
+     */
+    static boolean mentionsAny(String text, List<String> names) {
+        return text != null && containsAny(text, names);
+    }
+
+    /**
+     * @param language 本人の言語
+     * @return 英語なら true。モックは、英語のときだけ英語で返し、それ以外は日本語で返す
+     */
+    static boolean english(String language) {
+        return language != null && language.toLowerCase(Locale.ROOT).startsWith("en");
     }
 }

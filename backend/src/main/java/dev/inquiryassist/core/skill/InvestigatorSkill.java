@@ -19,10 +19,12 @@ public interface InvestigatorSkill {
      * @param inquiry 本人が確認した整形後の問い。元の発話や追加質問のやり取りは渡さない
      * @param scope 投稿者の閲覧範囲
      * @param progress 進捗の通知先
+     * @param language 本人の言語。事実と次に確認することと進捗の文言はこの言語で書く（根拠の引用は訳さない）
      * @return 調査の結果
      * @throws IllegalArgumentException 0次回答を出さない種別を渡した場合
      * @throws AiRefusalException モデルが回答を拒否した場合
      * @throws AiUnavailableException モデルを呼び出せなかった場合
      */
-    AiResult<Investigation> investigate(StructuredInquiry inquiry, AccessScope scope, ProgressListener progress);
+    AiResult<Investigation> investigate(
+            StructuredInquiry inquiry, AccessScope scope, ProgressListener progress, String language);
 }

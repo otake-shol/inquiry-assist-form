@@ -70,7 +70,8 @@ class OllamaSkillsTest {
                         "explainer", settings),
                 new InquiryProperties.Ollama(ollama.baseUrl(), "30m", 42),
                 new InquiryProperties.Trace(true),
-                new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"));
+                new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"),
+                java.util.Map.of());
     }
 
     private OllamaClient client() {
@@ -138,7 +139,7 @@ class OllamaSkillsTest {
     void thinkは設定のとおりに送られる() {
         ollama.reply("{\"explanation\":\"説明です。\"}", 1, 1);
 
-        explainer().explain(structured(), findings("事実"));
+        explainer().explain(structured(), findings("事実"), "ja");
 
         assertThat(request(0).path("think").asBoolean(false)).isTrue();
         assertThat(request(0).has("format")).isFalse();
@@ -169,8 +170,8 @@ class OllamaSkillsTest {
     void 聞き手の入力は種類_システム_機能_本人が書いた文章の見出しで組み立てる() {
         ollama.reply("{\"questions\":[]}", 1, 1).reply("{\"questions\":[]}", 1, 1);
 
-        interviewer().ask("期限の仕様", InquiryType.LOOKS_WRONG, SYSTEMS.get(0), POSTING, SCOPE);
-        interviewer().ask(null, null, null, null, SCOPE);
+        interviewer().ask("期限の仕様", InquiryType.LOOKS_WRONG, SYSTEMS.get(0), POSTING, SCOPE, "ja");
+        interviewer().ask(null, null, null, null, SCOPE, "ja");
 
         assertThat(userMessage(0))
                 .isEqualTo("## 種類\nLOOKS_WRONG\n\n## システム\n求人管理画面\n\n## 機能\n求人の掲載\n\n## 本人が書いた文章\n期限の仕様");
@@ -185,9 +186,9 @@ class OllamaSkillsTest {
                 new AnsweredQuestion(new FollowUpQuestion("q1", "どの画面ですか", List.of()), "求人管理画面"),
                 new AnsweredQuestion(new FollowUpQuestion("q2", "いつからですか", List.of()), null));
 
-        restater().restate("期限の仕様", InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), POSTING, answers, List.of("一昨日から", "3件です"));
-        restater().restate(null, null, null, null, List.of(), List.of());
-        restater().restate("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, answers, List.of());
+        restater().restate("期限の仕様", InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), POSTING, answers, List.of("一昨日から", "3件です"), "ja");
+        restater().restate(null, null, null, null, List.of(), List.of(), "ja");
+        restater().restate("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, answers, List.of(), "ja");
 
         assertThat(userMessage(0))
                 .isEqualTo("## 種類\nHOW_IT_WORKS\n\n## システム\n求人管理画面\n\n## 機能\n求人の掲載\n\n"
@@ -205,8 +206,8 @@ class OllamaSkillsTest {
     void 説明の入力は本人の問い_種類_確かめられた事実の見出しで組み立てる() {
         ollama.reply("{\"explanation\":\"説明です。\"}", 1, 1).reply("{\"explanation\":\"説明です。\"}", 1, 1);
 
-        explainer().explain(structured(), findings("事実A", "事実B"));
-        explainer().explain(new StructuredInquiry("本人の問い。", null, null, "目的", null, null), findings("事実A"));
+        explainer().explain(structured(), findings("事実A", "事実B"), "ja");
+        explainer().explain(new StructuredInquiry("本人の問い。", null, null, "目的", null, null), findings("事実A"), "ja");
 
         assertThat(userMessage(0))
                 .isEqualTo("## 本人の問い\n本人の問い。\n\n## 種類\nHOW_IT_WORKS\n\n## 確かめられた事実\n- 事実A\n- 事実B");
@@ -341,7 +342,7 @@ class OllamaSkillsTest {
         String invalid = "{\"summary\":\" \",\"goal\":\"NOPE\"}";
         ollama.reply("読めない出力その1", 1, 1).reply(invalid, 1, 1);
 
-        assertThatThrownBy(() -> restater().restate("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of()))
+        assertThatThrownBy(() -> restater().restate("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of(), "ja"))
                 .isInstanceOfSatisfying(UnreadableOutputException.class, e -> {
                     assertThat(e.reasons()).containsExactly("JSON として読めない", "形が指定と違う");
                     assertThat(e.rawOutputs()).containsExactly("読めない出力その1", invalid);
@@ -388,7 +389,7 @@ class OllamaSkillsTest {
         String empty = "{\"summary\":\"  \",\"goal\":\"g\"}";
         ollama.reply(empty, 1, 1).reply(empty, 1, 1);
 
-        assertThatThrownBy(() -> restater().restate("x", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of()))
+        assertThatThrownBy(() -> restater().restate("x", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of(), "ja"))
                 .isInstanceOf(AiUnavailableException.class);
         assertThat(ollama.requests()).hasSize(2);
     }
@@ -404,7 +405,7 @@ class OllamaSkillsTest {
 
         var results = new java.util.ArrayList<Boolean>();
         for (int i = 0; i < 6; i++) {
-            results.add(explainer().explain(structured(), findings("事実")).value().answersQuestion());
+            results.add(explainer().explain(structured(), findings("事実"), "ja").value().answersQuestion());
         }
 
         assertThat(results).containsExactly(true, false, false, false, false, false);
@@ -415,7 +416,7 @@ class OllamaSkillsTest {
     void 説明が空の出力も読めない場合と同じ扱い() {
         ollama.reply("{\"explanation\":\"\"}", 1, 1).reply("{\"explanation\":\"書き直しました。\"}", 1, 1);
 
-        assertThat(explainer().explain(structured(), findings("事実")).value().text()).isEqualTo("書き直しました。");
+        assertThat(explainer().explain(structured(), findings("事実"), "ja").value().text()).isEqualTo("書き直しました。");
     }
 
     @Test
@@ -460,7 +461,7 @@ class OllamaSkillsTest {
                 1,
                 1);
 
-        var questions = interviewer().ask("x", InquiryType.HOW_IT_WORKS, null, null, SCOPE).value().questions();
+        var questions = interviewer().ask("x", InquiryType.HOW_IT_WORKS, null, null, SCOPE, "ja").value().questions();
 
         assertThat(questions).extracting(FollowUpQuestion::id).containsExactly("q1", "q2");
         assertThat(questions).extracting(FollowUpQuestion::text).containsExactly("質問1", "質問2");
@@ -472,7 +473,7 @@ class OllamaSkillsTest {
     void 聞き手の質問が0個でもよい() {
         ollama.reply("{\"questions\":[]}", 1, 1);
 
-        assertThat(interviewer().ask("x", InquiryType.HOW_IT_WORKS, null, null, SCOPE).value().questions())
+        assertThat(interviewer().ask("x", InquiryType.HOW_IT_WORKS, null, null, SCOPE, "ja").value().questions())
                 .isEmpty();
     }
 
@@ -485,7 +486,7 @@ class OllamaSkillsTest {
                 1);
 
         var forced = restater()
-                .restate("x", InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), POSTING, List.of(), List.of())
+                .restate("x", InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), POSTING, List.of(), List.of(), "ja")
                 .value();
 
         assertThat(forced.targetSystem()).isEqualTo("求人管理画面");
@@ -498,7 +499,7 @@ class OllamaSkillsTest {
     void 言い直しは対象システムが未定ならモデルの出力を使い_goalがなければ言い直しの文章で代える() {
         ollama.reply("{\"summary\":\"言い直し。\",\"targetSystem\":\"請求の画面\"}", 1, 1);
 
-        var result = restater().restate("x", InquiryType.LOOKS_WRONG, null, null, List.of(), List.of()).value();
+        var result = restater().restate("x", InquiryType.LOOKS_WRONG, null, null, List.of(), List.of(), "ja").value();
 
         assertThat(result.targetSystem()).isEqualTo("請求の画面");
         assertThat(result.goal()).isEqualTo("言い直し。");
@@ -539,7 +540,7 @@ class OllamaSkillsTest {
     void format未対応の501も通信の失敗として扱う() {
         ollama.status(501);
 
-        assertThatThrownBy(() -> restater().restate("x", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of()))
+        assertThatThrownBy(() -> restater().restate("x", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of(), "ja"))
                 .isInstanceOf(AiUnavailableException.class);
     }
 
@@ -556,5 +557,58 @@ class OllamaSkillsTest {
         assertThat(usage.model()).isEqualTo("test-model");
         assertThat(usage.promptVersion()).isEqualTo("v2");
         assertThat(usage.mock()).isFalse();
+    }
+
+    // ---- 言語（契約書「言語」。日本語のときは、モデルに送る内容を変えない） ----
+
+    private static final String OUTPUT_LANGUAGE =
+            Prompts.withOutputLanguage("", "en");
+
+    private String systemMessage(int index) {
+        return request(index).path("messages").get(0).path("content").asString();
+    }
+
+    @Test
+    void 書く言語の指示は共通のファイルの言語名を英語に置き換えて足す() {
+        assertThat(OUTPUT_LANGUAGE).startsWith("\n\n## 書く言語");
+        assertThat(OUTPUT_LANGUAGE).contains("英語（English）").doesNotContain("{{language}}");
+        assertThat(Prompts.withOutputLanguage("本文", "ja")).isEqualTo("本文");
+        assertThat(Prompts.withOutputLanguage("本文", null)).isEqualTo("本文");
+        assertThat(Prompts.withOutputLanguage("本文", "en")).isEqualTo("本文" + OUTPUT_LANGUAGE);
+    }
+
+    @Test
+    void 日本語なら聞き手と言い直しと説明に送る指示文は従来と同じで_英語なら末尾に言語の指示だけが増える() {
+        ollama.reply("{\"questions\":[]}", 1, 1).reply("{\"questions\":[]}", 1, 1);
+        interviewer().ask("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, SCOPE, "ja");
+        interviewer().ask("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, SCOPE, "en");
+        assertThat(systemMessage(0)).isEqualTo(Prompts.systemOf(Skill.INTERVIEWER, "v2"));
+        assertThat(systemMessage(1)).isEqualTo(Prompts.systemOf(Skill.INTERVIEWER, "v2") + OUTPUT_LANGUAGE);
+        assertThat(userMessage(1)).isEqualTo(userMessage(0));
+
+        ollama.reply(RESTATE_OK, 1, 1).reply(RESTATE_OK, 1, 1);
+        restater().restate("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of(), "ja");
+        restater().restate("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of(), "en");
+        assertThat(systemMessage(2)).isEqualTo(Prompts.systemOf(Skill.RESTATER, "v2"));
+        assertThat(systemMessage(3)).isEqualTo(Prompts.systemOf(Skill.RESTATER, "v2") + OUTPUT_LANGUAGE);
+        assertThat(userMessage(3)).isEqualTo(userMessage(2));
+
+        ollama.reply("{\"explanation\":\"説明です。\"}", 1, 1).reply("{\"explanation\":\"説明です。\"}", 1, 1);
+        explainer().explain(structured(), findings("事実"), "ja");
+        explainer().explain(structured(), findings("事実"), "en");
+        assertThat(systemMessage(4)).isEqualTo(Prompts.systemOf(Skill.EXPLAINER, "v2"));
+        assertThat(systemMessage(5)).isEqualTo(Prompts.systemOf(Skill.EXPLAINER, "v2") + OUTPUT_LANGUAGE);
+        assertThat(userMessage(5)).isEqualTo(userMessage(4));
+    }
+
+    @Test
+    void 受付と答えの読み取りには言語の指示を足さない() {
+        ollama.reply(RECEPTION_OK, 1, 1);
+        reception().receive("期限の仕様", SYSTEMS, Placement.NONE);
+        assertThat(systemMessage(0)).isEqualTo(Prompts.systemOf(Skill.RECEPTION, "v2")).doesNotContain("書く言語");
+
+        ollama.reply("{\"answers\":[]}", 1, 1);
+        interviewer().prefill("今朝から出ません", List.of(SINCE));
+        assertThat(systemMessage(1)).isEqualTo(Prompts.prefillOf(Skill.INTERVIEWER, "v1")).doesNotContain("書く言語");
     }
 }

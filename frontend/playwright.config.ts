@@ -13,7 +13,14 @@ export default defineConfig({
     baseURL: "http://localhost:5173",
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      // Playwright の既定のブラウザの言語は英語。画面は最初の表示をブラウザの言語に
+      // 合わせるため、日本語に固定する（英語の確認は、テストの中で切り替える）
+      use: { ...devices["Desktop Chrome"], locale: "ja-JP" },
+    },
+  ],
   webServer: [
     {
       command: "bash ../scripts/gradle.sh bootRun --console=plain",

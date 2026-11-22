@@ -24,7 +24,7 @@ class ComposeFailureTest extends ApiSupport {
 
     @AfterEach
     void restore() {
-        doCallRealMethod().when(restater).restate(any(), any(), any(), any(), any(), any());
+        doCallRealMethod().when(restater).restate(any(), any(), any(), any(), any(), any(), any());
     }
 
     private String toLastAnswer() throws Exception {
@@ -38,7 +38,7 @@ class ComposeFailureTest extends ApiSupport {
     @Test
     void 拒否は422とinquiryIdを返し_答えは保存され_composeでやり直せる() throws Exception {
         String id = toLastAnswer();
-        doThrow(new AiRefusalException("拒否")).when(restater).restate(any(), any(), any(), any(), any(), any());
+        doThrow(new AiRefusalException("拒否")).when(restater).restate(any(), any(), any(), any(), any(), any(), any());
 
         String body = text(skip(id, "note")
                 .andExpect(status().isUnprocessableEntity())
@@ -56,7 +56,7 @@ class ComposeFailureTest extends ApiSupport {
         // 失敗が続く間は、composeも同じ失敗になる
         compose(id).andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.inquiryId").value(id));
         // 直ったら、同じ答えのまま組み立てられる
-        doCallRealMethod().when(restater).restate(any(), any(), any(), any(), any(), any());
+        doCallRealMethod().when(restater).restate(any(), any(), any(), any(), any(), any(), any());
         compose(id)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
@@ -71,7 +71,7 @@ class ComposeFailureTest extends ApiSupport {
         String blocked = idOf(create(null, "BLOCKED"));
         pick(blocked, "type", "HOW_TO");
         pick(blocked, "system", "reports");
-        doThrow(new AiUnavailableException("失敗", null)).when(restater).restate(any(), any(), any(), any(), any(), any());
+        doThrow(new AiUnavailableException("失敗", null)).when(restater).restate(any(), any(), any(), any(), any(), any(), any());
 
         skip(normal, "note").andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("AI_UNAVAILABLE"));
         write(blocked, "note", "止まっています")
@@ -83,7 +83,7 @@ class ComposeFailureTest extends ApiSupport {
     @Test
     void 言い直しの失敗の後に緊急度を変えても組み立て直さず_業務が止まっているに変えると担当者に送られる() throws Exception {
         String id = toLastAnswer();
-        doThrow(new AiUnavailableException("失敗", null)).when(restater).restate(any(), any(), any(), any(), any(), any());
+        doThrow(new AiUnavailableException("失敗", null)).when(restater).restate(any(), any(), any(), any(), any(), any(), any());
         skip(id, "note").andExpect(status().isServiceUnavailable());
 
         urgency(id, "HURRY")

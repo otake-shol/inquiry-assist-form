@@ -22,6 +22,7 @@ import java.util.UUID;
  *
  * @param id 識別子
  * @param createdAt 作成日時
+ * @param language 本人の言語。AI が書くものはこの言語で書く
  * @param phase 区間
  * @param turn 誰の番か。終わった件は null
  * @param awaiting 待っていること。終わった件は null
@@ -47,6 +48,7 @@ import java.util.UUID;
 public record InquiryView(
         UUID id,
         Instant createdAt,
+        String language,
         Phase phase,
         Turn turn,
         Awaiting awaiting,

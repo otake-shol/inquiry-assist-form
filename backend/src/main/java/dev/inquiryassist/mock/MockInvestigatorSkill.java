@@ -33,6 +33,12 @@ public class MockInvestigatorSkill implements InvestigatorSkill {
     private static final String FAQ_STATEMENT = "期限切れの求人は、応募者向けの一覧に表示されない";
     private static final String GHOST_STATEMENT_A = "期限切れの求人は、管理画面の再掲載ボタンから元に戻せる";
     private static final String GHOST_STATEMENT_B = "掲載期限は、夜間のバッチで自動的に延長される";
+    private static final String CODE_STATEMENT_EN =
+            "A job posting is treated as expired from the exact time of its posting deadline";
+    private static final String FAQ_STATEMENT_EN = "Expired job postings are not shown in the list for applicants";
+    private static final String GHOST_STATEMENT_A_EN =
+            "An expired job posting can be restored with the repost button on the admin screen";
+    private static final String GHOST_STATEMENT_B_EN = "The posting deadline is automatically extended by a nightly batch";
 
     private final Duration slowStepDelay;
 
@@ -47,6 +53,7 @@ public class MockInvestigatorSkill implements InvestigatorSkill {
      * @param inquiry 本人が確認した整形後の問い
      * @param scope 投稿者の閲覧範囲
      * @param progress 進捗の通知先
+     * @param language 本人の言語。{@code en} なら事実、次に確認すること、進捗を英語で返す（根拠の引用は資料の原文のまま）
      * @return 調査の結果（出典は未照合）
      * @throws IllegalArgumentException 調べない種類を渡した場合
      * @throws AiRefusalException {@code [拒否]} の場合
@@ -54,16 +61,17 @@ public class MockInvestigatorSkill implements InvestigatorSkill {
      */
     @Override
     public AiResult<Investigation> investigate(
-            StructuredInquiry inquiry, AccessScope scope, ProgressListener progress) {
+            StructuredInquiry inquiry, AccessScope scope, ProgressListener progress, String language) {
         if (inquiry.type() != null && !inquiry.type().investigates()) {
             throw new IllegalArgumentException("調べない種類: " + inquiry.type());
         }
         String tags = inquiry.goal();
         boolean slow = MockScenario.has(tags, MockScenario.TAG_SLOW);
 
-        step(slow, progress, "コードを検索しています");
-        step(slow, progress, "FAQを確認しています");
-        step(slow, progress, "用語対応表を照合しています");
+        boolean en = MockScenario.english(language);
+        step(slow, progress, en ? "Searching the code" : "コードを検索しています");
+        step(slow, progress, en ? "Checking the FAQ" : "FAQを確認しています");
+        step(slow, progress, en ? "Matching the glossary" : "用語対応表を照合しています");
         if (MockScenario.has(tags, MockScenario.TAG_ERROR)) {
             throw new AiUnavailableException("モックの調査エラー", null, Usage.ofMock());
         }
@@ -71,33 +79,45 @@ public class MockInvestigatorSkill implements InvestigatorSkill {
             throw new AiRefusalException("モックが調査を拒否しました", Usage.ofMock());
         }
 
-        List<String> notFound = List.of("期限切れの求人を一覧に出す設定やフラグは、job-board のコードには見つからなかった");
-        List<String> nextChecks = List.of("期限の境界（ちょうどの時刻）の扱いが意図した仕様かを、仕様の持ち主に確認する");
+        String codeStatement = en ? CODE_STATEMENT_EN : CODE_STATEMENT;
+        String faqStatement = en ? FAQ_STATEMENT_EN : FAQ_STATEMENT;
+        String ghostA = en ? GHOST_STATEMENT_A_EN : GHOST_STATEMENT_A;
+        String ghostB = en ? GHOST_STATEMENT_B_EN : GHOST_STATEMENT_B;
+        List<String> notFound = List.of(en
+                ? "No setting or flag that shows expired job postings in the list was found in the job-board code"
+                : "期限切れの求人を一覧に出す設定やフラグは、job-board のコードには見つからなかった");
+        List<String> nextChecks = List.of(en
+                ? "Confirm with the owner of the specification whether the handling of the exact deadline time is intended"
+                : "期限の境界（ちょうどの時刻）の扱いが意図した仕様かを、仕様の持ち主に確認する");
         Investigation result;
         if (MockScenario.has(tags, MockScenario.TAG_NO_GROUNDS)) {
             result = new Investigation(
                     List.of(),
-                    List.of("job-board のコード、FAQ、用語対応表に該当する記述は見つからなかった"),
-                    List.of("関連する画面名と、期待する動作を本人に確認する"));
+                    List.of(en
+                            ? "No matching description was found in the job-board code, the FAQ, or the glossary"
+                            : "job-board のコード、FAQ、用語対応表に該当する記述は見つからなかった"),
+                    List.of(en
+                            ? "Ask the user which screen is involved and what behavior they expect"
+                            : "関連する画面名と、期待する動作を本人に確認する"));
         } else if (MockScenario.has(tags, MockScenario.TAG_GHOST_CITATION)) {
             result = new Investigation(
                     List.of(
-                            new Finding(GHOST_STATEMENT_A, List.of(ghost("GhostService.java", "return ghost.expiresAt();"))),
-                            new Finding(GHOST_STATEMENT_B, List.of(ghost("GhostBatch.java", "extendAll(expired);")))),
+                            new Finding(ghostA, List.of(ghost("GhostService.java", "return ghost.expiresAt();"))),
+                            new Finding(ghostB, List.of(ghost("GhostBatch.java", "extendAll(expired);")))),
                     notFound,
                     nextChecks);
         } else if (MockScenario.has(tags, MockScenario.TAG_PARTIAL_GHOST)) {
             result = new Investigation(
                     List.of(
-                            new Finding(CODE_STATEMENT, List.of(codeCitation())),
-                            new Finding(GHOST_STATEMENT_A, List.of(ghost("GhostService.java", "return ghost.expiresAt();")))),
+                            new Finding(codeStatement, List.of(codeCitation())),
+                            new Finding(ghostA, List.of(ghost("GhostService.java", "return ghost.expiresAt();")))),
                     notFound,
                     nextChecks);
         } else {
             result = new Investigation(
                     List.of(
-                            new Finding(CODE_STATEMENT, List.of(codeCitation())),
-                            new Finding(FAQ_STATEMENT, List.of(faqCitation()))),
+                            new Finding(codeStatement, List.of(codeCitation())),
+                            new Finding(faqStatement, List.of(faqCitation()))),
                     notFound,
                     nextChecks);
         }

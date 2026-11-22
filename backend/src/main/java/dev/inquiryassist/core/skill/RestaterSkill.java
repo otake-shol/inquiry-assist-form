@@ -26,6 +26,7 @@ public interface RestaterSkill {
      * @param function 機能。決まっていなければ {@code null}
      * @param answers 詳しい質問と答え
      * @param corrections 本人が伝えた違う点の一言。伝えられた順。空なら最初の言い直し
+     * @param language 本人の言語。言い直しの文章と各項目はこの言語で書く
      * @return 整形後の問い
      * @throws AiRefusalException モデルが回答を拒否した場合
      * @throws AiUnavailableException モデルを呼び出せなかった場合
@@ -36,5 +37,6 @@ public interface RestaterSkill {
             SystemOption system,
             FunctionOption function,
             List<AnsweredQuestion> answers,
-            List<String> corrections);
+            List<String> corrections,
+            String language);
 }

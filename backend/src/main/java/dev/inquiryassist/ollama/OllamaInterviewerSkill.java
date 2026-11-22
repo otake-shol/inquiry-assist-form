@@ -58,16 +58,22 @@ public class OllamaInterviewerSkill implements InterviewerSkill {
      * @param system 決まっているシステム
      * @param function 決まっている機能
      * @param scope 投稿者の閲覧範囲
+     * @param language 本人の言語。日本語以外のときだけ、指示文の末尾に書く言語の指示を足す
      * @return 詳しい質問
      */
     @Override
     public AiResult<Interview> ask(
-            String utterance, InquiryType type, SystemOption system, FunctionOption function, AccessScope scope) {
+            String utterance,
+            InquiryType type,
+            SystemOption system,
+            FunctionOption function,
+            AccessScope scope,
+            String language) {
         String user = "## 種類\n" + (type == null ? "（未定）" : type.name())
                 + "\n\n## システム\n" + (system == null ? "なし" : system.label())
                 + "\n\n## 機能\n" + (function == null ? "なし" : function.label())
                 + "\n\n## 本人が書いた文章\n" + (utterance == null || utterance.isBlank() ? "（なし）" : utterance);
-        return call.call(this.system, user, OllamaInterviewerSkill::toInterview);
+        return call.call(Prompts.withOutputLanguage(this.system, language), user, OllamaInterviewerSkill::toInterview);
     }
 
     /**

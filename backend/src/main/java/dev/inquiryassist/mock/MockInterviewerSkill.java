@@ -29,12 +29,18 @@ public class MockInterviewerSkill implements InterviewerSkill {
      * @param system システム
      * @param function 機能
      * @param scope 投稿者の閲覧範囲
+     * @param language 本人の言語。{@code en} なら質問と選択肢を英語で返す
      * @return 詳しい質問。{@code [質問なし]} なら0問
      * @throws AiUnavailableException {@code [質問エラー]} の場合
      */
     @Override
     public AiResult<Interview> ask(
-            String utterance, InquiryType type, SystemOption system, FunctionOption function, AccessScope scope) {
+            String utterance,
+            InquiryType type,
+            SystemOption system,
+            FunctionOption function,
+            AccessScope scope,
+            String language) {
         if (MockScenario.has(utterance, MockScenario.TAG_QUESTION_ERROR)) {
             throw new AiUnavailableException("モックの質問生成エラー", null, Usage.ofMock());
         }
@@ -43,12 +49,17 @@ public class MockInterviewerSkill implements InterviewerSkill {
         }
         return new AiResult<>(
                 new Interview(List.of(
-                        new FollowUpQuestion("q1", "どの場面での話ですか", List.of("画面を開いたとき", "保存したとき", "一覧を見たとき")))),
+                        MockScenario.english(language)
+                                ? new FollowUpQuestion(
+                                        "q1",
+                                        "In what situation does this happen?",
+                                        List.of("When opening a screen", "When saving", "When viewing a list"))
+                                : new FollowUpQuestion("q1", "どの場面での話ですか", List.of("画面を開いたとき", "保存したとき", "一覧を見たとき")))),
                 Usage.ofMock());
     }
 
     /**
-     * 設定の質問のうち、選択肢の名前が文章にそのまま含まれているものを、その選択肢で読み取る。複数の選択肢が
+     * 設定の質問のうち、選択肢の名前（どの言語のものでも）が文章に含まれているものを、その選択肢で読み取る。複数の選択肢が
      * 含まれていれば、設定の順で先のもの。文章で答える質問は読み取らない。
      *
      * @param utterance 本人が書いた文章
@@ -64,7 +75,8 @@ public class MockInterviewerSkill implements InterviewerSkill {
         List<Prefill.Answer> answers = new ArrayList<>();
         for (IntakeQuestion question : questions) {
             for (Choice option : question.options()) {
-                if (utterance != null && utterance.contains(option.label())) {
+                // どの言語の名前でも読み取る。英字は大文字と小文字を区別しない
+                if (MockScenario.mentionsAny(utterance, option.aliases())) {
                     answers.add(new Prefill.Answer(question.id(), option.id(), null));
                     break;
                 }

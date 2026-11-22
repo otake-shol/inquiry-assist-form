@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
-import * as api from "./api/client.ts";
+import { ApiError } from "./api/client.ts";
+import { useApi } from "./api/useApi.ts";
 import {
   subscribeAnswerStream,
   type SubscribeAnswerStream,
@@ -50,8 +51,9 @@ import {
 } from "./flow/page.ts";
 import { TracePanel } from "./components/TracePanel.tsx";
 import { Withdraw } from "./components/Withdraw.tsx";
-import { USER_TEXT, askerStatusLabel } from "./text/inquiries.ts";
-import { TEXT, handoverText } from "./text/labels.ts";
+import { useI18n } from "./i18n/context.ts";
+import { askerStatusLabel } from "./text/inquiries.ts";
+import { handoverText } from "./text/labels.ts";
 
 /** App の props。 */
 interface AppProps {
@@ -98,6 +100,11 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
   } = state;
   const viewId = view?.id;
   const awaiting = view?.awaiting;
+  const api = useApi();
+  const { language, messages, reportApiLanguages } = useI18n();
+  const { text: TEXT, user: USER_TEXT } = messages;
+  // 副作用が最新の値を読むための入れ物（言語の切り替えで副作用をやり直さないものを、ここから読む）
+  const latest = useRef({ view, resume, api, language });
 
   const pathname = usePathname();
   const route: Route = useMemo(() => parseRoute(pathname), [pathname]);
@@ -107,11 +114,18 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
     `${routeKey}|${viewId ?? ""}|${view?.messages?.length ?? 0}`,
   );
 
+  // タブの題名を、いまの言語に合わせる
+  useEffect(() => {
+    document.title = TEXT.appTitle;
+  }, [TEXT.appTitle]);
+
+  // 設定は、言語を切り替えると取り直す（種類やシステムの名前は API が返すため）
   useEffect(() => {
     // 取得に失敗したら非モック扱いで続行する
     api
       .getConfig()
-      .then((config) =>
+      .then((config) => {
+        reportApiLanguages(config.languages ?? null);
         dispatch({
           type: "configLoaded",
           mock: config.mock,
@@ -121,22 +135,27 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
           urgencies: config.urgencies ?? [],
           userName: config.user?.name ?? null,
           trace: config.trace ?? false,
-        }),
-      )
+        });
+      })
       .catch(() => {});
-  }, []);
+  }, [api, reportApiLanguages]);
 
   useEffect(() => {
     if (awaiting !== "INVESTIGATION" || viewId === undefined) return;
     let unsubscribe: (() => void) | null = null;
     // StrictMode の開発時二重実行で接続が二重にならないよう、購読開始を1タスク遅らせる
     const timer = setTimeout(() => {
-      unsubscribe = subscribe(viewId, {
-        onProgress: (message) => dispatch({ type: "streamProgress", message }),
-        onDone: (done) => dispatch({ type: "viewReceived", view: done }),
-        onFailed: (failure) =>
-          dispatch({ type: "streamFailed", error: failure }),
-      });
+      unsubscribe = subscribe(
+        viewId,
+        {
+          onProgress: (message) =>
+            dispatch({ type: "streamProgress", message }),
+          onDone: (done) => dispatch({ type: "viewReceived", view: done }),
+          onFailed: (failure) =>
+            dispatch({ type: "streamFailed", error: failure }),
+        },
+        latest.current.language,
+      );
     }, 0);
     return () => {
       clearTimeout(timer);
@@ -150,37 +169,53 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
    * 表現は無い）。その id で問い合わせを取り直して、止まっている状態（`canSendNow` など）を画面に反映する。
    * @param operation 実行する API 呼び出し
    */
-  const run = useCallback(async (operation: () => Promise<InquiryView>) => {
-    dispatch({ type: "requestStarted" });
-    try {
-      const received = await operation();
-      dispatch({ type: "viewReceived", view: received });
-      return received;
-    } catch (e) {
-      const failure =
-        e instanceof api.ApiError
-          ? { code: e.code, message: e.message, inquiryId: e.inquiryId }
-          : { code: "UNKNOWN", message: String(e) };
-      dispatch({ type: "requestFailed", error: failure });
-      if (failure.inquiryId !== undefined) {
-        api
-          .getInquiry(failure.inquiryId)
-          .then((saved) => {
-            dispatch({ type: "viewRefreshed", view: saved });
-            navigateTo(inquiryPathOf(saved.id));
-          })
-          .catch(() => {});
+  const run = useCallback(
+    async (operation: () => Promise<InquiryView>) => {
+      dispatch({ type: "requestStarted" });
+      try {
+        const received = await operation();
+        dispatch({ type: "viewReceived", view: received });
+        return received;
+      } catch (e) {
+        const failure =
+          e instanceof ApiError
+            ? { code: e.code, message: e.message, inquiryId: e.inquiryId }
+            : { code: "UNKNOWN", message: String(e) };
+        dispatch({ type: "requestFailed", error: failure });
+        if (failure.inquiryId !== undefined) {
+          api
+            .getInquiry(failure.inquiryId)
+            .then((saved) => {
+              dispatch({ type: "viewRefreshed", view: saved });
+              navigateTo(inquiryPathOf(saved.id));
+            })
+            .catch(() => {});
+        }
+        return null;
       }
-      return null;
-    }
-  }, []);
+    },
+    [api],
+  );
 
   // URL に合わせて問い合わせを開く。新しい問い合わせや一覧に移ったら状態を捨て、
   // `/inquiries/{id}` を開いたら（作成直後で、すでに持っている場合を除き）取得して再開する。
-  const latest = useRef({ view, resume });
   useEffect(() => {
-    latest.current = { view, resume };
+    latest.current = { view, resume, api, language };
   });
+  // 言語を切り替えたら、表示中の問い合わせを取り直す（質問や選択肢の名前を、新しい言語にするため）。
+  // 入力の途中の文章（draft、入力欄の中身）は、この取り直しでは消えない
+  const previousApi = useRef(api);
+  useEffect(() => {
+    if (previousApi.current === api) return;
+    previousApi.current = api;
+    const current = latest.current.view;
+    if (current === null) return;
+    api
+      .getInquiry(current.id)
+      .then((refreshed) => dispatch({ type: "viewRefreshed", view: refreshed }))
+      .catch(() => {});
+  }, [api]);
+
   useEffect(() => {
     const { view: current, resume: resuming } = latest.current;
     if (route.kind !== "inquiry") {
@@ -195,7 +230,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
     if (current?.id === id) return;
     let cancelled = false;
     dispatch({ type: "resumeStarted" });
-    api
+    latest.current.api
       .getInquiry(id)
       .then((resumed) => {
         if (!cancelled) dispatch({ type: "inquiryResumed", view: resumed });
@@ -204,7 +239,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
         if (cancelled) return;
         // 形式の崩れた id には API が 400 VALIDATION を返す。無い問い合わせと同じく「見つからない」と示す
         if (
-          e instanceof api.ApiError &&
+          e instanceof ApiError &&
           (e.code === "NOT_FOUND" || e.code === "VALIDATION")
         ) {
           dispatch({ type: "resumeNotFound" });
@@ -212,7 +247,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
           dispatch({
             type: "resumeFailed",
             error:
-              e instanceof api.ApiError
+              e instanceof ApiError
                 ? { code: e.code, message: e.message }
                 : { code: "UNKNOWN", message: String(e) },
           });
@@ -336,12 +371,15 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
   const renderSection = (section: Section) => {
     switch (section.kind) {
       case "utterance":
-        return <UtteranceRow text={view!.utterance!} />;
+        return (
+          <UtteranceRow text={view!.utterance!} language={view!.language} />
+        );
       case "entry":
         return (
           <EntryRow
             entry={view!.intake.entries[section.index]}
             interactive={section.interactive}
+            language={view!.language}
             busy={busy}
             onBack={(questionId) =>
               void run(() => api.backIntake(view!.id, questionId))
@@ -351,7 +389,9 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
       case "question": {
         // 作成前は、設定の種類から描いた1問目。作成後は API が返す次の質問
         const question =
-          view === null ? firstQuestionOf(types) : view.intake.next!;
+          view === null
+            ? firstQuestionOf(types, TEXT.firstQuestion)
+            : view.intake.next!;
         return (
           <>
             {question.options.length > 0 || view !== null ? (
@@ -387,10 +427,14 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
       }
       case "restatement":
         return section.confirmed ? (
-          <ConfirmedRestatement summary={view!.structured!.summary} />
+          <ConfirmedRestatement
+            summary={view!.structured!.summary}
+            language={view!.language}
+          />
         ) : (
           <Restatement
             summary={view!.structured!.summary}
+            language={view!.language}
             revisionsLeft={view!.revisionsLeft}
             busy={busy}
             canGoBack={view!.intake.entries.length > 0}
@@ -420,6 +464,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
               !resultFromOperator(view!)
             }
             doForMe={view!.type?.id === "DO_FOR_ME"}
+            language={view!.language}
             busy={busy}
             onResolve={(resolved) =>
               void run(() => api.resolve(view!.id, resolved))
@@ -438,12 +483,21 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
       case "followup":
         return (
           <FollowUp
-            statusLabel={askerStatusLabel(view!, resultFromOperator(view!))}
+            statusLabel={askerStatusLabel(
+              view!,
+              resultFromOperator(view!),
+              messages.asker,
+            )}
             messages={view!.messages ?? []}
             awaiting={view!.awaiting}
             canAppend={canAppend(view!)}
             ended={view!.ending !== null}
-            handover={handoverText(view!, filedGuidance)}
+            handover={handoverText(
+              view!,
+              filedGuidance,
+              messages.asker.handover,
+            )}
+            language={view!.language}
             busy={busy}
             onSend={async (body) =>
               (await run(() => api.postMessage(view!.id, body))) !== null

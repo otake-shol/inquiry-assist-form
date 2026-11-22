@@ -239,7 +239,7 @@ describe("sectionKey", () => {
 
 describe("firstQuestionOf", () => {
   it("設定の種類から、名前と説明つきの選択肢を持つ1問目を作る", () => {
-    const question = firstQuestionOf(TYPE_OPTIONS);
+    const question = firstQuestionOf(TYPE_OPTIONS, "何をしたいですか");
     expect(question).toMatchObject({
       questionId: "type",
       kind: "TYPE",

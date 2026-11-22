@@ -4,14 +4,8 @@ import type {
   StateFields,
 } from "../api/types.ts";
 import { sortUrgentUnreadNewest, timeOf } from "../flow/board.ts";
-import {
-  AWAITING_LABELS,
-  ENDING_LABELS,
-  OPERATOR_COLUMN_LABELS,
-  OP_TEXT,
-  PHASE_LABELS,
-  movedText,
-} from "./labels.ts";
+import type { Messages } from "../i18n/messages.ts";
+import { movedText } from "./labels.ts";
 
 /** 担当者のボードの列。誰の番かで分ける。左から並べる順。 */
 export type OperatorColumn = "OPERATOR" | "ASKER" | "CLOSED";
@@ -83,9 +77,10 @@ export function unreadCountOf(items: OperatorItem[]): number {
 /**
  * ブラウザのタブの題名。未読があれば先頭に件数をつける。
  * @param unread 未読数
+ * @param op 辞書の、担当者の画面の文言（`messages.op`）
  */
-export function tabTitleOf(unread: number): string {
-  return unread > 0 ? `(${unread}) ${OP_TEXT.tabTitle}` : OP_TEXT.tabTitle;
+export function tabTitleOf(unread: number, op: Messages["op"]): string {
+  return unread > 0 ? `(${unread}) ${op.tabTitle}` : op.tabTitle;
 }
 
 /**
@@ -169,16 +164,18 @@ export function dropIntentOf(to: OperatorColumn): DropIntent | null {
  * カードに添える、待っていることや終わり方。「本人の番」の列では何を待っているか
  * （返事待ち、結果の確かめ待ち）、「終わり」の列では終わり方。「担当者の番」の列には添えない。
  * @param item 一覧の1件
+ * @param op 辞書の、担当者の画面の文言（`messages.op`）
  */
 export function cardNoteOf(
   item: Pick<StateFields, "phase" | "turn" | "awaiting" | "ending">,
+  op: Messages["op"],
 ): string | null {
   const column = operatorColumnOf(item);
   if (column === "CLOSED") {
-    return item.ending === null ? null : ENDING_LABELS[item.ending];
+    return item.ending === null ? null : op.endings[item.ending];
   }
   if (column === "ASKER") {
-    return item.awaiting === null ? null : AWAITING_LABELS[item.awaiting];
+    return item.awaiting === null ? null : op.awaiting[item.awaiting];
   }
   return null;
 }
@@ -186,12 +183,16 @@ export function cardNoteOf(
 /**
  * カードに添える区間。「分かる」「決まる」「行われる」だけを出し、受付と終わりは出さない。
  * @param item 一覧の1件
+ * @param op 辞書の、担当者の画面の文言（`messages.op`）
  */
-export function cardPhaseOf(item: Pick<StateFields, "phase">): string | null {
+export function cardPhaseOf(
+  item: Pick<StateFields, "phase">,
+  op: Messages["op"],
+): string | null {
   return item.phase === "KNOW" ||
     item.phase === "DECIDE" ||
     item.phase === "ACT"
-    ? PHASE_LABELS[item.phase]
+    ? op.phases[item.phase]
     : null;
 }
 
@@ -200,11 +201,13 @@ export function cardPhaseOf(item: Pick<StateFields, "phase">): string | null {
  * 前の一覧になかった件（新しく届いた件）は、移ったものとして扱わない。
  * @param before 更新前の一覧
  * @param after 更新後の一覧
+ * @param op 辞書の、担当者の画面の文言（`messages.op`）
  * @returns 移った件がなければ空文字
  */
 export function movedMessageOf(
   before: OperatorItem[],
   after: OperatorItem[],
+  op: Messages["op"],
 ): string {
   const previous = new Map(
     before.map((item) => [item.id, operatorColumnOf(item)]),
@@ -214,7 +217,7 @@ export function movedMessageOf(
     const column = operatorColumnOf(item);
     const was = previous.get(item.id);
     if (was !== undefined && was !== column) {
-      message = movedText(item.summary, OPERATOR_COLUMN_LABELS[column]);
+      message = movedText(item.summary, op.columns[column], op);
     }
   }
   return message;

@@ -220,6 +220,8 @@ export interface TraceEntry {
 /** 問い合わせ1件の表現。 */
 export interface InquiryView extends StateFields {
   id: string;
+  /** 本人の言語（`ja`、`en`）。本人の文章と AI が書いたものの言語 */
+  language: string;
   /** 見送りで終わった件だけが持つ */
   declined: Declined | null;
   urgency: Urgency;
@@ -293,6 +295,8 @@ export interface ErrorBody {
 /** オペレータ向けの一覧の1件。`filed` イベントの data も同じ形。 */
 export interface OperatorItem extends StateFields {
   id: string;
+  /** 本人の言語 */
+  language: string;
   filedAt: string;
   type: SystemOption | null;
   system: SystemOption | null;
@@ -314,6 +318,8 @@ export interface OperatorList {
 /** 本人向けの一覧の1件。 */
 export interface InquiryListItem extends StateFields {
   id: string;
+  /** 本人の言語 */
+  language: string;
   urgency: Urgency;
   /** 担当者に初めて渡した時刻。渡していなければ null。結果の出どころ（AI か担当者）を見分けるのに使う */
   handedOverAt: string | null;
@@ -350,6 +356,8 @@ export type SlackStatus = "POSTED" | "SKIPPED" | "PENDING" | "FAILED";
 /** 問い合わせの全内容（オペレータ向け）。 */
 export interface OperatorDetail extends StateFields {
   id: string;
+  /** 本人の言語 */
+  language: string;
   /** 見送りで終わった件だけが持つ */
   declined: Declined | null;
   filedAt: string;

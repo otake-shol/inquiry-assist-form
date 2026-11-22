@@ -22,6 +22,7 @@ public record InquiryList(long unreadReplyCount, List<Item> items) {
      *
      * @param id 識別子
      * @param createdAt 作成日時
+     * @param language 本人の言語
      * @param summary 言い直しの文章。なければ元の発話の先頭80文字
      * @param urgency 緊急度
      * @param phase 区間
@@ -35,6 +36,7 @@ public record InquiryList(long unreadReplyCount, List<Item> items) {
     public record Item(
             UUID id,
             Instant createdAt,
+            String language,
             String summary,
             Urgency urgency,
             Phase phase,

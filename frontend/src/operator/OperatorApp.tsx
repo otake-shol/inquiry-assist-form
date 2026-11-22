@@ -7,7 +7,8 @@ import {
   useRef,
   useState,
 } from "react";
-import * as api from "../api/client.ts";
+import { ApiError } from "../api/client.ts";
+import { useApi } from "../api/useApi.ts";
 import {
   subscribeOperatorStream,
   type SubscribeOperatorStream,
@@ -21,15 +22,10 @@ import type {
 import { BoardColumn } from "../components/BoardColumn.tsx";
 import { DevLink } from "../components/Navigation.tsx";
 import { NEW_INQUIRY_PATH } from "../path.ts";
-import { USER_TEXT } from "../text/inquiries.ts";
+import { useI18n, useMessages } from "../i18n/context.ts";
+import { LanguageSwitch } from "../components/LanguageSwitch.tsx";
 import { DetailView, type FocusRequest } from "./DetailView.tsx";
-import {
-  OPERATOR_COLUMN_LABELS,
-  OP_TEXT,
-  formatFiledAt,
-  opTypeLabel,
-  opUrgencyLabel,
-} from "./labels.ts";
+import { formatFiledAt, opTypeLabel, opUrgencyLabel } from "./labels.ts";
 import {
   OPERATOR_COLUMNS,
   arrangeOperatorBoard,
@@ -89,8 +85,9 @@ function OperatorCard({
   onDragEnd,
 }: OperatorCardProps) {
   const messageCount = item.messageCount;
-  const phase = cardPhaseOf(item);
-  const note = cardNoteOf(item);
+  const { op: OP_TEXT, meta } = useMessages();
+  const phase = cardPhaseOf(item, OP_TEXT);
+  const note = cardNoteOf(item, OP_TEXT);
   return (
     <li
       className={`board-card-item ${dragging ? "dragging" : ""}`}
@@ -117,14 +114,14 @@ function OperatorCard({
               <span className="visually-hidden">{OP_TEXT.unread}</span>
             </>
           )}
-          <span className="op-badge">{opTypeLabel(item.type)}</span>
+          <span className="op-badge">{opTypeLabel(item.type, OP_TEXT)}</span>
           <span className="op-system">
             {item.system?.label ?? OP_TEXT.systemUnknown}
             {item.function !== null && ` / ${item.function.label}`}
           </span>
           {item.urgency !== "NORMAL" && (
             <span className="op-badge warn strong-warn">
-              {opUrgencyLabel(item.urgency, urgencies)}
+              {opUrgencyLabel(item.urgency, urgencies, OP_TEXT)}
             </span>
           )}
           {item.sentImmediately && (
@@ -136,11 +133,13 @@ function OperatorCard({
             </span>
           )}
         </span>
-        <span className="op-summary">{item.summary}</span>
+        <span className="op-summary" lang={item.language}>
+          {item.summary}
+        </span>
         {note !== null && <span className="board-note op-wait">{note}</span>}
         <span className="op-row-top op-card-foot">
           <time className="op-time" dateTime={item.filedAt}>
-            {formatFiledAt(item.filedAt)}
+            {formatFiledAt(item.filedAt, meta.locale)}
           </time>
           {messageCount > 0 && (
             <span>{OP_TEXT.messageCount(messageCount)}</span>
@@ -163,6 +162,9 @@ export function OperatorApp({
   routeId,
   onNavigate,
 }: OperatorAppProps) {
+  const api = useApi();
+  const { language, messages, reportApiLanguages } = useI18n();
+  const { op: OP_TEXT, user: USER_TEXT } = messages;
   const [state, dispatch] = useReducer(operatorReducer, initialOperatorState);
   const { items, onlyUnread, selectedId, detail, detailLoading, banner } =
     state;
@@ -183,12 +185,15 @@ export function OperatorApp({
   // 詳細のパネルを開いていた問い合わせ（閉じたときにそのカードへフォーカスを戻す）
   const openerId = useRef<string | null>(null);
   useEffect(() => {
-    // 取得に失敗したら、実行記録も開発用のリンクも出さずに続行する
+    // 取得に失敗したら、実行記録も開発用のリンクも出さずに続行する。言語を切り替えたら取り直す
     api
       .getConfig()
-      .then(setConfig)
+      .then((loaded) => {
+        reportApiLanguages(loaded.languages ?? null);
+        setConfig(loaded);
+      })
       .catch(() => {});
-  }, []);
+  }, [api, reportApiLanguages]);
   const unread = unreadCountOf(items);
   const itemsRef = useRef(items);
   useEffect(() => {
@@ -210,7 +215,7 @@ export function OperatorApp({
       .catch(() => {
         if (request === listRequest.current) dispatch({ type: "listFailed" });
       });
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     loadList();
@@ -221,70 +226,90 @@ export function OperatorApp({
    * @param id 問い合わせの id
    * @param read 通知の時点で既読か
    */
-  const refreshDetail = useCallback(async (id: string, read: boolean) => {
-    try {
-      const refreshed = read
-        ? await api.getOperatorDetail(id)
-        : await api.markRead(id);
-      if (selectedRef.current === id) {
-        dispatch({ type: "detailLoaded", detail: refreshed });
+  const refreshDetail = useCallback(
+    async (id: string, read: boolean) => {
+      try {
+        const refreshed = read
+          ? await api.getOperatorDetail(id)
+          : await api.markRead(id);
+        if (selectedRef.current === id) {
+          dispatch({ type: "detailLoaded", detail: refreshed });
+        }
+      } catch {
+        // 取り直せなくても、いま見えている内容はそのまま残す
       }
-    } catch {
-      // 取り直せなくても、いま見えている内容はそのまま残す
-    }
-  }, []);
+    },
+    [api],
+  );
+
+  // 言語を切り替えたら、開いている詳細も取り直す（一覧は loadList の取り直しで揃う）
+  const previousApi = useRef(api);
+  useEffect(() => {
+    if (previousApi.current === api) return;
+    previousApi.current = api;
+    const id = selectedRef.current;
+    if (id !== null) void refreshDetail(id, true);
+  }, [api, refreshDetail]);
 
   useEffect(
     () =>
-      subscribe({
-        onFiled: (item) => dispatch({ type: "filed", item }),
-        onUpdated: (item) => {
-          dispatch({ type: "updated", item });
-          if (selectedRef.current === item.id) {
-            void refreshDetail(item.id, item.read);
-          }
+      subscribe(
+        {
+          onFiled: (item) => dispatch({ type: "filed", item }),
+          onUpdated: (item) => {
+            dispatch({ type: "updated", item });
+            if (selectedRef.current === item.id) {
+              void refreshDetail(item.id, item.read);
+            }
+          },
+          // 切断中に届いた分を取りこぼさないよう、再接続後に取り直す
+          onReconnected: loadList,
         },
-        // 切断中に届いた分を取りこぼさないよう、再接続後に取り直す
-        onReconnected: loadList,
-      }),
-    [subscribe, loadList, refreshDetail],
+        language,
+      ),
+    [subscribe, loadList, refreshDetail, language],
   );
 
   useEffect(() => {
     const previous = document.title;
-    document.title = tabTitleOf(unread);
+    document.title = tabTitleOf(unread, OP_TEXT);
     return () => {
       document.title = previous;
     };
-  }, [unread]);
+  }, [unread, OP_TEXT]);
 
   /**
    * 1件を開く。未読なら既読にしながら全内容を受け取る。
    * @param id 問い合わせの id
    */
-  const open = useCallback(async (id: string) => {
-    selectedRef.current = id;
-    dispatch({ type: "selected", id });
-    try {
-      const item = itemsRef.current.find((i) => i.id === id);
-      let loaded: OperatorDetail =
-        item !== undefined && !item.read
-          ? await api.markRead(id)
-          : await api.getOperatorDetail(id);
-      if (!loaded.read) loaded = await api.markRead(id);
-      if (selectedRef.current === id) {
-        dispatch({ type: "detailLoaded", detail: loaded });
+  const open = useCallback(
+    async (id: string) => {
+      selectedRef.current = id;
+      dispatch({ type: "selected", id });
+      try {
+        const item = itemsRef.current.find((i) => i.id === id);
+        let loaded: OperatorDetail =
+          item !== undefined && !item.read
+            ? await api.markRead(id)
+            : await api.getOperatorDetail(id);
+        if (!loaded.read) loaded = await api.markRead(id);
+        if (selectedRef.current === id) {
+          dispatch({ type: "detailLoaded", detail: loaded });
+        }
+      } catch (e) {
+        if (selectedRef.current !== id) return;
+        // 形式の崩れた id（途中で切れたリンクなど）には API が 400 VALIDATION を返す。
+        // 開こうとした問い合わせが無い点は同じなので、404 と同じく「見つからない」として示す。
+        const missing =
+          e instanceof ApiError &&
+          (e.code === "NOT_FOUND" || e.code === "VALIDATION");
+        dispatch(
+          missing ? { type: "detailNotFound" } : { type: "detailFailed" },
+        );
       }
-    } catch (e) {
-      if (selectedRef.current !== id) return;
-      // 形式の崩れた id（途中で切れたリンクなど）には API が 400 VALIDATION を返す。
-      // 開こうとした問い合わせが無い点は同じなので、404 と同じく「見つからない」として示す。
-      const missing =
-        e instanceof api.ApiError &&
-        (e.code === "NOT_FOUND" || e.code === "VALIDATION");
-      dispatch(missing ? { type: "detailNotFound" } : { type: "detailFailed" });
-    }
-  }, []);
+    },
+    [api],
+  );
 
   // URL（直接開いた場合、戻る・進む、カードでの選択）に合わせて詳細を開閉する
   const openedRoute = useRef<string | null | undefined>(undefined);
@@ -370,7 +395,7 @@ export function OperatorApp({
   const [previousItems, setPreviousItems] = useState(items);
   if (items !== previousItems) {
     setPreviousItems(items);
-    const message = movedMessageOf(previousItems, items);
+    const message = movedMessageOf(previousItems, items, OP_TEXT);
     if (message !== "") setAnnouncement(message);
   }
 
@@ -431,10 +456,11 @@ export function OperatorApp({
       <header className="op-head">
         <h1>{OP_TEXT.title}</h1>
         {unread > 0 && (
-          <span className="op-unread" aria-label={`未読 ${unread}件`}>
+          <span className="op-unread" aria-label={OP_TEXT.unreadCount(unread)}>
             {OP_TEXT.unread} {unread}
           </span>
         )}
+        <LanguageSwitch />
       </header>
       {banner !== null && (
         <div className="op-banner" role="status">
@@ -489,7 +515,7 @@ export function OperatorApp({
                 <BoardColumn
                   key={column}
                   columnId={column}
-                  title={OPERATOR_COLUMN_LABELS[column]}
+                  title={OP_TEXT.columns[column]}
                   count={board[column].length}
                   dropState={
                     dragId === null || !canDropOn(column)

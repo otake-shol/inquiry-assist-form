@@ -13,7 +13,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * 受付のモック。キーワードで種類を決め、文章に候補の名前が含まれればシステムと機能を置く（契約書「受付」）。
+ * 受付のモック。キーワード（日本語と英語）で種類を決め、文章に候補の名前（どの言語のものでも）が含まれればシステムと機能を置く
+ * （契約書「受付」）。
  * 緊急度は文章から決めない。
  */
 @Component
@@ -35,10 +36,13 @@ public class MockReceptionSkill implements ReceptionSkill {
         }
         SystemOption system = decided.systemId() != null
                 ? candidates.stream().filter(c -> c.id().equals(decided.systemId())).findFirst().orElse(null)
-                : candidates.stream().filter(c -> utterance.contains(c.label())).findFirst().orElse(null);
+                : candidates.stream().filter(c -> MockScenario.mentionsAny(utterance, c.aliases())).findFirst().orElse(null);
         FunctionOption function = system == null
                 ? null
-                : system.functions().stream().filter(f -> utterance.contains(f.label())).findFirst().orElse(null);
+                : system.functions().stream()
+                        .filter(f -> MockScenario.mentionsAny(utterance, f.aliases()))
+                        .findFirst()
+                        .orElse(null);
         return new AiResult<>(
                 new Reception(
                         MockScenario.classify(utterance),

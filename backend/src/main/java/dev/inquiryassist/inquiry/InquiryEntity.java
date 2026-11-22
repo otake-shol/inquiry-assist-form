@@ -91,6 +91,17 @@ class InquiryEntity {
     @Column(name = "asker_id", nullable = false)
     String askerId;
 
+    /** 本人の言語。AI が書くものはこの言語で書く。作成のときに決め、本人が行う状態を変えるリクエストのたびに合わせ直す。 */
+    @Column(nullable = false)
+    String language = "ja";
+
+    /**
+     * いま処理しているリクエストの、見る人の言語。保存しない。応答に出す名前と、入口の決まった質問をこの言語にするため、
+     * 読み出した記録に持たせる。
+     */
+    @jakarta.persistence.Transient
+    String viewerLanguage;
+
     /** 区間。 */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

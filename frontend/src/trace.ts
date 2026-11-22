@@ -1,4 +1,5 @@
 import type { TraceEntry } from "./api/types.ts";
+import type { Messages } from "./i18n/messages.ts";
 
 /** 段の種類。AI のスキルか、通常のコードか。 */
 export type StageKind = "skill" | "code";
@@ -24,14 +25,14 @@ export interface TraceStage {
   failedCalls: number;
 }
 
-/** 流れの順に並べた段の定義。照合（コード）は調査と説明の間に固定で置く。 */
-const STAGES: { key: string; label: string; kind: StageKind }[] = [
-  { key: "reception", label: "受付", kind: "skill" },
-  { key: "interviewer", label: "聞き手", kind: "skill" },
-  { key: "restater", label: "言い直し", kind: "skill" },
-  { key: "investigator", label: "調査", kind: "skill" },
-  { key: "verifier", label: "照合（コード）", kind: "code" },
-  { key: "explainer", label: "説明", kind: "skill" },
+/** 流れの順に並べた段の定義（名前は辞書）。照合（コード）は調査と説明の間に固定で置く。 */
+const STAGES: { key: string; kind: StageKind }[] = [
+  { key: "reception", kind: "skill" },
+  { key: "interviewer", kind: "skill" },
+  { key: "restater", kind: "skill" },
+  { key: "investigator", kind: "skill" },
+  { key: "verifier", kind: "code" },
+  { key: "explainer", kind: "skill" },
 ];
 
 /**
@@ -41,9 +42,11 @@ const STAGES: { key: string; label: string; kind: StageKind }[] = [
  * 照合は記録に現れないため、調査が1回でも成功していれば動いたものとして `calls` を 1 にする。
  * 一覧にないスキルの識別子は、末尾にスキルの段として足す。
  * @param entries 実行記録（無効または古い応答では null / undefined）
+ * @param trace 辞書の、実行記録の文言（`messages.trace`。段の名前を持つ）
  */
 export function summarizeTrace(
   entries: TraceEntry[] | null | undefined,
+  trace: Messages["trace"],
 ): TraceStage[] {
   const list = entries ?? [];
   const known = new Set(STAGES.map((stage) => stage.key));
@@ -55,7 +58,7 @@ export function summarizeTrace(
   }
   const defs = [
     ...STAGES,
-    ...extra.map((key) => ({ key, label: key, kind: "skill" as StageKind })),
+    ...extra.map((key) => ({ key, kind: "skill" as StageKind })),
   ];
 
   const stages = defs.map<TraceStage>((def) => {
@@ -77,7 +80,7 @@ export function summarizeTrace(
     }
     return {
       key: def.key,
-      label: def.label,
+      label: trace.stages[def.key] ?? def.key,
       kind: def.kind,
       calls: calls.length,
       implementations,
@@ -103,22 +106,30 @@ export function summarizeTrace(
 /**
  * 所要時間の表示。1秒未満はミリ秒、それ以上は秒（小数1桁）。
  * @param millis ミリ秒（記録がなければ null）
+ * @param trace 辞書の、実行記録の文言（`messages.trace`）
  */
-export function formatDuration(millis: number | null): string {
-  if (millis === null) return "記録なし";
-  return millis < 1000 ? `${millis}ミリ秒` : `${(millis / 1000).toFixed(1)}秒`;
+export function formatDuration(
+  millis: number | null,
+  trace: Messages["trace"],
+): string {
+  if (millis === null) return trace.noRecord;
+  return millis < 1000
+    ? trace.millis(millis)
+    : trace.seconds((millis / 1000).toFixed(1));
 }
 
 /**
  * 実装の表示。モックは「モック」、`ollama` は「手元のモデル」とモデルの名前、その他は名前のまま。
  * @param provider 実装の名前
  * @param model モデルの名前
+ * @param messages 辞書（`messages`。実行記録の文言と、「A（B）」の形を持つ）
  */
 export function implementationLabel(
   provider: string,
   model: string | null,
+  messages: Messages,
 ): string {
-  if (provider === "mock") return "モック";
-  const base = provider === "ollama" ? "手元のモデル" : provider;
-  return model === null ? base : `${base}（${model}）`;
+  if (provider === "mock") return messages.trace.mock;
+  const base = provider === "ollama" ? messages.trace.local : provider;
+  return model === null ? base : messages.meta.paren(base, model);
 }

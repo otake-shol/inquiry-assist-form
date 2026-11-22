@@ -58,7 +58,8 @@ class OllamaInvestigatorSkillTest {
                 Map.of("investigator", settings),
                 new InquiryProperties.Ollama(ollama.baseUrl(), "30m", 42),
                 new InquiryProperties.Trace(true),
-                new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"));
+                new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"),
+                java.util.Map.of());
         return new OllamaInvestigatorSkill(new OllamaClient(ollama.baseUrl(), "30m", 42, JSON), JSON, properties, knowledge);
     }
 
@@ -67,7 +68,7 @@ class OllamaInvestigatorSkillTest {
     }
 
     private AiResult<Investigation> investigate(AccessScope scope) {
-        return skill().investigate(inquiry(InquiryType.HOW_IT_WORKS), scope, progress::add);
+        return skill().investigate(inquiry(InquiryType.HOW_IT_WORKS), scope, progress::add, "ja");
     }
 
     /** 道具の呼び出しを求める応答を積む。calls は「名前, 引数」の並び。 */
@@ -409,8 +410,31 @@ class OllamaInvestigatorSkillTest {
 
     @Test
     void 調べない種類を渡すと_モデルを呼ばずに拒む() {
-        assertThatThrownBy(() -> skill().investigate(inquiry(InquiryType.CHANGE_REQUEST), ALL, progress::add))
+        assertThatThrownBy(() -> skill().investigate(inquiry(InquiryType.CHANGE_REQUEST), ALL, progress::add, "ja"))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(ollama.requests()).isEmpty();
+    }
+
+    @Test
+    void 英語なら指示文の末尾に言語の指示を足し_進捗も英語で_日本語なら従来のまま() {
+        replySearch("掲載期限");
+        ollama.reply(result(finding("求人は期限切れになる", "faq", "posting-expiry.md", FAQ_QUOTE)), 30, 20);
+        replySearch("掲載期限");
+        ollama.reply(result(finding("求人は期限切れになる", "faq", "posting-expiry.md", FAQ_QUOTE)), 30, 20);
+
+        skill().investigate(inquiry(InquiryType.HOW_IT_WORKS), ALL, progress::add, "ja");
+        List<String> jaProgress = List.copyOf(progress);
+        progress.clear();
+        skill().investigate(inquiry(InquiryType.HOW_IT_WORKS), ALL, progress::add, "en");
+
+        String base = Prompts.systemOf(dev.inquiryassist.core.skill.Skill.INVESTIGATOR, "v1");
+        String jaSystem = request(0).path("messages").get(0).path("content").asString();
+        String enSystem = request(2).path("messages").get(0).path("content").asString();
+        assertThat(jaSystem).isEqualTo(base);
+        assertThat(enSystem).isEqualTo(Prompts.withOutputLanguage(base, "en")).contains("英語（English）");
+        assertThat(request(2).path("messages").get(1).path("content").asString())
+                .isEqualTo(request(0).path("messages").get(1).path("content").asString());
+        assertThat(jaProgress).containsExactly("資料を検索しています");
+        assertThat(progress).containsExactly("Searching the documents");
     }
 }

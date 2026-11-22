@@ -81,6 +81,7 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 {
   "id": "0b9c…(UUID)",
   "createdAt": "2026-11-22T03:00:00Z",
+  "language": "ja",
   "phase": "INTAKE",
   "turn": "ASKER",
   "awaiting": "INTAKE_ANSWER",
@@ -183,7 +184,64 @@ inquiry:
 - 置き場所が決まっていない項目（`null`）は、その項目を指定した設定には当てはまらない。
 - `options` を省いた質問は、文章で答える。
 
-設定の文言（種類、システム、機能、質問、選択肢の名前）は、言語ごとの名前の対応で持つ（`{ ja: …, en: … }`）。API が返す `label` と `text` は、いまは既定の言語（`inquiry.languages` の先頭。既定は `ja`）の名前。本人の言語に合わせて返すのは、段階 1-C。
+設定の文言（種類、システム、機能、質問、選択肢の名前、`filed-guidance`）は、言語ごとの名前の対応で持つ（`{ ja: …, en: … }`）。API が返す `label` と `text` は、見る人の言語の名前（次の「言語」の節）。
+
+## 言語
+
+画面と API は、複数の言語に対応する。使える言語は設定 `inquiry.languages`（既定は `ja`、`en`）で、先頭が既定の言語。
+
+### 文章の4つの種類
+
+どの言語で出すかは、文章の種類で決まる。
+
+| 種類 | 例 | 言語 |
+| --- | --- | --- |
+| 画面の固定の文言 | ボタン、見出し、状態を表す言葉 | 見る人の言語。画面が持つ |
+| 設定の名前と、API が組み込みで持つ文言 | 種類、緊急度、システム、機能、マスの質問と選択肢、`filedGuidance`、入口の決まった質問 | 見る人の言語。API が返す |
+| 書かれた内容 | 本人の文章、AI が書いた質問・言い直し・事実・説明、担当者の発言、見送りの理由 | 書かれたときの言語のまま。訳さない |
+| 資料の引用 | 根拠の `quote`、資料の題名と場所 | 資料の原文のまま |
+
+### 見る人の言語
+
+リクエストごとに決まる。
+
+- `Accept-Language` ヘッダーに書かれた順に、使える言語と比べる（`en-US` は `en` として比べる）。最初に当てはまった言語を使う。
+- 当てはまる言語がなければ、既定の言語。
+- ヘッダーを付けられない接続（6 と `GET /api/operator/stream`）は、クエリの `lang` で渡す。`lang` があれば、ヘッダーより優先する。
+- その言語の名前が設定にない項目は、項目ごとに、既定の言語の名前で返す。
+
+見る人の言語で返すもの:
+
+- `GET /api/config` の `types`、`urgencies`、`systems`、`filedGuidance`
+- InquiryView と一覧の、種類・緊急度・システム・機能の `label`
+- `intake` の質問文、選択肢、答えの名前。設定から来たものと、入口の決まった質問（下の表）。AI が作った質問は「書かれた内容」なので、作ったときの言語のまま
+- 置き場所の名前から作る `summary`（言い直しも本人の文章もない件。名前の区切りは、`ja` が「・」、`en` が「 / 」）と、名前もない件の `summary`（`（内容なし）`／`(No content)`）。言い直しや本人の文章から作る `summary` は「書かれた内容」なので、書かれたときの言語のまま
+
+| 入口の決まった質問 | `ja` | `en` |
+| --- | --- | --- |
+| 種類 | 何をしたいですか | What can we help you with? |
+| システム | どのシステムですか | Which system is it about? |
+| 機能 | どの機能ですか | Which function is it about? |
+| 補足（任意） | 補足があれば書いてください | Add anything else you would like to tell us |
+| 補足（必須） | 状況を一言で教えてください | Tell us briefly what is happening |
+
+### 本人の言語（`language`）
+
+問い合わせが持つ。InquiryView、本人の一覧（10）、担当者の一覧と詳細に `language`（`"ja"` など）として返す。
+
+- 作成（2）のときの、見る人の言語で決まる。
+- その後、本人が行う状態を変えるリクエスト（3〜5b、7、8、11、12）のたびに、そのリクエストの言語に合わせ直す。本人が途中で画面の言語を切り替えた場合に、次に AI が書くものから新しい言語になる。
+- 取得（GET）と、担当者の操作では変わらない。
+- AI は、本人の言語で書く。対象は、聞き手が作る質問と選択肢、言い直し（文章と `structured` の各項目）、調査の事実と `memo`、説明、調べている間の進捗の文言。
+- 既に書かれたものは、本人の言語が変わっても書き直さない。
+- `structured.targetSystem` に入れるシステムの名前は、本人の言語の名前。
+
+### 言語を切り替えないもの
+
+- エラーの `message`。開発者向けで、画面は `code` から文言を決める。
+- 状態の履歴の `detail`（置き直しの前後の名前）。既定の言語の名前を、置き直した時点で保存する。
+- Slack への通知。既定の言語で書く。
+- `GET /api/config` の `user.name` と `operatorName`（認証を加えるまでの固定値）。
 
 ## エンドポイント
 
@@ -206,7 +264,7 @@ inquiry:
 }
 ```
 
-`types` は5つを、聞く順（上の用語の順）で返す。`incidentGuidance` は廃止。
+`types` は5つを、聞く順（上の用語の順）で返す。`incidentGuidance` は廃止。`types`、`urgencies`、`systems`、`filedGuidance` は、見る人の言語で返す（「言語」の節）。`languages` は、使える言語の一覧（先頭が既定の言語）。
 
 ### 2. `POST /api/inquiries`
 
@@ -354,7 +412,9 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | `使い方`、`やり方`、`手順`、`どうやって` | `HOW_TO` |
 | 上記以外 | `HOW_IT_WORKS` |
 
-システムは、文章に設定のシステムの名前（既定の言語の `label`）が含まれていれば、そのシステム。機能は、システムが決まっていて、文章にそのシステムの機能の名前が含まれていれば、その機能。含まれていなければ置かない（質問として聞く）。緊急度は、文章からは決めない。
+英語の文章のために、次の語も同じ優先順位で見る（大文字と小文字を区別しない）: `CHANGE_REQUEST` は `feature request`、`improve`。`DO_FOR_ME` は `please`、`could you`。`LOOKS_WRONG` は `bug`、`wrong`、`broken`。`HOW_TO` は `how to`、`how do i`。
+
+システムは、文章に設定のシステムの名前（どの言語の `label` でも。英字は大文字と小文字を区別しない）が含まれていれば、そのシステム。機能は、システムが決まっていて、文章にそのシステムの機能の名前が含まれていれば、その機能。含まれていなければ置かない（質問として聞く）。緊急度は、文章からは決めない。
 
 ### タグ
 
@@ -377,11 +437,11 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 
 ### 聞き手（設定に質問があり、文章が書かれている場合）
 
-モックの聞き手は、設定の質問のうち、選択肢の名前（既定の言語の `label`）が文章にそのまま含まれているものを、その選択肢で読み取る。複数の選択肢が含まれていれば、設定の順で先のもの。文章で答える質問は、読み取らない。`[質問エラー]` では `AI_UNAVAILABLE` で失敗し、設定の質問をすべて聞く。
+モックの聞き手は、設定の質問のうち、選択肢の名前（どの言語の `label` でも。英字は大文字と小文字を区別しない）が文章にそのまま含まれているものを、その選択肢で読み取る。複数の選択肢が含まれていれば、設定の順で先のもの。文章で答える質問は、読み取らない。`[質問エラー]` では `AI_UNAVAILABLE` で失敗し、設定の質問をすべて聞く。
 
 ### 聞き手（設定に質問がない場合）
 
-モックの聞き手は、質問を1問返す。id は `q1`、文言は「どの場面での話ですか」、選択肢は「画面を開いたとき」「保存したとき」「一覧を見たとき」（選択肢の id は `o1`〜`o3`）。
+モックの聞き手は、質問を1問返す。id は `q1`、文言は「どの場面での話ですか」、選択肢は「画面を開いたとき」「保存したとき」「一覧を見たとき」（選択肢の id は `o1`〜`o3`）。本人の言語が `en` なら、文言は「In what situation does this happen?」、選択肢は「When opening a screen」「When saving」「When viewing a list」。
 
 ### 言い直し（問いの組み立て）
 
@@ -402,9 +462,30 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | `CHANGE_REQUEST` | 変えてほしい点がある。 |
 | 決まっていない | 相談したいことがある。 |
 
+本人の言語が `en` のときは、同じ組み立てを英語で行う。
+
+1. 置き場所の前置き: 「About （機能） in （システム）: 」。システムだけなら「About （システム）: 」
+2. 種類ごとの文（下の表）
+3. 「What was written: （文章）」
+4. 「(（質問文）: （答え）)」
+5. 「Note: （一言）」
+
+| 種類 | 種類ごとの文（`en`） |
+| --- | --- |
+| `HOW_TO` | I want to know how to use it. |
+| `HOW_IT_WORKS` | I want to know how it currently works. |
+| `LOOKS_WRONG` | Something may be behaving incorrectly. I want to check whether this is the intended behavior. |
+| `DO_FOR_ME` | I would like a task to be done. |
+| `CHANGE_REQUEST` | I would like something to be changed. |
+| 決まっていない | I have something to ask about. |
+
+前置きと答えに入れる名前（システム、機能、質問文、選択肢）は、本人の言語の名前。
+
 モックの言い直しは、本人が書いた文章を `goal` にそのまま入れる（文章がなければ、種類ごとの文）。調査と説明のモックは、タグを `goal` から読む（`goal` は書き直しや作り直しで変わらないため、タグの振る舞いは最後まで保たれる）。
 
 モックの説明は、渡された事実の文をつないで作る（「（事実1）。（事実2）。」の形。`LOOKS_WRONG` では先頭に「現在の実装では、」を付け、末尾に「この動作が意図した仕様かどうかは、担当者が確認します。」を足す）。渡されなかった事実の内容が説明に現れないことを、テストで確かめられる形にする。
+
+本人の言語が `en` のとき、モックの調査は事実、`memo`、進捗の文言を英語で返し、モックの説明は英語でつなぐ（「（事実1）. （事実2）.」。`LOOKS_WRONG` では先頭に「In the current implementation: 」を付け、末尾に「Whether this behavior is intended will be confirmed by the support team.」を足す）。正常系の2つの事実は「A job posting is treated as expired from the exact time of its posting deadline」と「Expired job postings are not shown in the list for applicants」。ほかの文面（根拠のない事実、`memo`、進捗）は、日本語の文面と同じ意味の英語にする。根拠の引用は、どちらの言語でも資料の原文のまま。
 
 モックの一次情報は `backend/src/main/resources/mock-knowledge/` の固定ファイル（サンプルのコード、FAQ、用語対応表）。正常系の出典はこのファイルの実在する行を指し、出典の照合は実際に動く。
 
@@ -415,10 +496,13 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | 項目 | 既定 |
 | --- | --- |
 | 言語 | `ja`、`en`（既定は `ja`） |
+| 種類（`en`） | How to use something（Steps for an operation）、How something works（Why it behaves the way it does）、Something looks wrong（It does not behave as expected）、Do something for me（Fix data or change a setting）、Change something（Add or improve a feature）。括弧の中は説明文（`hint`） |
+| 緊急度（`en`） | Normal、Urgent、Work is blocked |
+| `filed-guidance` | `ja` は「担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。」。`en` は「The support team will review this and reply on this page. When a reply arrives, a mark appears in “My inquiries”.」 |
 | システム | `system-a`（システムA。機能は `a-1`（機能A-1）、`a-2`（機能A-2））、`system-b`（システムB。機能は `b-1`（機能B-1））、`system-c`（システムC。機能の設定なし） |
 | マスの設定 | 1件。`system-a` の `LOOKS_WRONG` に、質問「いつから起きていますか」（選択肢は、今日から、今週から、もっと前から） |
 
-確定したシステムの名前（既定の言語の `label`）を、`structured.targetSystem` に入れる。
+確定したシステムの名前（本人の言語の `label`）を、`structured.targetSystem` に入れる。
 
 API のテストは、業務らしい名前の一覧をテスト用の設定（`backend/src/test/resources/config/application.yaml`）で与えて行う。名前から置き場所を置く動きを、意味のある名前で確かめるため。システムは `job-admin`（求人管理画面。機能は `posting`（求人の掲載）、`applicants`（応募者の一覧））、`billing`（請求管理。機能は `invoice`（請求書））、`reports`（レポート。機能の設定なし）。マスの設定は、`job-admin` の `LOOKS_WRONG` に質問「いつから起きていますか」（選択肢つき）と、`billing` の `invoice` の `DO_FOR_ME` に、文章で答える質問「対象の取引先はどこですか」。
 
@@ -442,11 +526,11 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 担当者に渡したことのある問い合わせの一覧。クエリ `unreadOnly=true` で未読だけに絞る。
 
-`200` `{ "unreadCount": 2, "items": [{ "id", "filedAt", "type": { "id", "label" } | null, "system": { "id", "label" } | null, "function": { "id", "label" } | null, "urgency", "summary", "sentImmediately", "read": false, "phase", "turn", "awaiting", "ending", "messageCount" }] }`。`filedAt` は、担当者に初めて渡した時刻（`handedOverAt` と同じ）。`summary` は言い直しの文章、なければ本人が書いた文章の先頭80文字、それもなければ置き場所の名前（種類、システム、機能を「・」でつないだもの）。並びは新しい順。ただし緊急度が `BLOCKED` の件を先頭に寄せる。
+`200` `{ "unreadCount": 2, "items": [{ "id", "filedAt", "language", "type": { "id", "label" } | null, "system": { "id", "label" } | null, "function": { "id", "label" } | null, "urgency", "summary", "sentImmediately", "read": false, "phase", "turn", "awaiting", "ending", "messageCount" }] }`。`filedAt` は、担当者に初めて渡した時刻（`handedOverAt` と同じ）。`summary` は言い直しの文章、なければ本人が書いた文章の先頭80文字、それもなければ置き場所の名前（種類、システム、機能を「・」でつないだもの）。並びは新しい順。ただし緊急度が `BLOCKED` の件を先頭に寄せる。
 
 ### `GET /api/operator/inquiries/{id}`
 
-`200` 問い合わせの全内容。`id`、`filedAt`、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`declined`、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
+`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`declined`、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
 
 `followUps` は廃止し、`intake` に置き換える。入力を終える前に担当者へ送られることがなくなったため、「未回答」の状態は要らなくなった。
 
@@ -565,7 +649,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 
 自分（現在の利用者）が作った問い合わせの一覧（新しい順、最大50件）。
 
-`200` `{ "unreadReplyCount": 1, "items": [{ "id", "createdAt", "summary", "urgency", "phase", "turn", "awaiting", "ending", "handedOverAt", "unreadReply", "messageCount" }] }`。`summary` は、担当者向けの一覧と同じ決まり。`handedOverAt` は、結果を確かめている件の結果が、AI の答えか担当者の結果かを見分けるために使う（担当者に渡したことがあれば、担当者の結果）。
+`200` `{ "unreadReplyCount": 1, "items": [{ "id", "createdAt", "language", "summary", "urgency", "phase", "turn", "awaiting", "ending", "handedOverAt", "unreadReply", "messageCount" }] }`。`summary` は、担当者向けの一覧と同じ決まり。`handedOverAt` は、結果を確かめている件の結果が、AI の答えか担当者の結果かを見分けるために使う（担当者に渡したことがあれば、担当者の結果）。
 
 ### 11. `POST /api/inquiries/{id}/messages`
 

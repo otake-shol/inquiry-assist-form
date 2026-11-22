@@ -9,11 +9,8 @@ import type {
   TypeOption,
 } from "../api/types.ts";
 import { MAX_MESSAGE_LENGTH } from "../components/Exchange.tsx";
+import { useMessages } from "../i18n/context.ts";
 import {
-  ACTOR_LABELS,
-  DECLINE_REASON_LABELS,
-  OP_TEXT,
-  PHASE_LABELS,
   SWITCHABLE_PHASES,
   eventLabel,
   formatFiledAt,
@@ -45,6 +42,8 @@ export function PhaseSwitch({
   busy,
   onChange,
 }: PhaseSwitchProps) {
+  const messages = useMessages();
+  const OP_TEXT = messages.op;
   return (
     <div className="op-phase">
       <div
@@ -62,7 +61,7 @@ export function PhaseSwitch({
               if (phase !== candidate) onChange(candidate);
             }}
           >
-            {PHASE_LABELS[candidate]}
+            {OP_TEXT.phases[candidate]}
           </button>
         ))}
       </div>
@@ -95,6 +94,8 @@ export function PlacementForm({
   busy,
   onSubmit,
 }: PlacementFormProps) {
+  const messages = useMessages();
+  const OP_TEXT = messages.op;
   const id = useId();
   const [type, setType] = useState(detail.type?.id ?? "");
   const [systemId, setSystemId] = useState(detail.system?.id ?? "");
@@ -181,6 +182,8 @@ interface SendToAskerProps {
  * @param props 入力欄の参照と、送る処理
  */
 export function SendToAsker({ busy, inputRef, onSend }: SendToAskerProps) {
+  const messages = useMessages();
+  const OP_TEXT = messages.op;
   const id = useId();
   const [text, setText] = useState("");
   const body = text.trim();
@@ -252,6 +255,8 @@ export function DeclineForm({
   reasonRef,
   onSubmit,
 }: DeclineFormProps) {
+  const messages = useMessages();
+  const OP_TEXT = messages.op;
   const id = useId();
   const [kind, setKind] = useState<DeclineReasonKind>("NOT_REPRODUCIBLE");
   const [reason, setReason] = useState("");
@@ -277,7 +282,7 @@ export function DeclineForm({
           onChange={(event) => setKind(event.target.value as DeclineReasonKind)}
         >
           {(
-            Object.entries(DECLINE_REASON_LABELS) as [
+            Object.entries(OP_TEXT.declineReasons) as [
               DeclineReasonKind,
               string,
             ][]
@@ -315,6 +320,8 @@ export function DeclineForm({
  * @param props 履歴
  */
 export function HistoryList({ history }: { history: HistoryEntry[] }) {
+  const messages = useMessages();
+  const OP_TEXT = messages.op;
   return (
     <details className="op-fold op-history">
       <summary>{OP_TEXT.historySummary}</summary>
@@ -324,17 +331,19 @@ export function HistoryList({ history }: { history: HistoryEntry[] }) {
         <ol>
           {history.map((entry, index) => (
             <li key={`${entry.at}:${index}`}>
-              <time dateTime={entry.at}>{formatFiledAt(entry.at)}</time>
+              <time dateTime={entry.at}>
+                {formatFiledAt(entry.at, messages.meta.locale)}
+              </time>
               <span className="op-history-actor">
-                {ACTOR_LABELS[entry.actor]}
+                {OP_TEXT.actors[entry.actor]}
               </span>
-              <span>{eventLabel(entry.event)}</span>
+              <span>{eventLabel(entry.event, OP_TEXT)}</span>
               {entry.detail != null && (
                 <span className="op-history-detail">
-                  {placementChangeText(entry.detail)}
+                  {placementChangeText(entry.detail, messages)}
                 </span>
               )}
-              <span className="op-muted">→ {stateLine(entry)}</span>
+              <span className="op-muted">→ {stateLine(entry, messages)}</span>
             </li>
           ))}
         </ol>

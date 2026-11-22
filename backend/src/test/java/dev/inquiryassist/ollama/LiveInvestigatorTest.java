@@ -77,7 +77,8 @@ class LiveInvestigatorTest {
                 Map.of("investigator", settings),
                 new InquiryProperties.Ollama("http://localhost:11434", "30m", 42),
                 new InquiryProperties.Trace(true),
-                new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"));
+                new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"),
+                java.util.Map.of());
         OllamaInvestigatorSkill skill = new OllamaInvestigatorSkill(
                 new OllamaClient("http://localhost:11434", "30m", 42, JSON), JSON, properties, knowledge);
         StructuredInquiry inquiry =
@@ -85,7 +86,7 @@ class LiveInvestigatorTest {
         List<String> progress = new ArrayList<>();
 
         long start = System.nanoTime();
-        AiResult<Investigation> result = skill.investigate(inquiry, SCOPE, progress::add);
+        AiResult<Investigation> result = skill.investigate(inquiry, SCOPE, progress::add, "ja");
         long millis = (System.nanoTime() - start) / 1_000_000;
 
         CitationVerifier verifier = new CitationVerifier(knowledge);

@@ -27,38 +27,38 @@ class ConcurrentAnswerTest {
     void 生成中の問い合わせの2回目の生成はINVALID_STATEで拒否され1回目は完了する() throws Exception {
         String utterance = "[遅延] 求人の掲載期限の仕様";
         var id = IntakeSteps.toStructured(service, utterance).id();
-        service.confirmStructured(id, null);
+        service.confirmStructured(id, null, "ja");
 
         CountDownLatch firstProgress = new CountDownLatch(1);
         CompletableFuture<InquiryView> first =
-                CompletableFuture.supplyAsync(() -> service.generateAnswer(id, m -> firstProgress.countDown()));
+                CompletableFuture.supplyAsync(() -> service.generateAnswer(id, m -> firstProgress.countDown(), "ja"));
         assertThat(firstProgress.await(5, TimeUnit.SECONDS)).isTrue();
 
-        assertThatThrownBy(() -> service.generateAnswer(id, m -> {})).isInstanceOf(InvalidStateException.class);
+        assertThatThrownBy(() -> service.generateAnswer(id, m -> {}, "ja")).isInstanceOf(InvalidStateException.class);
 
         assertThat(first.get(10, TimeUnit.SECONDS).awaiting()).isEqualTo(Awaiting.RESULT_CONFIRMATION);
         // 完了後は待っていることが変わっているため、再度の生成も拒否される
-        assertThatThrownBy(() -> service.generateAnswer(id, m -> {})).isInstanceOf(IllegalTransitionException.class);
+        assertThatThrownBy(() -> service.generateAnswer(id, m -> {}, "ja")).isInstanceOf(IllegalTransitionException.class);
     }
 
     @Test
     void 生成中に今すぐ送ると生成側の保存は競合として拒否され起票は1件だけになる() throws Exception {
         String utterance = "[遅延] 求人の掲載期限の仕様";
         var id = IntakeSteps.toStructured(service, utterance).id();
-        service.confirmStructured(id, null);
+        service.confirmStructured(id, null, "ja");
 
         CountDownLatch firstProgress = new CountDownLatch(1);
         CompletableFuture<InquiryView> generating =
-                CompletableFuture.supplyAsync(() -> service.generateAnswer(id, m -> firstProgress.countDown()));
+                CompletableFuture.supplyAsync(() -> service.generateAnswer(id, m -> firstProgress.countDown(), "ja"));
         assertThat(firstProgress.await(5, TimeUnit.SECONDS)).isTrue();
 
-        InquiryView sent = service.sendNow(id);
+        InquiryView sent = service.sendNow(id, "ja");
 
         assertThat(sent.awaiting()).isEqualTo(Awaiting.HANDLING);
         assertThat(sent.turn()).isEqualTo(Turn.OPERATOR);
         assertThatThrownBy(() -> generating.get(10, TimeUnit.SECONDS))
                 .hasCauseInstanceOf(InvalidStateException.class);
-        assertThat(service.get(id).sentImmediately()).isTrue();
-        assertThat(service.get(id).answer()).isNull();
+        assertThat(service.get(id, "ja").sentImmediately()).isTrue();
+        assertThat(service.get(id, "ja").answer()).isNull();
     }
 }

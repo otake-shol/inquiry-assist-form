@@ -28,7 +28,7 @@ class InquiryApiTest extends ApiSupport {
 
     private static final String SPEC = "求人の掲載期限の仕様";
 
-    @Value("${inquiry.filed-guidance}")
+    @Value("${inquiry.filed-guidance.ja}")
     String filedGuidance;
 
     @BeforeEach

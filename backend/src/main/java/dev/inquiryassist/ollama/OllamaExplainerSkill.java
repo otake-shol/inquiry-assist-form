@@ -38,17 +38,22 @@ public class OllamaExplainerSkill implements ExplainerSkill {
      *
      * @param inquiry 本人が確認した整形後の問い
      * @param confirmedFindings 根拠を確かめられた事実
+     * @param language 本人の言語。日本語以外のときだけ、指示文の末尾に書く言語の指示を足す
      * @return 本人向けの説明と、問いに答えているかの判定
      */
     @Override
-    public AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings) {
+    public AiResult<Explanation> explain(
+            StructuredInquiry inquiry, List<Finding> confirmedFindings, String language) {
         StringBuilder user = new StringBuilder("## 本人の問い\n")
                 .append(inquiry.summary())
                 .append("\n\n## 種類\n")
                 .append(inquiry.type() == null ? "（未定）" : inquiry.type().name())
                 .append("\n\n## 確かめられた事実\n");
         confirmedFindings.forEach(f -> user.append("- ").append(f.statement()).append('\n'));
-        return call.call(system, user.toString().stripTrailing(), OllamaExplainerSkill::toExplanation);
+        return call.call(
+                Prompts.withOutputLanguage(system, language),
+                user.toString().stripTrailing(),
+                OllamaExplainerSkill::toExplanation);
     }
 
     private static Explanation toExplanation(JsonNode node) {

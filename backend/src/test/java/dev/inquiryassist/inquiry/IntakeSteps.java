@@ -13,7 +13,7 @@ final class IntakeSteps {
      * 問いを組み立てた（{@code STRUCTURED} の）問い合わせを返す。
      */
     static InquiryView toStructured(InquiryService service, String text) {
-        InquiryView view = service.create(text, null);
+        InquiryView view = service.create(text, null, "ja");
         for (int guard = 0; guard < 20 && view.intake().next() != null; guard++) {
             InquiryView.QuestionView next = view.intake().next();
             IntakeReply reply = next.kind() == QuestionKind.NOTE
@@ -21,7 +21,7 @@ final class IntakeSteps {
                             ? new IntakeReply(next.questionId(), null, null, false, true)
                             : new IntakeReply(next.questionId(), null, "状況", false, false))
                     : new IntakeReply(next.questionId(), null, null, true, false);
-            view = service.answerIntake(view.id(), reply);
+            view = service.answerIntake(view.id(), reply, "ja");
         }
         return view;
     }

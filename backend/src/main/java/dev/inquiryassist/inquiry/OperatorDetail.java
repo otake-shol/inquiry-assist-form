@@ -18,6 +18,7 @@ import java.util.UUID;
  *
  * @param id 識別子
  * @param filedAt 担当者に初めて渡した時刻
+ * @param language 本人の言語
  * @param askerId 投稿者
  * @param askerName 投稿者の表示用の名前。認証を加えるまでは設定の固定値
  * @param utterance 本人が書いた文章（最初の文章、切り替えたときの文章、補足を、書いた順に空行でつないだもの）
@@ -44,6 +45,7 @@ import java.util.UUID;
 public record OperatorDetail(
         UUID id,
         Instant filedAt,
+        String language,
         String askerId,
         String askerName,
         String utterance,

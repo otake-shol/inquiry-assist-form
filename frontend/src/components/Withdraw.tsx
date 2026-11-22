@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { USER_TEXT } from "../text/inquiries.ts";
+import { useMessages } from "../i18n/context.ts";
 
 /** 取り下げるリンクの props。 */
 interface WithdrawProps {
@@ -15,6 +15,8 @@ interface WithdrawProps {
  * @param props 取り下げの受け口
  */
 export function Withdraw({ busy, onWithdraw }: WithdrawProps) {
+  const messages = useMessages();
+  const USER_TEXT = messages.user;
   const [confirming, setConfirming] = useState(false);
   const linkRef = useRef<HTMLButtonElement | null>(null);
   const confirmRef = useRef<HTMLParagraphElement | null>(null);

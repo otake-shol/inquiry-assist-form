@@ -1,5 +1,4 @@
 import type { InquiryView, IntakeQuestion, TypeOption } from "../api/types.ts";
-import { TEXT } from "../text/labels.ts";
 
 /** ページに並べる部分。上から順に並び、済んだやり取りは要約として残る。 */
 export type Section =
@@ -20,12 +19,16 @@ export const FIRST_QUESTION_ID = "type";
  * 問い合わせの作成前に出す1問目を、`GET /api/config` の種類から作る。
  * 作成後の質問は API が返す `intake.next` を描くだけで、画面は順番を決めない。
  * @param types 設定の種類（聞く順）
+ * @param text 1問目の質問文（辞書の `text.firstQuestion`）
  */
-export function firstQuestionOf(types: TypeOption[]): IntakeQuestion {
+export function firstQuestionOf(
+  types: TypeOption[],
+  text: string,
+): IntakeQuestion {
   return {
     questionId: FIRST_QUESTION_ID,
     kind: "TYPE",
-    text: TEXT.firstQuestion,
+    text,
     options: types.map((type) => ({
       id: type.id,
       label: type.label,

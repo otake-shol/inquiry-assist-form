@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import * as api from "../api/client.ts";
+import { useApi } from "../api/useApi.ts";
 import type { InquiryList } from "../api/types.ts";
 
 /** `useInquiryList` の戻り値。 */
@@ -13,10 +13,11 @@ export interface InquiryListState {
 /**
  * 送った問い合わせの一覧（`GET /api/inquiries`）を取得する。ページの上部の未読の件数と、
  * 一覧の画面の両方に使う。`refreshKey` が変わるたびに取り直す（古い応答は捨てる）。
- * 取得に失敗しても画面は壊さず、失敗の印だけを返す。
+ * 言語を切り替えると取り直す。取得に失敗しても画面は壊さず、失敗の印だけを返す。
  * @param refreshKey 取り直すきっかけ（開いているページや問い合わせが変わったときに変える）
  */
 export function useInquiryList(refreshKey: string): InquiryListState {
+  const api = useApi();
   const [state, setState] = useState<InquiryListState>({
     list: null,
     failed: false,
@@ -34,6 +35,6 @@ export function useInquiryList(refreshKey: string): InquiryListState {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [api, refreshKey]);
   return state;
 }

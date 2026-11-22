@@ -1,8 +1,8 @@
 import { useId, useState, type FormEvent } from "react";
 import type { Awaiting, InquiryMessage, MessageAuthor } from "../api/types.ts";
+import { useMessages } from "../i18n/context.ts";
 import { formatFiledAt } from "../operator/labels.ts";
-import { MESSAGE_KIND_LABELS, USER_TEXT } from "../text/inquiries.ts";
-import { TEXT, type HandoverText } from "../text/labels.ts";
+import type { HandoverText } from "../text/labels.ts";
 
 /** 本文の最大文字数（契約書: 1〜4000文字）。 */
 export const MAX_MESSAGE_LENGTH = 4000;
@@ -12,6 +12,8 @@ interface MessageThreadProps {
   messages: InquiryMessage[];
   /** 画面を見ている側（この側の発言を右に出す） */
   mine: MessageAuthor;
+  /** 本人の言語。本人の追記に `lang` 属性として付ける（担当者の発言は言語が分からないので付けない） */
+  askerLanguage?: string;
 }
 
 /**
@@ -21,7 +23,12 @@ interface MessageThreadProps {
  * 一覧は空でも描き、あとから加わったものが伝わるようにする。
  * @param props やり取りと、見ている側
  */
-export function MessageThread({ messages, mine }: MessageThreadProps) {
+export function MessageThread({
+  messages,
+  mine,
+  askerLanguage,
+}: MessageThreadProps) {
+  const { user: USER_TEXT, asker, meta } = useMessages();
   return (
     <ol
       className="thread"
@@ -37,17 +44,22 @@ export function MessageThread({ messages, mine }: MessageThreadProps) {
           } ${message.from === mine ? "mine" : "theirs"}`}
         >
           <p className="message-meta">
-            {MESSAGE_KIND_LABELS[message.kind] !== null && (
+            {asker.messageKinds[message.kind] !== null && (
               <span className="message-kind">
-                {MESSAGE_KIND_LABELS[message.kind]}
+                {asker.messageKinds[message.kind]}
               </span>
             )}
             <span className="message-author">{message.authorName}</span>
             <time dateTime={message.createdAt}>
-              {formatFiledAt(message.createdAt)}
+              {formatFiledAt(message.createdAt, meta.locale)}
             </time>
           </p>
-          <p className="message-body">{message.body}</p>
+          <p
+            className="message-body"
+            lang={message.from === "ASKER" ? askerLanguage : undefined}
+          >
+            {message.body}
+          </p>
         </li>
       ))}
     </ol>
@@ -120,6 +132,7 @@ interface ResultCheckProps {
  * @param props 操作の受け口
  */
 function ResultCheck({ busy, onResolve }: ResultCheckProps) {
+  const { text: TEXT, user: USER_TEXT } = useMessages();
   const id = useId();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -195,6 +208,8 @@ interface FollowUpProps {
   onResolve: (resolved: boolean, note?: string) => void;
   /** 新しい問い合わせを書き始める */
   onRestart: () => void;
+  /** 本人の言語（本人の追記の `lang` 属性） */
+  language?: string;
 }
 
 /**
@@ -215,7 +230,9 @@ export function FollowUp({
   onSend,
   onResolve,
   onRestart,
+  language,
 }: FollowUpProps) {
+  const { user: USER_TEXT } = useMessages();
   const hasReply = messages.some((message) => message.from === "OPERATOR");
   return (
     <div className="system followup">
@@ -231,7 +248,11 @@ export function FollowUp({
           {handover.guidance !== null && <p>{handover.guidance}</p>}
         </div>
       )}
-      <MessageThread messages={messages} mine="ASKER" />
+      <MessageThread
+        messages={messages}
+        mine="ASKER"
+        askerLanguage={language}
+      />
       {!hasReply && <p className="muted">{USER_TEXT.noReplyYet}</p>}
       {awaiting === "RESULT_CONFIRMATION" && (
         <ResultCheck busy={busy} onResolve={onResolve} />

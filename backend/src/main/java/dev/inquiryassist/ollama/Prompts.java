@@ -43,4 +43,32 @@ final class Prompts {
             throw new UncheckedIOException("プロンプトを読めません: " + resource.getPath(), e);
         }
     }
+
+    /**
+     * 人が読む文章を書くスキルの指示文を、本人の言語に合わせる。日本語のときは、指示文をそのまま返す
+     * （日本語のときにモデルへ送る内容は、言語に対応する前と1文字も変えない。評価の結果を有効に保つため）。
+     * 日本語以外のときだけ、末尾に書く言語の指示（{@code skills/shared/output-language-v1.md}）を足す。
+     *
+     * @param system 指示文
+     * @param language 本人の言語
+     * @return 本人の言語に合わせた指示文
+     */
+    static String withOutputLanguage(String system, String language) {
+        if (language == null || language.isBlank() || "ja".equalsIgnoreCase(language)) {
+            return system;
+        }
+        ClassPathResource resource = new ClassPathResource("skills/shared/output-language-v1.md");
+        try (InputStream in = resource.getInputStream()) {
+            String shared = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            return system + shared.replace("{{language}}", languageName(language));
+        } catch (IOException e) {
+            throw new UncheckedIOException("プロンプトを読めません: " + resource.getPath(), e);
+        }
+    }
+
+    /** 書く言語の名前。指示文が日本語で書かれているため、日本語の名前に、その言語での名前を添える（例: 英語（English））。 */
+    static String languageName(String language) {
+        java.util.Locale locale = java.util.Locale.forLanguageTag(language);
+        return locale.getDisplayLanguage(java.util.Locale.JAPANESE) + "（" + locale.getDisplayLanguage(locale) + "）";
+    }
 }

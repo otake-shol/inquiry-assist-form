@@ -1,3 +1,5 @@
+import { messagesOf } from "../i18n/messages.ts";
+import type { Language } from "../i18n/language.ts";
 import type { ErrorBody, InquiryView, OperatorItem } from "./types.ts";
 
 /** 0次回答ストリームのイベント受け口。 */
@@ -14,17 +16,26 @@ export interface AnswerStreamHandlers {
 export type SubscribeAnswerStream = (
   id: string,
   handlers: AnswerStreamHandlers,
+  language: Language,
 ) => () => void;
 
 /**
  * EventSource で `answer-stream` を購読する本番実装。
  * `done` / `failed` を受けたら接続を閉じ、自動再接続を止める。
+ * `EventSource` には、ヘッダーを付けられないので、見る人の言語をクエリの `lang` で渡す。
  * @param id 問い合わせ ID
  * @param handlers イベントの受け口
+ * @param language 見る人の言語
  * @returns 購読解除関数
  */
-export const subscribeAnswerStream: SubscribeAnswerStream = (id, handlers) => {
-  const source = new EventSource(`/api/inquiries/${id}/answer-stream`);
+export const subscribeAnswerStream: SubscribeAnswerStream = (
+  id,
+  handlers,
+  language,
+) => {
+  const source = new EventSource(
+    `/api/inquiries/${id}/answer-stream?lang=${language}`,
+  );
   let closed = false;
   const close = () => {
     closed = true;
@@ -54,7 +65,7 @@ export const subscribeAnswerStream: SubscribeAnswerStream = (id, handlers) => {
     close();
     handlers.onFailed({
       code: "NETWORK",
-      message: "サーバーとの接続が切れました",
+      message: messagesOf(language).errors.streamLost,
     });
   });
 
@@ -77,6 +88,7 @@ export interface OperatorStreamHandlers {
  */
 export type SubscribeOperatorStream = (
   handlers: OperatorStreamHandlers,
+  language: Language,
 ) => () => void;
 
 /** 切断後に再接続するまでの待ち時間（ミリ秒）。 */
@@ -85,17 +97,22 @@ const RECONNECT_DELAY_MS = 3000;
 /**
  * EventSource で `/api/operator/stream` を購読する本番実装。
  * 切断したら一定時間後に自分で接続し直し、つながったら `onReconnected` を呼ぶ。
+ * 見る人の言語はクエリの `lang` で渡す。言語を切り替えたら、つなぎ直す。
  * @param handlers イベントの受け口
+ * @param language 見る人の言語
  * @returns 購読解除関数
  */
-export const subscribeOperatorStream: SubscribeOperatorStream = (handlers) => {
+export const subscribeOperatorStream: SubscribeOperatorStream = (
+  handlers,
+  language,
+) => {
   let source: EventSource | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
   let dropped = false;
 
   const connect = () => {
-    source = new EventSource("/api/operator/stream");
+    source = new EventSource(`/api/operator/stream?lang=${language}`);
     source.addEventListener("open", () => {
       if (dropped) {
         dropped = false;

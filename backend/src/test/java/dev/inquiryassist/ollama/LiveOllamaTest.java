@@ -54,7 +54,8 @@ class LiveOllamaTest {
                 Map.of("reception", fast, "interviewer", fast, "restater", fast, "explainer", thinking),
                 new InquiryProperties.Ollama("http://localhost:11434", "30m", 42),
                 new InquiryProperties.Trace(true),
-                new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"));
+                new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"),
+                java.util.Map.of());
     }
 
     private static OllamaClient client() {
@@ -96,7 +97,7 @@ class LiveOllamaTest {
         var skill = new OllamaInterviewerSkill(client(), JSON, properties());
         long start = System.nanoTime();
 
-        var result = skill.ask(UTTERANCE, InquiryType.HOW_IT_WORKS, null, null, SCOPE);
+        var result = skill.ask(UTTERANCE, InquiryType.HOW_IT_WORKS, null, null, SCOPE, "ja");
 
         report("interviewer", start, result);
         List<FollowUpQuestion> questions = result.value().questions();
@@ -118,10 +119,10 @@ class LiveOllamaTest {
                 new AnsweredQuestion(new FollowUpQuestion("q2", "いつからですか", List.of()), null));
         long start = System.nanoTime();
 
-        var first = skill.restate(UTTERANCE, InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), null, answers, List.of());
+        var first = skill.restate(UTTERANCE, InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), null, answers, List.of(), "ja");
         report("restater", start, first);
         var corrected = skill.restate(
-                UTTERANCE, InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), null, answers, List.of("消えたのは昨日から"));
+                UTTERANCE, InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), null, answers, List.of("消えたのは昨日から"), "ja");
 
         for (var result : List.of(first, corrected)) {
             StructuredInquiry value = result.value();
@@ -149,7 +150,7 @@ class LiveOllamaTest {
                 null);
         long start = System.nanoTime();
 
-        var result = skill.explain(inquiry, findings);
+        var result = skill.explain(inquiry, findings, "ja");
 
         report("explainer", start, result);
         assertThat(result.value().text()).isNotBlank();

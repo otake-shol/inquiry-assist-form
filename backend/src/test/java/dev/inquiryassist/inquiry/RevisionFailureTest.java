@@ -35,19 +35,19 @@ class RevisionFailureTest {
     void AIが失敗した作り直しは残り回数を減らさず一言も残さない() {
         var id = IntakeSteps.toStructured(service, "期限の仕様").id();
 
-        doThrow(new AiUnavailableException("失敗", null)).when(assistant).restate(any(), any(), any(), any(), any(), any());
-        assertThatThrownBy(() -> service.revise(id, "違う")).isInstanceOf(AiUnavailableException.class);
-        doThrow(new AiRefusalException("拒否")).when(assistant).restate(any(), any(), any(), any(), any(), any());
-        assertThatThrownBy(() -> service.revise(id, "違う")).isInstanceOf(AiRefusalException.class);
+        doThrow(new AiUnavailableException("失敗", null)).when(assistant).restate(any(), any(), any(), any(), any(), any(), any());
+        assertThatThrownBy(() -> service.revise(id, "違う", "ja")).isInstanceOf(AiUnavailableException.class);
+        doThrow(new AiRefusalException("拒否")).when(assistant).restate(any(), any(), any(), any(), any(), any(), any());
+        assertThatThrownBy(() -> service.revise(id, "違う", "ja")).isInstanceOf(AiRefusalException.class);
 
-        assertThat(service.get(id).revisionsLeft()).isEqualTo(2);
+        assertThat(service.get(id, "ja").revisionsLeft()).isEqualTo(2);
         assertThat(jdbc.queryForObject(
                         "select jsonb_array_length(revision_notes) from inquiries where id = ?::uuid",
                         Integer.class,
                         id.toString()))
                 .isZero();
 
-        doCallRealMethod().when(assistant).restate(any(), any(), any(), any(), any(), any());
-        assertThat(service.revise(id, "違う").revisionsLeft()).isEqualTo(1);
+        doCallRealMethod().when(assistant).restate(any(), any(), any(), any(), any(), any(), any());
+        assertThat(service.revise(id, "違う", "ja").revisionsLeft()).isEqualTo(1);
     }
 }

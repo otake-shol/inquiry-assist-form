@@ -1,7 +1,5 @@
+import { useMessages } from "../i18n/context.ts";
 import { useId, type HTMLAttributes, type ReactNode } from "react";
-
-/** カードがない列に薄く示す文言。 */
-export const BOARD_EMPTY_TEXT = "ありません";
 
 /** BoardColumn の props。 */
 interface BoardColumnProps {
@@ -33,6 +31,7 @@ export function BoardColumn({
   columnId,
   children,
 }: BoardColumnProps) {
+  const { text } = useMessages();
   const id = useId();
   const titleId = `${id}-title`;
   const countId = `${id}-count`;
@@ -47,12 +46,12 @@ export function BoardColumn({
         <h3 id={titleId}>{title}</h3>
         <span id={countId} className="board-count">
           {count}
-          <span className="visually-hidden">件</span>
+          <span className="visually-hidden">{text.countUnit(count)}</span>
         </span>
       </div>
       <div className="board-column-body">
         {count === 0 ? (
-          <p className="board-empty">{BOARD_EMPTY_TEXT}</p>
+          <p className="board-empty">{text.boardEmpty}</p>
         ) : (
           <ul className="board-cards">{children}</ul>
         )}

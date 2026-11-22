@@ -628,14 +628,15 @@ blockquote {
   display: none;
 }
 
+/* 文言は辞書から属性で受け取る（CSS に書くと言語を切り替えられない） */
 .mock-bar summary::after {
-  content: "開く";
+  content: attr(data-open-label);
   margin-left: auto;
   color: var(--muted);
 }
 
 .mock-bar details[open] summary::after {
-  content: "閉じる";
+  content: attr(data-close-label);
 }
 
 .mock-help {
@@ -729,8 +730,9 @@ blockquote {
 
 .op-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 14px;
+  gap: 8px 14px;
   margin-bottom: 16px;
 }
 
@@ -1527,4 +1529,33 @@ blockquote {
 
 .op-history-detail {
   overflow-wrap: anywhere;
+}
+
+.op-asker-language {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* 言語の切り替え（本人の画面の上部と、担当者の画面の上部） */
+.lang-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lang-switch button {
+  min-height: 32px;
+  padding: 2px 12px;
+  font-size: 0.85rem;
+}
+
+.lang-switch button[aria-current="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.op-head .lang-switch {
+  margin-left: auto;
 }

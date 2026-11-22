@@ -26,7 +26,8 @@ class TraceViewsTest {
                 Map.of(),
                 new InquiryProperties.Ollama("http://localhost:11434", "30m", 42),
                 new InquiryProperties.Trace(traceEnabled),
-                new InquiryProperties.Dev("利用者", "担当者"));
+                new InquiryProperties.Dev("利用者", "担当者"),
+                java.util.Map.of());
     }
 
     private static SkillImplementations implementations() {

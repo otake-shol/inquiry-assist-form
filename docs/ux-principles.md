@@ -166,6 +166,66 @@ AIは門番ではなく伴走者。使えば早く答えが出るが、使わな
 
 この表示の中に限り、内部の言葉（スキルの名前、モデルの名前）を使ってよい。
 
+## 言語
+
+画面は、日本語と英語で表示できる。どの文章がどの言語で出るかの決まりは、`api-contract.md` の「言語」の節が正。
+
+### 選び方
+
+- 最初の表示は、ブラウザの言語（`navigator.languages` の順）に合わせる。使える言語に当てはまらなければ、既定の言語。
+- 画面の上部（本人の画面も、担当者の画面も）に、言語の切り替えを置く。選択肢は、その言語自身の名前で書く（「日本語」「English」）。いま選んでいる言語が分かるようにする（`aria-current`）。
+- 選んだ言語は、ブラウザに保存する。次に開いたときは、保存した言語で表示する。
+- 使える言語は、`GET /api/config` の `languages` と、画面が文言を持つ言語の両方に含まれるもの。1つしかなければ、切り替えを出さない。
+- 切り替えたら、ページの `lang` 属性とタブの題名を変え、表示中のデータ（設定、問い合わせ、一覧）を取得し直す。種類やシステムの名前は API が返すため。
+- 切り替えても、入力の途中の文章は消さない。
+
+### 切り替わるものと、切り替わらないもの
+
+- 切り替わる: 画面の固定の文言、種類・緊急度・システム・機能の名前、設定から来た質問と選択肢、日時の書き方。
+- 切り替わらない: 本人が書いた文章、AI が書いた言い直しと説明、担当者の発言、根拠の引用。書かれたときの言語のまま出す。
+- 切り替わらない文章には、その文章の言語を `lang` 属性で示す（読み上げが正しい言語で行われるようにするため）。AI が書いたものと本人の文章は問い合わせの `language`、根拠の引用は資料の言語（いまの見本の資料はすべて `ja`）。担当者の発言は、言語が分からないので付けない。
+
+### 担当者の画面
+
+- 本人の言語が、担当者の画面の言語と違うときだけ、パネルの「いまの状態」の下に「本人の言語: English」のように示す（言語の名前は、その言語自身の名前）。本人に送る文章を、どの言語で書けばよいかが分かるようにするため。
+- 訳を添えること、返信の下書きを本人の言語で出すことは、段階2。
+
+### 英語の言葉
+
+英語の文言は、次の対応に揃える。表にない文言は、この対応と下の「言葉づかい」に合わせて訳す。
+
+| 日本語 | 英語 |
+| --- | --- |
+| 問い合わせアシスト | Inquiry Assist |
+| 問い合わせ | inquiry |
+| 送った問い合わせ | My inquiries |
+| 担当者（本人の画面） | the support team |
+| 担当者（担当者の画面） | staff |
+| 本人（担当者の画面） | requester |
+| あなたの番／相手の番／終わり | Your turn／Their turn／Closed |
+| 担当者の番／本人の番／終わり | Staff's turn／Requester's turn／Closed |
+| 区間（受付、分かる、決まる、行われる、終わり） | Stage（Intake、Understand、Decide、Carry out、Closed） |
+| 解決済み／回答済み／見送り／取り下げ | Resolved／Answered／Declined／Withdrawn |
+| 文章で書く | Write it in your own words |
+| わからない | Not sure |
+| つまり、こういうことですね。 | Here is what I understood. |
+| 合っています／少し違う | That's right／Not quite |
+| 調べた結果 | What I found |
+| 根拠にした資料 | Sources |
+| 担当者向けの詳しい内容 | Details for the support team |
+| やりたかったことは、進められそうですか。 | Can you now move forward with what you wanted to do? |
+| 解決しました／まだ解決していません | This solved it／Not solved yet |
+| 担当者が確認しています | The support team is looking into it |
+| 担当者から質問が届いています | The support team has a question for you |
+| 担当者から結果が届いています | The support team has sent you a result |
+| この問い合わせを取り下げる | Withdraw this inquiry |
+| 聞き返す／結果を伝える | Ask the requester／Send the result |
+| 見送る／見送りとして終える | Decline／Close as declined |
+| 置き直す | Reclassify |
+| 状態の履歴 | Status history |
+
+英語の文体: 短い平叙文で書く。本人の画面では、内部の言葉（phase、turn、ticket、triage、skill など）を使わない。感嘆符と絵文字は使わない。見出しとボタンは、文の先頭だけを大文字にする（Sentence case）。
+
 ## 共通
 
 新しい部分が現れたら、そこが見える位置まで滑らかにスクロールし、読み上げ環境にも伝わるようにする（進捗は `aria-live="polite"`）。キーボードだけで最後まで操作できること。動きを減らす設定（`prefers-reduced-motion`）では動きを止める。

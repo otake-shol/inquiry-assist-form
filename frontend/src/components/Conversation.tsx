@@ -1,4 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from "react";
+import { useMessages } from "../i18n/context.ts";
+import type { Messages } from "../i18n/messages.ts";
 import type {
   IntakeAnswerRequest,
   IntakeEntry,
@@ -8,19 +10,24 @@ import type {
   Urgency,
 } from "../api/types.ts";
 import { MAX_UTTERANCE_LENGTH } from "../flow/page.ts";
-import { TEXT } from "../text/labels.ts";
 
 /** 文章で答える質問の最大文字数（契約書: 1〜1000文字）。補足は 4000 文字まで。 */
 const MAX_ANSWER_LENGTH = 1000;
 
 /**
  * 本人が書いた文章。画面側の言葉と区別できる形で残す。
- * @param props 文章
+ * @param props 文章と、その言語（問い合わせの `language`）
  */
-export function UtteranceRow({ text }: { text: string }) {
+export function UtteranceRow({
+  text,
+  language,
+}: {
+  text: string;
+  language?: string;
+}) {
   return (
     <div className="utterance">
-      <p>{text}</p>
+      <p lang={language}>{text}</p>
     </div>
   );
 }
@@ -28,8 +35,9 @@ export function UtteranceRow({ text }: { text: string }) {
 /**
  * 答えの表示用の文字列。選んだものは名前、文章はその本文、わからないはその言葉で示す。
  * @param entry 答え終えた質問
+ * @param TEXT 辞書の、本人向けの画面の固定文言（`messages.text`）
  */
-function answerLabelOf(entry: IntakeEntry): string {
+function answerLabelOf(entry: IntakeEntry, TEXT: Messages["text"]): string {
   switch (entry.answer.kind) {
     case "OPTION":
     case "INFERRED":
@@ -50,6 +58,8 @@ interface EntryRowProps {
   interactive: boolean;
   busy: boolean;
   onBack: (questionId: string) => void;
+  /** 本人の文章（文章で答えた答え）の言語 */
+  language?: string;
 }
 
 /**
@@ -57,14 +67,27 @@ interface EntryRowProps {
  * AI が文章から置いた答えには「（文章から読み取りました）」と添える。
  * @param props 答え終えた質問と、戻る操作の受け口
  */
-export function EntryRow({ entry, interactive, busy, onBack }: EntryRowProps) {
+export function EntryRow({
+  entry,
+  interactive,
+  busy,
+  onBack,
+  language,
+}: EntryRowProps) {
+  const messages = useMessages();
+  const TEXT = messages.text;
   const body = (
     <>
       <span className="answered-q">{entry.text}</span>
       <span className="answered-arrow" aria-hidden="true">
         →
       </span>
-      <span className="answered-a">{answerLabelOf(entry)}</span>
+      <span
+        className="answered-a"
+        lang={entry.answer.kind === "TEXT" ? language : undefined}
+      >
+        {answerLabelOf(entry, TEXT)}
+      </span>
       {entry.answer.kind === "INFERRED" && (
         <span className="answered-note">{TEXT.inferredNote}</span>
       )}
@@ -112,6 +135,8 @@ function TextAnswer({
   children,
   onSubmit,
 }: TextAnswerProps) {
+  const messages = useMessages();
+  const TEXT = messages.text;
   const id = useId();
   const [text, setText] = useState("");
   const handleSubmit = (event: FormEvent) => {
@@ -175,6 +200,8 @@ export function QuestionPrompt({
   typeHints,
   onAnswer,
 }: QuestionPromptProps) {
+  const messages = useMessages();
+  const TEXT = messages.text;
   const baseId = useId();
   const labelId = `${baseId}-label`;
   const isNote = question.kind === "NOTE";
@@ -296,6 +323,8 @@ export function UrgencyChoice({
   busy,
   onChange,
 }: UrgencyChoiceProps) {
+  const messages = useMessages();
+  const TEXT = messages.text;
   const name = useId();
   if (options.length === 0) return null;
   return (
@@ -344,6 +373,8 @@ export function WriteByText({
   onChange,
   onSubmit,
 }: WriteByTextProps) {
+  const messages = useMessages();
+  const TEXT = messages.text;
   const id = useId();
   if (!open) {
     return (

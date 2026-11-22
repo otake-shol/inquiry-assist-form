@@ -39,11 +39,24 @@ public record IntakeCatalog(
      *
      * @param id 識別子
      * @param label 画面に出す名前
+     * @param aliases ほかの言語の名前も含めたすべての名前
      * @param functions 機能。設定がなければ空
      */
-    public record SystemInfo(String id, String label, List<Choice> functions) {
+    public record SystemInfo(String id, String label, List<String> aliases, List<Choice> functions) {
+
+        /**
+         * 名前が1つだけのシステムを作る。
+         *
+         * @param id 識別子
+         * @param label 画面に出す名前
+         * @param functions 機能
+         */
+        public SystemInfo(String id, String label, List<Choice> functions) {
+            this(id, label, List.of(label), functions);
+        }
 
         public SystemInfo {
+            aliases = aliases == null || aliases.isEmpty() ? List.of(label) : List.copyOf(aliases);
             functions = functions == null ? List.of() : List.copyOf(functions);
         }
     }
@@ -97,8 +110,9 @@ public record IntakeCatalog(
                 .map(s -> new SystemOption(
                         s.id(),
                         s.label(),
+                        s.aliases(),
                         s.functions().stream()
-                                .map(f -> new FunctionOption(f.id(), f.label()))
+                                .map(f -> new FunctionOption(f.id(), f.label(), f.aliases()))
                                 .toList()))
                 .toList();
     }

@@ -35,7 +35,7 @@ public class OperatorService {
     private final InquiryProperties properties;
     private final SkillImplementations implementations;
     private final InquiryPresenter presenter;
-    private final IntakeCatalog catalog;
+    private final IntakeLocales locales;
     private final ApplicationEventPublisher events;
 
     /**
@@ -43,7 +43,7 @@ public class OperatorService {
      * @param properties 投稿先と担当者の表示名の設定
      * @param implementations スキルごとの実装（実行記録の実装名に使う）
      * @param presenter 一覧と詳細の項目を作る
-     * @param catalog 置き直しの入力を確かめる、システムと機能の一覧
+     * @param locales 置き直しの入力を確かめる、システムと機能の一覧（言語ごと）
      * @param events 更新の確定後にイベントを発行する
      */
     OperatorService(
@@ -51,13 +51,13 @@ public class OperatorService {
             InquiryProperties properties,
             SkillImplementations implementations,
             InquiryPresenter presenter,
-            IntakeCatalog catalog,
+            IntakeLocales locales,
             ApplicationEventPublisher events) {
         this.repository = repository;
         this.properties = properties;
         this.implementations = implementations;
         this.presenter = presenter;
-        this.catalog = catalog;
+        this.locales = locales;
         this.events = events;
     }
 
@@ -67,11 +67,11 @@ public class OperatorService {
      * @param unreadOnly true なら未読だけに絞る
      * @return 一覧と、未読数（絞り込みにかかわらず全体）
      */
-    public OperatorList list(boolean unreadOnly) {
+    public OperatorList list(boolean unreadOnly, String lang) {
         // 寄せ方は安定。BLOCKED の中、それ以外の中は、送られた新しい順のまま
         List<OperatorItem> items = new ArrayList<>(repository.findByHandedOverAtIsNotNullOrderByHandedOverAtDesc().stream()
                 .filter(e -> !unreadOnly || e.readAt == null)
-                .map(presenter::toItem)
+                .map(e -> presenter.toItem(e, lang))
                 .toList());
         items.sort(java.util.Comparator.comparing(item -> item.urgency() != Urgency.BLOCKED));
         return new OperatorList(repository.countByHandedOverAtIsNotNullAndReadAtIsNull(), List.copyOf(items));
@@ -84,8 +84,8 @@ public class OperatorService {
      * @return 全内容
      * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
      */
-    public OperatorDetail get(UUID id) {
-        return toDetail(loadHandedOver(id));
+    public OperatorDetail get(UUID id, String lang) {
+        return toDetail(loadHandedOver(id), lang);
     }
 
     /**
@@ -95,10 +95,10 @@ public class OperatorService {
      * @return 既読後の全内容
      * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
      */
-    public OperatorDetail markRead(UUID id) {
+    public OperatorDetail markRead(UUID id, String lang) {
         loadHandedOver(id);
         repository.markRead(id, Instant.now());
-        return toDetail(loadHandedOver(id));
+        return toDetail(loadHandedOver(id), lang);
     }
 
     /**
@@ -113,7 +113,7 @@ public class OperatorService {
      * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
      * @throws InvalidStateException 担当者の番でない場合
      */
-    public OperatorDetail reply(UUID id, ReplyKind kind, String body) {
+    public OperatorDetail reply(UUID id, ReplyKind kind, String body, String lang) {
         String trimmed = MessageBodies.validated(body);
         InquiryEntity inquiry = loadHandedOver(id);
         Transition transition = InquiryStateMachine.operatorReplied(inquiry.state(), kind);
@@ -125,7 +125,7 @@ public class OperatorService {
                 Instant.now());
         inquiry.askerUnreadReply = true;
         inquiry.apply(transition, Instant.now());
-        return toDetail(saveAndPublish(inquiry));
+        return toDetail(saveAndPublish(inquiry), lang);
     }
 
     /**
@@ -139,7 +139,7 @@ public class OperatorService {
      * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
      * @throws InvalidStateException 担当者の番でない場合
      */
-    public OperatorDetail decline(UUID id, DeclineReason reasonKind, String reason) {
+    public OperatorDetail decline(UUID id, DeclineReason reasonKind, String reason, String lang) {
         String trimmed = reason == null ? "" : reason.strip();
         if (trimmed.isEmpty() || trimmed.length() > MAX_REASON_LENGTH) {
             throw new IllegalArgumentException("reason は前後の空白を除いて1〜" + MAX_REASON_LENGTH + "文字");
@@ -151,7 +151,7 @@ public class OperatorService {
         inquiry.askerUnreadReply = true;
         inquiry.declined = new Declined(reasonKind, trimmed);
         inquiry.apply(transition, Instant.now());
-        return toDetail(saveAndPublish(inquiry));
+        return toDetail(saveAndPublish(inquiry), lang);
     }
 
     /**
@@ -164,10 +164,10 @@ public class OperatorService {
      * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
      * @throws InvalidStateException 担当者の番でない場合
      */
-    public OperatorDetail changePhase(UUID id, Phase phase) {
+    public OperatorDetail changePhase(UUID id, Phase phase, String lang) {
         InquiryEntity inquiry = loadHandedOver(id);
         inquiry.apply(InquiryStateMachine.phaseChanged(inquiry.state(), phase), Instant.now());
-        return toDetail(saveAndPublish(inquiry));
+        return toDetail(saveAndPublish(inquiry), lang);
     }
 
     /**
@@ -183,7 +183,8 @@ public class OperatorService {
      * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
      * @throws InvalidStateException 終わっている場合
      */
-    public OperatorDetail replacePlacement(UUID id, InquiryType type, String systemId, String functionId) {
+    public OperatorDetail replacePlacement(
+            UUID id, InquiryType type, String systemId, String functionId, String lang) {
         validatePlacement(systemId, functionId);
         InquiryEntity inquiry = loadHandedOver(id);
         Placement before = inquiry.placement();
@@ -195,18 +196,23 @@ public class OperatorService {
                 transition,
                 Instant.now(),
                 java.util.Map.of("before", namesOf(before), "after", namesOf(after)));
-        return toDetail(saveAndPublish(inquiry));
+        return toDetail(saveAndPublish(inquiry), lang);
     }
 
     /** 置き場所を、既定の言語の名前にする。決まっていない項目は null。 */
     private java.util.Map<String, String> namesOf(Placement placement) {
         java.util.Map<String, String> names = new java.util.LinkedHashMap<>();
-        names.put("type", placement.type() == null ? null : catalog.typeLabel(placement.type()));
-        names.put("system", placement.systemId() == null ? null : catalog.systemLabel(placement.systemId()));
+        names.put("type", placement.type() == null ? null : defaultCatalog().typeLabel(placement.type()));
+        names.put("system", placement.systemId() == null ? null : defaultCatalog().systemLabel(placement.systemId()));
         names.put(
                 "function",
-                placement.functionId() == null ? null : catalog.functionLabel(placement.systemId(), placement.functionId()));
+                placement.functionId() == null ? null : defaultCatalog().functionLabel(placement.systemId(), placement.functionId()));
         return names;
+    }
+
+    /** 履歴に残す名前と、置き直しの入力の確かめは、既定の言語の名前で行う（言語を切り替えないもの）。 */
+    private IntakeCatalog defaultCatalog() {
+        return locales.catalog(locales.defaultLanguage());
     }
 
     private void validatePlacement(String systemId, String functionId) {
@@ -214,7 +220,7 @@ public class OperatorService {
             throw new IllegalArgumentException("機能はシステムが決まっているときだけ指定できます");
         }
         if (systemId != null) {
-            IntakeCatalog.SystemInfo system = catalog.system(systemId);
+            IntakeCatalog.SystemInfo system = defaultCatalog().system(systemId);
             if (system == null) {
                 throw new IllegalArgumentException("一覧にないシステムです: " + systemId);
             }
@@ -248,7 +254,7 @@ public class OperatorService {
             throw new InvalidStateException("他の操作と競合しました。最新の状態を取得し直してください");
         }
         try {
-            events.publishEvent(new InquiryUpdatedEvent(presenter.toItem(saved)));
+            events.publishEvent(presenter.updatedEvent(saved));
         } catch (RuntimeException e) {
             log.error("更新の通知イベントの配信に失敗 id={}", saved.id, e);
         }
@@ -262,7 +268,7 @@ public class OperatorService {
                 .orElseThrow(() -> new InquiryNotFoundException(id));
     }
 
-    private OperatorDetail toDetail(InquiryEntity e) {
+    private OperatorDetail toDetail(InquiryEntity e, String lang) {
         // 説明だけが失敗した場合も、保存済みの調査の内容（技術メモ・出典）を出す。このとき grounded は false
         OperatorDetail.AnswerDetail answer = e.answerGrounded == null && e.technicalMemo == null
                 ? null
@@ -285,14 +291,15 @@ public class OperatorService {
         return new OperatorDetail(
                 e.id,
                 e.handedOverAt,
+                e.language,
                 e.askerId,
                 properties.dev().userName(),
                 e.utterance(),
                 e.urgency,
-                presenter.placed(e, QuestionKind.TYPE),
-                presenter.placed(e, QuestionKind.SYSTEM),
-                presenter.placed(e, QuestionKind.FUNCTION),
-                presenter.entries(e),
+                presenter.placed(e, QuestionKind.TYPE, lang),
+                presenter.placed(e, QuestionKind.SYSTEM, lang),
+                presenter.placed(e, QuestionKind.FUNCTION, lang),
+                presenter.entries(e, lang),
                 presenter.structuredView(e),
                 List.copyOf(e.revisionNotes),
                 answer,

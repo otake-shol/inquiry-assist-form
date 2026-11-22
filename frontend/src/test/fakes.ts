@@ -39,6 +39,7 @@ export const URGENCY_OPTIONS = [
 export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     mock: false,
+    languages: ["ja", "en"],
     types: TYPE_OPTIONS,
     urgencies: URGENCY_OPTIONS,
     ...overrides,
@@ -147,6 +148,7 @@ export const HANDED_OVER_AT = "2026-11-21T05:00:00Z";
 export function makeView(overrides: Partial<InquiryView> = {}): InquiryView {
   return {
     id: "inq-1",
+    language: "ja",
     ...INTAKE_STATE,
     declined: null,
     urgency: "NORMAL",
@@ -188,6 +190,7 @@ export function makeListItem(
 ): InquiryListItem {
   return {
     id: "inq-1",
+    language: "ja",
     createdAt: "2026-11-21T05:00:00Z",
     summary: "求人の掲載期限を、何日まで延ばせるかを知りたい。",
     ...HANDLING_STATE,
@@ -287,6 +290,8 @@ export interface RecordedCall {
   method: string;
   path: string;
   body: unknown;
+  /** リクエストのヘッダー（名前は小文字） */
+  headers: Record<string, string>;
 }
 
 /** ルートの応答。HTTP ステータスを指定しなければ 200。 */
@@ -299,7 +304,11 @@ export type RouteResult = { status?: number; body: unknown };
  * @returns 呼び出し履歴
  */
 export function installFakeFetch(
-  routes: Record<string, RouteResult | ((body: unknown) => RouteResult)>,
+  routes: Record<
+    string,
+    | RouteResult
+    | ((body: unknown, headers: Record<string, string>) => RouteResult)
+  >,
 ): RecordedCall[] {
   const calls: RecordedCall[] = [];
   const allRoutes = {
@@ -313,7 +322,11 @@ export function installFakeFetch(
       const path = String(input);
       const body =
         typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
-      calls.push({ method, path, body });
+      const headers: Record<string, string> = {};
+      new Headers(init?.headers).forEach((value, name) => {
+        headers[name] = value;
+      });
+      calls.push({ method, path, body, headers });
       const route = (allRoutes as typeof routes)[`${method} ${path}`];
       if (route === undefined) {
         return new Response(
@@ -321,7 +334,7 @@ export function installFakeFetch(
           { status: 500 },
         );
       }
-      const result = typeof route === "function" ? route(body) : route;
+      const result = typeof route === "function" ? route(body, headers) : route;
       return new Response(JSON.stringify(result.body), {
         status: result.status ?? 200,
         headers: { "Content-Type": "application/json" },
@@ -336,12 +349,18 @@ export class FakeStream {
   readonly subscriptions: {
     id: string;
     handlers: AnswerStreamHandlers;
+    /** 購読したときの見る人の言語 */
+    language: string;
     closed: boolean;
   }[] = [];
 
   /** App に渡す購読関数。 */
-  readonly subscribe = (id: string, handlers: AnswerStreamHandlers) => {
-    const subscription = { id, handlers, closed: false };
+  readonly subscribe = (
+    id: string,
+    handlers: AnswerStreamHandlers,
+    language: string,
+  ) => {
+    const subscription = { id, handlers, language, closed: false };
     this.subscriptions.push(subscription);
     return () => {
       subscription.closed = true;
@@ -358,6 +377,7 @@ export class FakeStream {
 export function makeItem(overrides: Partial<OperatorItem> = {}): OperatorItem {
   return {
     id: "op-1",
+    language: "ja",
     filedAt: "2026-11-21T05:00:00Z",
     type: { id: "LOOKS_WRONG", label: "おかしいかもしれない" },
     system: { id: "job-admin", label: "求人管理画面" },
@@ -378,6 +398,7 @@ export function makeDetail(
 ): OperatorDetail {
   return {
     id: "op-1",
+    language: "ja",
     ...HANDLING_STATE,
     declined: null,
     filedAt: "2026-11-21T05:00:00Z",
@@ -453,12 +474,14 @@ export function makeDetail(
 export class FakeOperatorStream {
   readonly subscriptions: {
     handlers: OperatorStreamHandlers;
+    /** 購読したときの見る人の言語 */
+    language: string;
     closed: boolean;
   }[] = [];
 
   /** OperatorApp に渡す購読関数。 */
-  readonly subscribe = (handlers: OperatorStreamHandlers) => {
-    const subscription = { handlers, closed: false };
+  readonly subscribe = (handlers: OperatorStreamHandlers, language: string) => {
+    const subscription = { handlers, language, closed: false };
     this.subscriptions.push(subscription);
     return () => {
       subscription.closed = true;

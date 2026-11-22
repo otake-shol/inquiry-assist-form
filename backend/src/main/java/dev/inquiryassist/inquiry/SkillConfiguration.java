@@ -2,8 +2,6 @@ package dev.inquiryassist.inquiry;
 
 import dev.inquiryassist.core.CitationVerifier;
 import dev.inquiryassist.core.KnowledgeSearch;
-import dev.inquiryassist.core.intake.IntakeCatalog;
-import dev.inquiryassist.core.intake.IntakePlanner;
 import dev.inquiryassist.core.skill.AnswerPipeline;
 import dev.inquiryassist.core.skill.ExplainerSkill;
 import dev.inquiryassist.core.skill.InvestigatorSkill;
@@ -26,25 +24,14 @@ class SkillConfiguration {
     }
 
     /**
-     * 設定から作った、種類、緊急度、システム、機能、マスの設定（名前は既定の言語）。
+     * 言語ごとの、種類、緊急度、システム、機能、マスの設定の名前と、入口の質問を決める処理。
      *
      * @param properties 問い合わせフォームの設定
-     * @return 入口の質問を決めるのに使う一覧
+     * @return 言語ごとの一覧
      */
     @Bean
-    IntakeCatalog intakeCatalog(InquiryProperties properties) {
-        return properties.catalog();
-    }
-
-    /**
-     * 入口の質問を決める処理。
-     *
-     * @param catalog 種類、システム、機能、マスの設定
-     * @return 入口の質問を決める処理
-     */
-    @Bean
-    IntakePlanner intakePlanner(IntakeCatalog catalog) {
-        return new IntakePlanner(catalog);
+    IntakeLocales intakeLocales(InquiryProperties properties) {
+        return new IntakeLocales(properties);
     }
 
     /**

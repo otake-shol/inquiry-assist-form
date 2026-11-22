@@ -1,5 +1,6 @@
 import type { TraceEntry } from "../api/types.ts";
-import { USER_TEXT } from "../text/inquiries.ts";
+import { useMessages } from "../i18n/context.ts";
+import type { Messages } from "../i18n/messages.ts";
 import {
   formatDuration,
   implementationLabel,
@@ -11,7 +12,15 @@ import {
  * 1段ぶんの表示。まだ動いていない段は薄く示す。同じスキルが複数回動いたときは回数と合計を示す。
  * @param props 集計した1段
  */
-function StageRow({ stage }: { stage: TraceStage }) {
+function StageRow({
+  stage,
+  messages,
+}: {
+  stage: TraceStage;
+  messages: Messages;
+}) {
+  const { trace } = messages;
+  const number = (value: number) => value.toLocaleString(messages.meta.locale);
   const ran = stage.calls > 0;
   const code = stage.kind === "code";
   return (
@@ -19,31 +28,32 @@ function StageRow({ stage }: { stage: TraceStage }) {
       <p className="trace-head">
         <strong>{stage.label}</strong>
         <span className="trace-kind">
-          {code ? "通常のコード" : "AI のスキル"}
+          {code ? trace.codeKind : trace.skillKind}
         </span>
-        {!ran && <span className="trace-idle">まだ動いていません</span>}
+        {!ran && <span className="trace-idle">{trace.idle}</span>}
         {ran && stage.calls > 1 && (
-          <span className="trace-count">{stage.calls}回（合計）</span>
+          <span className="trace-count">{trace.calls(stage.calls)}</span>
         )}
         {stage.failedCalls > 0 && (
-          <span className="trace-failed">失敗 {stage.failedCalls}回</span>
+          <span className="trace-failed">
+            {trace.failedCalls(stage.failedCalls)}
+          </span>
         )}
       </p>
       {ran && !code && (
         <p className="trace-detail">
           {stage.implementations
-            .map((i) => implementationLabel(i.provider, i.model))
-            .join("、")}
-          {" ・ "}
-          {formatDuration(stage.durationMillis)}
-          {" ・ "}入力 {stage.inputTokens.toLocaleString("ja-JP")} / 出力{" "}
-          {stage.outputTokens.toLocaleString("ja-JP")} トークン
-          {stage.failedCalls === 0 && " ・ 失敗なし"}
+            .map((i) => implementationLabel(i.provider, i.model, messages))
+            .join(trace.implJoiner)}
+          {messages.meta.separator}
+          {formatDuration(stage.durationMillis, trace)}
+          {messages.meta.separator}
+          {trace.tokens(number(stage.inputTokens), number(stage.outputTokens))}
+          {stage.failedCalls === 0 &&
+            `${messages.meta.separator}${trace.noFailure}`}
         </p>
       )}
-      {ran && code && (
-        <p className="trace-detail">調査の結果の根拠を確かめる</p>
-      )}
+      {ran && code && <p className="trace-detail">{trace.codeDetail}</p>}
     </li>
   );
 }
@@ -59,13 +69,14 @@ export function TracePanel({
 }: {
   entries: TraceEntry[] | null | undefined;
 }) {
-  const stages = summarizeTrace(entries);
+  const messages = useMessages();
+  const stages = summarizeTrace(entries, messages.trace);
   return (
     <details className="trace-panel">
-      <summary>{USER_TEXT.traceSummary}</summary>
+      <summary>{messages.user.traceSummary}</summary>
       <ol className="trace-list">
         {stages.map((stage) => (
-          <StageRow key={stage.key} stage={stage} />
+          <StageRow key={stage.key} stage={stage} messages={messages} />
         ))}
       </ol>
     </details>

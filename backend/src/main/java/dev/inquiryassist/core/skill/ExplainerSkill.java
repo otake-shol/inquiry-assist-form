@@ -18,9 +18,10 @@ public interface ExplainerSkill {
      *
      * @param inquiry 本人が確認した整形後の問い
      * @param confirmedFindings 根拠を確かめられた事実。1件以上
+     * @param language 本人の言語。説明はこの言語で書く
      * @return 本人向けの説明と、問いに答えているかの判定
      * @throws AiRefusalException モデルが回答を拒否した場合
      * @throws AiUnavailableException モデルを呼び出せなかった場合
      */
-    AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings);
+    AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings, String language);
 }

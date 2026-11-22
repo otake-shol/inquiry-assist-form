@@ -37,7 +37,7 @@ class OperatorStreamHubTest {
 
     private static InquiryFiledEvent event() {
         return new InquiryFiledEvent(
-                new OperatorItem(UUID.randomUUID(), Instant.now(), null, null, null, Urgency.NORMAL, "要約", false, false, Phase.KNOW, Turn.OPERATOR, Awaiting.HANDLING, null, 0));
+                new OperatorItem(UUID.randomUUID(), Instant.now(), "ja", null, null, null, Urgency.NORMAL, "要約", false, false, Phase.KNOW, Turn.OPERATOR, Awaiting.HANDLING, null, 0), java.util.Map.of());
     }
 
     @Test
@@ -84,5 +84,33 @@ class OperatorStreamHubTest {
         hub.heartbeat();
 
         assertThat(emitter.sends.get()).isEqualTo(before + 2);
+    }
+
+    @Test
+    void イベントは接続の言語の一覧の1件を持ち_その言語がなければ既定の言語の1件() {
+        OperatorItem ja = item("ja");
+        OperatorItem en = item("en");
+        InquiryFiledEvent event = new InquiryFiledEvent(ja, java.util.Map.of("ja", ja, "en", en));
+
+        assertThat(event.itemFor("en")).isSameAs(en);
+        assertThat(event.itemFor("ja")).isSameAs(ja);
+        assertThat(event.itemFor("")).isSameAs(ja);
+        assertThat(event.itemFor("fr")).isSameAs(ja);
+    }
+
+    @Test
+    void 言語つきで登録した購読者にも配られる() {
+        OperatorStreamHub hub = new OperatorStreamHub();
+        CountingEmitter en = new CountingEmitter(false);
+        hub.register(en, "en");
+        int afterConnect = en.sends.get();
+
+        hub.onFiled(event());
+
+        assertThat(en.sends.get()).isEqualTo(afterConnect + 1);
+    }
+
+    private static OperatorItem item(String summary) {
+        return new OperatorItem(UUID.randomUUID(), Instant.now(), "ja", null, null, null, Urgency.NORMAL, summary, false, false, Phase.KNOW, Turn.OPERATOR, Awaiting.HANDLING, null, 0);
     }
 }

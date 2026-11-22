@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ja } from "../i18n/ja.ts";
 import {
   ASKER_REPLY_STATE,
   HANDLING_STATE,
@@ -31,8 +32,8 @@ const read = makeItem({ id: "b", read: true });
 describe("オペレータ画面の純粋関数", () => {
   it("未読数と、未読があるときだけ件数が付くタブの題名", () => {
     expect(unreadCountOf([unread, read, makeItem({ id: "c" })])).toBe(2);
-    expect(tabTitleOf(2)).toBe("(2) 問い合わせ受付");
-    expect(tabTitleOf(0)).toBe("問い合わせ受付");
+    expect(tabTitleOf(2, ja.op)).toBe("(2) 問い合わせ受付");
+    expect(tabTitleOf(0, ja.op)).toBe("問い合わせ受付");
   });
 
   it("未読だけの絞り込みでも、開いている1件は残る", () => {
@@ -154,21 +155,21 @@ describe("担当者のボードの列と並び順", () => {
   });
 
   it("カードに添える言葉は、本人の番の列では待っていること、終わりの列では終わり方、担当者の番の列には無い", () => {
-    expect(cardNoteOf(HANDLING_STATE)).toBeNull();
-    expect(cardNoteOf(ASKER_REPLY_STATE)).toBe("返事待ち");
-    expect(cardNoteOf(RESULT_STATE)).toBe("結果の確かめ待ち");
-    expect(cardNoteOf(closedState("RESOLVED"))).toBe("解決済み");
-    expect(cardNoteOf(closedState("ANSWERED"))).toBe("回答済み");
-    expect(cardNoteOf(closedState("DECLINED"))).toBe("見送り");
-    expect(cardNoteOf(closedState("WITHDRAWN"))).toBe("取り下げ");
+    expect(cardNoteOf(HANDLING_STATE, ja.op)).toBeNull();
+    expect(cardNoteOf(ASKER_REPLY_STATE, ja.op)).toBe("返事待ち");
+    expect(cardNoteOf(RESULT_STATE, ja.op)).toBe("結果の確かめ待ち");
+    expect(cardNoteOf(closedState("RESOLVED"), ja.op)).toBe("解決済み");
+    expect(cardNoteOf(closedState("ANSWERED"), ja.op)).toBe("回答済み");
+    expect(cardNoteOf(closedState("DECLINED"), ja.op)).toBe("見送り");
+    expect(cardNoteOf(closedState("WITHDRAWN"), ja.op)).toBe("取り下げ");
   });
 
   it("カードの区間は、分かる・決まる・行われるだけを出す", () => {
-    expect(cardPhaseOf({ phase: "KNOW" })).toBe("分かる");
-    expect(cardPhaseOf({ phase: "DECIDE" })).toBe("決まる");
-    expect(cardPhaseOf({ phase: "ACT" })).toBe("行われる");
-    expect(cardPhaseOf({ phase: "INTAKE" })).toBeNull();
-    expect(cardPhaseOf({ phase: "CLOSED" })).toBeNull();
+    expect(cardPhaseOf({ phase: "KNOW" }, ja.op)).toBe("分かる");
+    expect(cardPhaseOf({ phase: "DECIDE" }, ja.op)).toBe("決まる");
+    expect(cardPhaseOf({ phase: "ACT" }, ja.op)).toBe("行われる");
+    expect(cardPhaseOf({ phase: "INTAKE" }, ja.op)).toBeNull();
+    expect(cardPhaseOf({ phase: "CLOSED" }, ja.op)).toBeNull();
   });
 });
 
@@ -176,18 +177,18 @@ describe("movedMessageOf", () => {
   it("別の列に移った件を、移った先の列の名前で読み上げ用の文にする", () => {
     const before = [makeItem({ id: "a", read: true })];
     const after = [{ ...before[0], ...ASKER_REPLY_STATE }];
-    expect(movedMessageOf(before, after)).toBe(
+    expect(movedMessageOf(before, after, ja.op)).toBe(
       "「求人が一覧に出なくなった理由を知りたい。」を本人の番に移しました",
     );
   });
 
   it("列が変わらない件、前の一覧になかった件（新しく届いた件）は、文にしない", () => {
     const before = [makeItem({ id: "a", read: true })];
-    expect(movedMessageOf(before, [...before])).toBe("");
-    expect(movedMessageOf([], before)).toBe("");
-    expect(movedMessageOf(before, [...before, makeItem({ id: "new" })])).toBe(
-      "",
-    );
+    expect(movedMessageOf(before, [...before], ja.op)).toBe("");
+    expect(movedMessageOf([], before, ja.op)).toBe("");
+    expect(
+      movedMessageOf(before, [...before, makeItem({ id: "new" })], ja.op),
+    ).toBe("");
   });
 });
 

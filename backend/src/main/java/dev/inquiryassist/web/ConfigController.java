@@ -4,10 +4,10 @@ import dev.inquiryassist.core.intake.Choice;
 import dev.inquiryassist.core.intake.IntakeCatalog;
 import dev.inquiryassist.inquiry.CurrentUserProvider;
 import dev.inquiryassist.inquiry.InquiryProperties;
+import dev.inquiryassist.inquiry.IntakeLocales;
 import dev.inquiryassist.inquiry.SkillImplementations;
 import java.util.List;
 import java.util.Map;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -76,40 +76,38 @@ public class ConfigController {
     public record SystemView(String id, String label, List<Choice> functions) {}
 
     private final SkillImplementations implementations;
-    private final String filedGuidance;
     private final InquiryProperties properties;
-    private final IntakeCatalog catalog;
+    private final IntakeLocales locales;
     private final CurrentUserProvider users;
 
     /**
      * @param implementations スキルごとの実装
-     * @param filedGuidance 担当者に送った後の案内文
-     * @param properties 言語、実行記録、表示名の設定
-     * @param catalog 種類、緊急度、システム、機能の名前（既定の言語）
+     * @param properties 言語、案内文、実行記録、表示名の設定
+     * @param locales 種類、緊急度、システム、機能の名前（言語ごと）
      * @param users 現在の利用者
      */
     public ConfigController(
             SkillImplementations implementations,
-            @Value("${inquiry.filed-guidance}") String filedGuidance,
             InquiryProperties properties,
-            IntakeCatalog catalog,
+            IntakeLocales locales,
             CurrentUserProvider users) {
         this.users = users;
         this.implementations = implementations;
         this.properties = properties;
-        this.catalog = catalog;
-        this.filedGuidance = filedGuidance;
+        this.locales = locales;
     }
 
     /**
+     * @param lang 見る人の言語。種類、緊急度、システムと機能の名前と、案内文をこの言語で返す
      * @return モック動作中かどうか、案内文、言語、種類、緊急度、システムと機能、実装、実行記録の有無、利用者と担当者の表示名
      */
     @GetMapping("/api/config")
-    public ConfigResponse config() {
+    public ConfigResponse config(@ViewerLang String lang) {
+        IntakeCatalog catalog = locales.catalog(lang);
         return new ConfigResponse(
                 implementations.includesMock(),
-                filedGuidance,
-                properties.languages(),
+                properties.nameOf(properties.filedGuidance(), lang, ""),
+                locales.resolver().available(),
                 catalog.types().stream()
                         .map(t -> new TypeView(t.type().name(), t.label(), t.hint()))
                         .toList(),

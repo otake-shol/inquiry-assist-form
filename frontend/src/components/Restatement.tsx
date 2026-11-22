@@ -1,20 +1,29 @@
 import { useState, type FormEvent } from "react";
-import { TEXT } from "../text/labels.ts";
+import { useMessages } from "../i18n/context.ts";
 
 /** 確定した言い直しの props。 */
 interface ConfirmedRestatementProps {
   summary: string;
+  /** 言い直し（AI が書いた文章）の言語 */
+  language?: string;
 }
 
 /**
  * 確定した言い直し。要約として上に残る。
  * @param props 言い直しの文章
  */
-export function ConfirmedRestatement({ summary }: ConfirmedRestatementProps) {
+export function ConfirmedRestatement({
+  summary,
+  language,
+}: ConfirmedRestatementProps) {
+  const messages = useMessages();
+  const TEXT = messages.text;
   return (
     <div className="system restatement confirmed">
       <p className="lead">{TEXT.restatementLead}</p>
-      <p className="restatement-text">{summary}</p>
+      <p className="restatement-text" lang={language}>
+        {summary}
+      </p>
     </div>
   );
 }
@@ -31,6 +40,8 @@ interface RestatementProps {
   onRewrite: (summary: string) => void;
   onGoBack: () => void;
   onSendAsIs: () => void;
+  /** 言い直し（AI が書いた文章）の言語 */
+  language?: string;
 }
 
 /** 入力の状態。 */
@@ -51,7 +62,10 @@ export function Restatement({
   onRewrite,
   onGoBack,
   onSendAsIs,
+  language,
 }: RestatementProps) {
+  const messages = useMessages();
+  const TEXT = messages.text;
   const [mode, setMode] = useState<Mode>("idle");
   const [note, setNote] = useState("");
   const [edited, setEdited] = useState(summary);
@@ -69,7 +83,9 @@ export function Restatement({
     <div className="system restatement">
       <div tabIndex={-1} data-autofocus className="focus-target">
         <p className="lead">{TEXT.restatementLead}</p>
-        <p className="restatement-text">{summary}</p>
+        <p className="restatement-text" lang={language}>
+          {summary}
+        </p>
       </div>
 
       {mode === "idle" && (

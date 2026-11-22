@@ -3,8 +3,8 @@ package dev.inquiryassist.notification;
 import dev.inquiryassist.inquiry.InquiryFiledEvent;
 import dev.inquiryassist.inquiry.InquiryUpdatedEvent;
 import java.io.IOException;
-import java.util.Set;
-import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
@@ -25,7 +25,8 @@ public class OperatorStreamHub {
     /** 接続を維持する時間の上限。切れても画面が再接続する。 */
     private static final long TIMEOUT_MILLIS = 60L * 60 * 1000;
 
-    private final Set<SseEmitter> subscribers = new CopyOnWriteArraySet<>();
+    /** 購読者と、その接続の言語（空は既定の言語）。 */
+    private final Map<SseEmitter, String> subscribers = new ConcurrentHashMap<>();
 
     /**
      * 購読者を登録する。接続の完了・タイムアウト・エラーで自動的に取り除く。
@@ -33,8 +34,18 @@ public class OperatorStreamHub {
      * @return 購読者の SSE
      */
     public SseEmitter subscribe() {
+        return subscribe("");
+    }
+
+    /**
+     * 言語つきで購読者を登録する。送る問い合わせの一覧の1件は、この言語の名前にする。
+     *
+     * @param language 接続の言語（クエリの {@code lang} で決めた、見る人の言語）
+     * @return 購読者の SSE
+     */
+    public SseEmitter subscribe(String language) {
         SseEmitter emitter = new SseEmitter(TIMEOUT_MILLIS);
-        register(emitter);
+        register(emitter, language);
         return emitter;
     }
 
@@ -44,7 +55,17 @@ public class OperatorStreamHub {
      * @param emitter 登録する SSE
      */
     void register(SseEmitter emitter) {
-        subscribers.add(emitter);
+        register(emitter, "");
+    }
+
+    /**
+     * 既存の SSE を、言語つきで購読者として登録する。
+     *
+     * @param emitter 登録する SSE
+     * @param language 接続の言語
+     */
+    void register(SseEmitter emitter, String language) {
+        subscribers.put(emitter, language == null ? "" : language);
         emitter.onCompletion(() -> subscribers.remove(emitter));
         emitter.onTimeout(() -> subscribers.remove(emitter));
         emitter.onError(e -> subscribers.remove(emitter));
@@ -59,9 +80,8 @@ public class OperatorStreamHub {
      */
     @EventListener
     public void onFiled(InquiryFiledEvent event) {
-        for (SseEmitter emitter : subscribers) {
-            send(emitter, SseEmitter.event().name("filed").data(event.item(), MediaType.APPLICATION_JSON));
-        }
+        subscribers.forEach((emitter, language) -> send(
+                emitter, SseEmitter.event().name("filed").data(event.itemFor(language), MediaType.APPLICATION_JSON)));
     }
 
     /**
@@ -71,15 +91,14 @@ public class OperatorStreamHub {
      */
     @EventListener
     public void onUpdated(InquiryUpdatedEvent event) {
-        for (SseEmitter emitter : subscribers) {
-            send(emitter, SseEmitter.event().name("updated").data(event.item(), MediaType.APPLICATION_JSON));
-        }
+        subscribers.forEach((emitter, language) -> send(
+                emitter, SseEmitter.event().name("updated").data(event.itemFor(language), MediaType.APPLICATION_JSON)));
     }
 
     /** 接続維持のコメント行を全購読者へ送り、切断した購読者を掃除する。 */
     @Scheduled(fixedDelayString = "${inquiry.operator.heartbeat-interval:PT15S}")
     public void heartbeat() {
-        for (SseEmitter emitter : subscribers) {
+        for (SseEmitter emitter : subscribers.keySet()) {
             send(emitter, SseEmitter.event().comment("keepalive"));
         }
     }

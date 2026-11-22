@@ -1,92 +1,10 @@
-import type { InquiryView, SourceType } from "../api/types.ts";
+import type { InquiryView } from "../api/types.ts";
+import type { Messages } from "../i18n/messages.ts";
 
 /**
- * 画面に出す文言を集約する。言葉づかいの仕様は docs/ux-principles.md。
- * 「0次回答」「種別」「判定」「整形」「起票」「出典」は画面に出さない。
- * 後で日本語と英語に切り替えられるよう、文言はコンポーネントに直接書かずここに集める。
+ * 画面に出す文言は、言語ごとの辞書（`i18n/`）に集める。言葉づかいの仕様は docs/ux-principles.md。
+ * このファイルには、辞書から文言を選ぶ純粋関数を置く。
  */
-
-/** 根拠にした資料の種類の呼び名。 */
-export const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
-  CODE: "コード",
-  FAQ: "FAQ",
-  DOCUMENT: "ドキュメント",
-  GLOSSARY: "用語対応表",
-};
-
-/** 画面の固定文言。 */
-export const TEXT = {
-  appTitle: "問い合わせアシスト",
-  /** 問い合わせの作成前に、画面が描く1問目の質問文（作成後は API が返す） */
-  firstQuestion: "何をしたいですか",
-  writeLink: "文章で書く",
-  inputLabel:
-    "うまくまとまっていなくて大丈夫です。起きていること、知りたいことをそのまま書いてください。",
-  send: "送信する",
-  unknown: "わからない",
-  next: "次へ",
-  skip: "書かずに進む",
-  skippedAnswer: "書かずに進みました",
-  alsoWriteLabel: "選択肢にない場合は、文章で答えられます",
-  inferredNote: "（文章から読み取りました）",
-  rewindHint: "（押すと答え直せます）",
-  urgencyLegend: "急ぎですか",
-  working: "少しお待ちください。",
-  restatementLead: "つまり、こういうことですね。",
-  restatementOk: "合っています",
-  restatementNo: "少し違います",
-  noteLabel: "どこが違いますか？",
-  noteSubmit: "作り直してもらう",
-  cancel: "やめる",
-  rewrite: "自分で書き直す",
-  rewriteLabel: "言い直しを書き直してください",
-  rewriteSubmit: "この内容で確定する",
-  noRevisionsLeft:
-    "うまく汲み取れませんでした。書いていただいた内容のまま担当者に送ることもできます。",
-  sendAsIs: "このまま担当者に送る",
-  backToQuestions: "前の質問に戻る",
-  researching: "調べています",
-  researchingLabel: "調べている内容",
-  resultTitle: "調べた結果",
-  notFound: "手元の資料からは答えを見つけられませんでした。",
-  notAnswered: "ご質問への答えは、手元の資料では確認できませんでした。",
-  relatedTitle: "関連して分かったこと",
-  citationsTitle: (n: number) => `根拠にした資料（${n}件）`,
-  memoTitle: "担当者向けの詳しい内容",
-  memoFindings: "分かったこと",
-  memoNotFound: "調べたが見つからなかったこと",
-  memoNextChecks: "次に確認すること",
-  resolved: "解決しました",
-  notResolved: "まだ解決していません（担当者に送る）",
-  doneByMyself: "自分でできました",
-  askStaff: "担当者に頼む",
-  sendToStaff: "担当者に送る",
-  bugFiled: "いまの動きを調べました。この内容を添えて担当者に送りました。",
-  doForMeFiled: "調べた内容を添えて、担当者に送りました。",
-  retryResearch: "もう一度調べる",
-  retryCompose: "もう一度試す",
-  sendNow: "答えを待たずに担当者に送る",
-  sendNowHint: "待たずに人に見てもらいたいときはこちら。",
-  restart: "新しい問い合わせを書く",
-} as const;
-
-/** AI を使えないときのエラー文。 */
-export const AI_ERROR_TEXT: Record<string, string> = {
-  AI_REFUSED: "この内容は自動では調べられませんでした。担当者に直接送れます。",
-  AI_UNAVAILABLE: "いま自動の調査を使えません。担当者に直接送れます。",
-};
-
-/** 上記以外のエラーの汎用文言。 */
-export const GENERIC_ERROR_TEXT =
-  "うまく処理できませんでした。時間をおいてもう一度お試しください。";
-
-/** AI を使えない失敗のあと、答えを待たずに送れるとき（ページの下に案内が出ている場合）の案内。 */
-export const AI_ERROR_SEND_NOW_HINT =
-  "ページの下の「答えを待たずに担当者に送る」から送れます。";
-
-/** 問い合わせがまだ保存されていないときの案内。 */
-export const AI_ERROR_BEFORE_CREATE_HINT =
-  "内容を少し変えるか、時間をおいてもう一度送信してください。";
 
 /** 担当者に渡した直後の案内。 */
 export interface HandoverText {
@@ -100,18 +18,20 @@ export interface HandoverText {
  * 調べた結果を添えた、入力を添えた）で、添えた内容の言い方が変わる。
  * @param view 担当者に渡したことのある問い合わせ
  * @param filedGuidance 担当者に送った後の案内文（API の設定）
+ * @param handover 辞書の、渡した直後の案内（`messages.asker.handover`）
  */
 export function handoverText(
   view: InquiryView,
   filedGuidance: string | null,
+  handover: Messages["asker"]["handover"],
 ): HandoverText {
   const lead =
     view.urgency === "BLOCKED" && view.sentImmediately
-      ? "担当者にすぐ届けました。書いていただいた内容をそのまま添えています。"
+      ? handover.blocked
       : view.sentImmediately
-        ? "担当者に送りました。書いていただいた内容をそのまま添えています。"
+        ? handover.immediate
         : view.answer !== null
-          ? "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。"
-          : "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。";
+          ? handover.withAnswer
+          : handover.plain;
   return { lead, guidance: filedGuidance };
 }

@@ -11,7 +11,8 @@ import type {
 } from "../api/types.ts";
 import { MessageThread } from "../components/Exchange.tsx";
 import { TracePanel } from "../components/TracePanel.tsx";
-import { SOURCE_TYPE_LABELS } from "../text/labels.ts";
+import { useMessages } from "../i18n/context.ts";
+import { languageName } from "../i18n/messages.ts";
 import {
   DeclineForm,
   HistoryList,
@@ -20,13 +21,13 @@ import {
   SendToAsker,
 } from "./Controls.tsx";
 import {
-  OP_TEXT,
   formatFiledAt,
   opAnswerLabel,
   opUrgencyLabel,
   stateLine,
   waitingText,
 } from "./labels.ts";
+import type { Messages } from "../i18n/messages.ts";
 import type { DropIntent } from "./state.ts";
 
 /** カードをドラッグで落としたときの、入力欄へのフォーカスの要求。 */
@@ -72,14 +73,25 @@ interface DetailViewProps {
  * 箇条書きの1区分。項目が無ければ何も出さない。
  * @param props 見出しと項目
  */
-function List({ title, items }: { title: string; items: string[] }) {
+function List({
+  title,
+  items,
+  language,
+}: {
+  title: string;
+  items: string[];
+  /** 項目（AI が書いた文）の言語 */
+  language?: string;
+}) {
   if (items.length === 0) return null;
   return (
     <>
       <h4>{title}</h4>
       <ul>
         {items.map((item) => (
-          <li key={item}>{item}</li>
+          <li key={item} lang={language}>
+            {item}
+          </li>
         ))}
       </ul>
     </>
@@ -90,14 +102,19 @@ function List({ title, items }: { title: string; items: string[] }) {
  * 置き場所（システム、機能）の名前。AI が文章から置いたものには、そのことを添える。
  * @param placement 置き場所（決まっていなければ null）
  * @param unknown 決まっていないときの文言
+ * @param op 辞書の、担当者の画面の文言（`messages.op`）
  */
-function placementLabel(placement: Placement | null, unknown: string): string {
+function placementLabel(
+  placement: Placement | null,
+  unknown: string,
+  op: Messages["op"],
+): string {
   if (placement === null) return unknown;
   const mark =
     placement.by === "AI"
-      ? OP_TEXT.placedByAi
+      ? op.placedByAi
       : placement.by === "OPERATOR"
-        ? OP_TEXT.placedByOperator
+        ? op.placedByOperator
         : "";
   return placement.label + mark;
 }
@@ -123,8 +140,11 @@ export function DetailView({
   onReply,
   onDecline,
 }: DetailViewProps) {
+  const dict = useMessages();
+  const OP_TEXT = dict.op;
   const { structured, answer } = detail;
   const messages = detail.messages ?? [];
+  const askerLang = detail.language;
   const ended = detail.ending !== null;
   const operatorsTurn = !ended && detail.turn === "OPERATOR";
 
@@ -158,19 +178,19 @@ export function DetailView({
       <header className="op-article-head">
         <div className="op-badges">
           <span className="op-badge">
-            {placementLabel(detail.type, OP_TEXT.typeUnknown)}
+            {placementLabel(detail.type, OP_TEXT.typeUnknown, OP_TEXT)}
           </span>
           <span className="op-badge">
-            {placementLabel(detail.system, OP_TEXT.systemUnknown)}
+            {placementLabel(detail.system, OP_TEXT.systemUnknown, OP_TEXT)}
           </span>
           {detail.function !== null && (
             <span className="op-badge">
-              {placementLabel(detail.function, "")}
+              {placementLabel(detail.function, "", OP_TEXT)}
             </span>
           )}
           {detail.urgency !== "NORMAL" && (
             <span className="op-badge warn strong-warn">
-              {opUrgencyLabel(detail.urgency, urgencies)}
+              {opUrgencyLabel(detail.urgency, urgencies, OP_TEXT)}
             </span>
           )}
           {detail.sentImmediately && (
@@ -186,14 +206,21 @@ export function DetailView({
           )}
         </div>
         <p className="op-meta">
-          <time dateTime={detail.filedAt}>{formatFiledAt(detail.filedAt)}</time>
-          {" ・ "}
+          <time dateTime={detail.filedAt}>
+            {formatFiledAt(detail.filedAt, dict.meta.locale)}
+          </time>
+          {dict.meta.separator}
           {detail.askerName ?? detail.askerId}
         </p>
         <p className="op-state" aria-live="polite">
           <span className="op-state-label">{OP_TEXT.stateLabel}</span>
-          <strong>{stateLine(detail)}</strong>
+          <strong>{stateLine(detail, dict)}</strong>
         </p>
+        {detail.language !== dict.meta.code && (
+          <p className="op-asker-language">
+            {OP_TEXT.askerLanguage(languageName(detail.language))}
+          </p>
+        )}
         <PhaseSwitch
           phase={detail.phase}
           enabled={operatorsTurn}
@@ -215,22 +242,26 @@ export function DetailView({
       {detail.utterance !== null && (
         <section>
           <h3>{OP_TEXT.utterance}</h3>
-          <p className="op-pre">{detail.utterance}</p>
+          <p className="op-pre" lang={askerLang}>
+            {detail.utterance}
+          </p>
         </section>
       )}
 
       {structured !== null && (
         <section>
           <h3>{OP_TEXT.restatement}</h3>
-          <p className="op-pre">{structured.summary}</p>
+          <p className="op-pre" lang={askerLang}>
+            {structured.summary}
+          </p>
           <dl className="op-fields">
-            <dt>対象</dt>
+            <dt>{OP_TEXT.fieldTarget}</dt>
             <dd>{structured.targetSystem ?? "—"}</dd>
-            <dt>やりたいこと</dt>
+            <dt>{OP_TEXT.fieldGoal}</dt>
             <dd>{structured.goal}</dd>
-            <dt>起きたこと</dt>
+            <dt>{OP_TEXT.fieldWhatHappened}</dt>
             <dd>{structured.whatHappened ?? "—"}</dd>
-            <dt>期待した結果</dt>
+            <dt>{OP_TEXT.fieldExpected}</dt>
             <dd>{structured.expectedResult ?? "—"}</dd>
           </dl>
         </section>
@@ -243,7 +274,12 @@ export function DetailView({
             {detail.intake.map((entry) => (
               <li key={entry.questionId}>
                 <span className="op-q">{entry.text}</span>
-                <span className="op-a">{opAnswerLabel(entry.answer)}</span>
+                <span
+                  className="op-a"
+                  lang={entry.answer.kind === "TEXT" ? askerLang : undefined}
+                >
+                  {opAnswerLabel(entry.answer, OP_TEXT)}
+                </span>
               </li>
             ))}
           </ul>
@@ -255,7 +291,9 @@ export function DetailView({
           <h3>{OP_TEXT.revisionNotes}</h3>
           <ul>
             {detail.revisionNotes.map((note, index) => (
-              <li key={`${index}:${note}`}>{note}</li>
+              <li key={`${index}:${note}`} lang={askerLang}>
+                {note}
+              </li>
             ))}
           </ul>
         </section>
@@ -273,21 +311,37 @@ export function DetailView({
                   <span className="op-badge warn">{OP_TEXT.offTopic}</span>
                 </p>
               )}
-            <p className="op-pre">
+            <p
+              className="op-pre"
+              lang={answer.grounded ? askerLang : undefined}
+            >
               {answer.grounded ? answer.askerExplanation : OP_TEXT.notGrounded}
             </p>
-            <List title={OP_TEXT.findings} items={answer.memo.findings} />
+            <List
+              title={OP_TEXT.findings}
+              items={answer.memo.findings}
+              language={askerLang}
+            />
             {(answer.memo.unconfirmed ?? []).length > 0 && (
               <div className="op-unconfirmed">
                 <List
                   title={OP_TEXT.unconfirmed}
                   items={answer.memo.unconfirmed ?? []}
+                  language={askerLang}
                 />
                 <p className="op-muted">{OP_TEXT.unconfirmedNote}</p>
               </div>
             )}
-            <List title={OP_TEXT.notFound} items={answer.memo.notFound} />
-            <List title={OP_TEXT.nextChecks} items={answer.memo.nextChecks} />
+            <List
+              title={OP_TEXT.notFound}
+              items={answer.memo.notFound}
+              language={askerLang}
+            />
+            <List
+              title={OP_TEXT.nextChecks}
+              items={answer.memo.nextChecks}
+              language={askerLang}
+            />
             {answer.citations.length > 0 && (
               <>
                 <h4>{OP_TEXT.citations}</h4>
@@ -303,11 +357,11 @@ export function DetailView({
                         >
                           {c.verified ? OP_TEXT.verified : OP_TEXT.unverified}
                         </span>
-                        [{SOURCE_TYPE_LABELS[c.sourceType]}] {c.repository} /{" "}
-                        {c.path}:{c.startLine}-{c.endLine}
+                        [{dict.sources[c.sourceType]}] {c.repository} / {c.path}
+                        :{c.startLine}-{c.endLine}
                         <span className="op-muted"> @{c.revision}</span>
                       </div>
-                      <blockquote>{c.quote}</blockquote>
+                      <blockquote lang="ja">{c.quote}</blockquote>
                     </li>
                   ))}
                 </ul>
@@ -319,7 +373,11 @@ export function DetailView({
 
       <section className="op-exchange">
         <h3>{OP_TEXT.exchange}</h3>
-        <MessageThread messages={messages} mine="OPERATOR" />
+        <MessageThread
+          messages={messages}
+          mine="OPERATOR"
+          askerLanguage={askerLang}
+        />
         {messages.length === 0 && (
           <p className="op-muted">{OP_TEXT.noMessages}</p>
         )}
@@ -335,7 +393,7 @@ export function DetailView({
             />
           </>
         ) : (
-          <p className="op-waiting">{waitingText(detail)}</p>
+          <p className="op-waiting">{waitingText(detail, OP_TEXT)}</p>
         )}
         {failed && (
           <p className="op-muted" role="alert">

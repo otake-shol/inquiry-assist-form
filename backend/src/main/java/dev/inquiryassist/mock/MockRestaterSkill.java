@@ -31,6 +31,7 @@ public class MockRestaterSkill implements RestaterSkill {
      * @param function 決まっている機能
      * @param answers 詳しい質問と答え
      * @param corrections 本人が伝えた違う点の一言（伝えられた順）
+     * @param language 本人の言語。{@code en} なら英語で組み立てる
      * @return 整形後の問い
      * @throws AiUnavailableException {@code [言い直しエラー]} の場合
      */
@@ -41,23 +42,26 @@ public class MockRestaterSkill implements RestaterSkill {
             SystemOption system,
             FunctionOption function,
             List<AnsweredQuestion> answers,
-            List<String> corrections) {
+            List<String> corrections,
+            String language) {
         if (MockScenario.has(utterance, MockScenario.TAG_RESTATE_ERROR)) {
             throw new AiUnavailableException("モックの言い直しエラー", null, Usage.ofMock());
         }
-        String typeSentence = sentenceOf(type);
+        boolean en = MockScenario.english(language);
+        String typeSentence = en ? sentenceOfEn(type) : sentenceOf(type);
         List<String> parts = new ArrayList<>();
-        parts.add(prefixOf(system, function) + typeSentence);
+        parts.add((en ? prefixOfEn(system, function) : prefixOf(system, function)) + typeSentence);
         String text = utterance == null ? "" : MockScenario.stripTags(utterance);
         if (!text.isEmpty()) {
-            parts.add("書かれた内容: " + text);
+            parts.add((en ? "What was written: " : "書かれた内容: ") + text);
         }
         for (AnsweredQuestion a : answers) {
             if (!a.unknown()) {
-                parts.add("（" + a.question().text() + ": " + a.answer().strip() + "）");
+                String body = a.question().text() + ": " + a.answer().strip();
+                parts.add(en ? "(" + body + ")" : "（" + body + "）");
             }
         }
-        corrections.forEach(note -> parts.add("補足: " + note.strip()));
+        corrections.forEach(note -> parts.add((en ? "Note: " : "補足: ") + note.strip()));
         boolean written = utterance != null && !utterance.isBlank();
         return new AiResult<>(
                 new StructuredInquiry(
@@ -68,6 +72,29 @@ public class MockRestaterSkill implements RestaterSkill {
                         null,
                         null),
                 Usage.ofMock());
+    }
+
+    private static String prefixOfEn(SystemOption system, FunctionOption function) {
+        if (system == null) {
+            return "";
+        }
+        return function == null
+                ? "About " + system.label() + ": "
+                : "About " + function.label() + " in " + system.label() + ": ";
+    }
+
+    private static String sentenceOfEn(InquiryType type) {
+        if (type == null) {
+            return "I have something to ask about.";
+        }
+        return switch (type) {
+            case HOW_TO -> "I want to know how to use it.";
+            case HOW_IT_WORKS -> "I want to know how it currently works.";
+            case LOOKS_WRONG ->
+                "Something may be behaving incorrectly. I want to check whether this is the intended behavior.";
+            case DO_FOR_ME -> "I would like a task to be done.";
+            case CHANGE_REQUEST -> "I would like something to be changed.";
+        };
     }
 
     private static String prefixOf(SystemOption system, FunctionOption function) {

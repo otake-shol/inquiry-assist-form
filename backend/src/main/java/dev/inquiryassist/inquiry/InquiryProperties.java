@@ -27,6 +27,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param ollama 手元のモデル（Ollama）の共通の設定
  * @param trace スキルの実行記録の設定
  * @param dev 認証を加えるまでの、利用者と担当者の表示名の仮の設定
+ * @param filedGuidance 担当者に渡した後に画面が見せる案内文。言語ごと
  */
 @ConfigurationProperties("inquiry")
 public record InquiryProperties(
@@ -40,7 +41,8 @@ public record InquiryProperties(
         @DefaultValue Map<String, SkillSettings> skills,
         @DefaultValue Ollama ollama,
         @DefaultValue Trace trace,
-        @DefaultValue Dev dev) {
+        @DefaultValue Dev dev,
+        @DefaultValue Map<String, String> filedGuidance) {
 
     /**
      * スキルの実行記録の設定。
@@ -151,10 +153,24 @@ public record InquiryProperties(
      * @return 既定の言語の名前。なければ最初に書かれた名前、それもなければ fallback
      */
     public String nameOf(Map<String, String> names, String fallback) {
+        return nameOf(names, defaultLanguage(), fallback);
+    }
+
+    /**
+     * 言語ごとの名前のうち、指定した言語の名前を返す。その言語の名前がなければ、項目ごとに既定の言語の名前に落とす。
+     *
+     * @param names 言語から名前への対応
+     * @param language 見る人の言語
+     * @param fallback 名前が1つもないときの値
+     * @return 指定した言語の名前。なければ既定の言語の名前、最初に書かれた名前、fallback の順
+     */
+    public String nameOf(Map<String, String> names, String language, String fallback) {
         if (names != null) {
-            String preferred = names.get(defaultLanguage());
-            if (preferred != null && !preferred.isBlank()) {
-                return preferred;
+            for (String lang : List.of(language, defaultLanguage())) {
+                String preferred = names.get(lang);
+                if (preferred != null && !preferred.isBlank()) {
+                    return preferred;
+                }
             }
             for (String value : names.values()) {
                 if (value != null && !value.isBlank()) {
@@ -163,6 +179,16 @@ public record InquiryProperties(
             }
         }
         return fallback;
+    }
+
+    /** どの言語の名前も（空でないものを書かれた順に、重複なく）集める。文章から名前を読み取るために使う。 */
+    private static List<String> allNames(Map<String, String> names, String label) {
+        java.util.LinkedHashSet<String> all = new java.util.LinkedHashSet<>();
+        all.add(label);
+        if (names != null) {
+            names.values().stream().filter(v -> v != null && !v.isBlank()).forEach(all::add);
+        }
+        return List.copyOf(all);
     }
 
     /**
@@ -178,45 +204,68 @@ public record InquiryProperties(
      * @return 種類、緊急度、システム、機能、マスの設定
      */
     public IntakeCatalog catalog() {
+        return catalog(defaultLanguage());
+    }
+
+    /**
+     * 設定から、入口の質問を決める処理に渡す一覧を作る。名前は指定した言語に解決する（なければ項目ごとに既定の言語）。
+     * 文章から読み取るためのほかの言語の名前も、あわせて持たせる。
+     *
+     * @param language 見る人の言語
+     * @return 種類、緊急度、システム、機能、マスの設定
+     */
+    public IntakeCatalog catalog(String language) {
         List<IntakeCatalog.TypeInfo> typeInfos = java.util.Arrays.stream(InquiryType.values())
                 .map(t -> {
                     NamedEntry entry = types.stream().filter(e -> t.name().equals(e.id())).findFirst().orElse(null);
                     return new IntakeCatalog.TypeInfo(
                             t,
-                            entry == null ? t.name() : nameOf(entry.label(), t.name()),
-                            entry == null ? "" : nameOf(entry.hint(), ""));
+                            entry == null ? t.name() : nameOf(entry.label(), language, t.name()),
+                            entry == null ? "" : nameOf(entry.hint(), language, ""));
                 })
                 .toList();
         List<IntakeCatalog.UrgencyInfo> urgencyInfos = java.util.Arrays.stream(Urgency.values())
                 .map(u -> {
                     NamedEntry entry = urgencies.stream().filter(e -> u.name().equals(e.id())).findFirst().orElse(null);
-                    return new IntakeCatalog.UrgencyInfo(u, entry == null ? u.name() : nameOf(entry.label(), u.name()));
+                    return new IntakeCatalog.UrgencyInfo(u, entry == null ? u.name() : nameOf(entry.label(), language, u.name()));
                 })
                 .toList();
         List<IntakeCatalog.SystemInfo> systemInfos = systems.stream()
-                .map(s -> new IntakeCatalog.SystemInfo(
-                        s.id(),
-                        nameOf(s.label(), s.id()),
-                        s.functions().stream()
-                                .map(f -> new Choice(f.id(), nameOf(f.label(), f.id())))
-                                .toList()))
+                .map(s -> {
+                    String label = nameOf(s.label(), language, s.id());
+                    return new IntakeCatalog.SystemInfo(
+                            s.id(),
+                            label,
+                            allNames(s.label(), label),
+                            s.functions().stream()
+                                    .map(f -> {
+                                        String functionLabel = nameOf(f.label(), language, f.id());
+                                        return new Choice(f.id(), functionLabel, allNames(f.label(), functionLabel));
+                                    })
+                                    .toList());
+                })
                 .toList();
         List<IntakeCatalog.Cell> cellInfos = cells.stream()
                 .map(c -> new IntakeCatalog.Cell(
                         blankToNull(c.system()),
                         blankToNull(c.function()),
                         c.type(),
-                        c.questions().stream().map(this::question).toList()))
+                        c.questions().stream().map(q -> question(q, language)).toList()))
                 .toList();
         return new IntakeCatalog(typeInfos, urgencyInfos, systemInfos, cellInfos);
     }
 
-    private IntakeQuestion question(QuestionEntry q) {
+    private IntakeQuestion question(QuestionEntry q, String language) {
         return new IntakeQuestion(
                 q.id(),
                 QuestionKind.DETAIL,
-                nameOf(q.text(), q.id()),
-                q.options().stream().map(o -> new Choice(o.id(), nameOf(o.label(), o.id()))).toList(),
+                nameOf(q.text(), language, q.id()),
+                q.options().stream()
+                        .map(o -> {
+                            String label = nameOf(o.label(), language, o.id());
+                            return new Choice(o.id(), label, allNames(o.label(), label));
+                        })
+                        .toList(),
                 false,
                 false);
     }

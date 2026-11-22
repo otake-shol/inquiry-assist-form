@@ -1,6 +1,6 @@
 import type { Declined, Ending, ZeroAnswer } from "../api/types.ts";
-import { USER_TEXT, endingText } from "../text/inquiries.ts";
-import { SOURCE_TYPE_LABELS, TEXT } from "../text/labels.ts";
+import { useMessages } from "../i18n/context.ts";
+import { endingText } from "../text/inquiries.ts";
 
 /**
  * 調べている間の進捗。済んだ行にはチェック、最新の行には動きのある印をつける。
@@ -13,6 +13,7 @@ export function Researching({
   progress: string[];
   stopped: boolean;
 }) {
+  const { text: TEXT } = useMessages();
   return (
     <div className="system">
       <h2 tabIndex={-1} data-autofocus>
@@ -44,14 +45,25 @@ export function Researching({
  * 箇条書きの1区分。項目が無ければ何も出さない。
  * @param props 見出しと項目
  */
-function MemoList({ title, items }: { title: string; items: string[] }) {
+function MemoList({
+  title,
+  items,
+  language,
+}: {
+  title: string;
+  items: string[];
+  /** 項目（AI が書いた文）の言語 */
+  language?: string;
+}) {
   if (items.length === 0) return null;
   return (
     <>
       <h4>{title}</h4>
       <ul>
         {items.map((item) => (
-          <li key={item}>{item}</li>
+          <li key={item} lang={language}>
+            {item}
+          </li>
         ))}
       </ul>
     </>
@@ -66,6 +78,8 @@ interface ResultProps {
   busy: boolean;
   /** 「やってほしい」か（解決の判定を「自分でできました」「担当者に頼む」で聞く） */
   doForMe?: boolean;
+  /** 説明（AI が書いた文）の言語。問い合わせの `language` */
+  language?: string;
   onResolve: (resolved: boolean) => void;
 }
 
@@ -80,8 +94,10 @@ export function Result({
   awaitingResolution,
   busy,
   doForMe = false,
+  language,
   onResolve,
 }: ResultProps) {
+  const { text: TEXT, user: USER_TEXT, sources } = useMessages();
   // 古い応答（answered が無い）では grounded と同じ値として扱う
   const answered = answer.answered ?? answer.grounded;
   return (
@@ -90,13 +106,17 @@ export function Result({
         {TEXT.resultTitle}
       </h2>
       {answer.grounded && answered && (
-        <p className="answer-body">{answer.askerExplanation}</p>
+        <p className="answer-body" lang={language}>
+          {answer.askerExplanation}
+        </p>
       )}
       {answer.grounded && !answered && (
         <>
           <p className="answer-body">{TEXT.notAnswered}</p>
           <h3 className="related-title">{TEXT.relatedTitle}</h3>
-          <p className="answer-body related">{answer.askerExplanation}</p>
+          <p className="answer-body related" lang={language}>
+            {answer.askerExplanation}
+          </p>
         </>
       )}
       {!answer.grounded && <p className="answer-body">{TEXT.notFound}</p>}
@@ -107,10 +127,10 @@ export function Result({
             {answer.citations.map((c) => (
               <li key={`${c.repository}:${c.path}:${c.startLine}`}>
                 <div>
-                  [{SOURCE_TYPE_LABELS[c.sourceType]}] {c.repository} / {c.path}
-                  :{c.startLine}-{c.endLine}
+                  [{sources[c.sourceType]}] {c.repository} / {c.path}:
+                  {c.startLine}-{c.endLine}
                 </div>
-                <blockquote>{c.quote}</blockquote>
+                <blockquote lang="ja">{c.quote}</blockquote>
               </li>
             ))}
           </ul>
@@ -118,9 +138,21 @@ export function Result({
       )}
       <details>
         <summary>{TEXT.memoTitle}</summary>
-        <MemoList title={TEXT.memoFindings} items={answer.memo.findings} />
-        <MemoList title={TEXT.memoNotFound} items={answer.memo.notFound} />
-        <MemoList title={TEXT.memoNextChecks} items={answer.memo.nextChecks} />
+        <MemoList
+          title={TEXT.memoFindings}
+          items={answer.memo.findings}
+          language={language}
+        />
+        <MemoList
+          title={TEXT.memoNotFound}
+          items={answer.memo.notFound}
+          language={language}
+        />
+        <MemoList
+          title={TEXT.memoNextChecks}
+          items={answer.memo.nextChecks}
+          language={language}
+        />
       </details>
       {awaitingResolution && (
         <p className="progress-question">{USER_TEXT.progressQuestion}</p>
@@ -176,6 +208,7 @@ export function Result({
  * @param props 案内の種類
  */
 export function FiledNotice({ text }: { text: "lookWrong" | "doForMe" }) {
+  const { text: TEXT } = useMessages();
   return (
     <p className="system notice-inline">
       {text === "lookWrong" ? TEXT.bugFiled : TEXT.doForMeFiled}
@@ -204,7 +237,8 @@ export function Closing({
   onRestart,
   showRestart = true,
 }: ClosingProps) {
-  const text = endingText(ending, declined);
+  const { text: TEXT, asker } = useMessages();
+  const text = endingText(ending, declined, asker);
   return (
     <div className="system closing">
       <div tabIndex={-1} data-autofocus className="focus-target">

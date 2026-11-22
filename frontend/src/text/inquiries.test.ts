@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { en } from "../i18n/en.ts";
+import { ja } from "../i18n/ja.ts";
 import {
   ASKER_REPLY_STATE,
   CONFIRMATION_STATE,
@@ -22,15 +24,23 @@ describe("askerStatusLabel", () => {
       [ASKER_REPLY_STATE, true, "担当者から質問が届いています"],
     ];
     for (const [state, fromOperator, label] of cases) {
-      expect(askerStatusLabel(state, fromOperator)).toBe(label);
+      expect(askerStatusLabel(state, fromOperator, ja.asker)).toBe(label);
     }
   });
 
   it("終わっていれば、終わり方を本人に見せる言葉にする（結果の出どころは関係しない）", () => {
-    expect(askerStatusLabel(closedState("RESOLVED"), false)).toBe("解決済み");
-    expect(askerStatusLabel(closedState("ANSWERED"), true)).toBe("回答済み");
-    expect(askerStatusLabel(closedState("DECLINED"), true)).toBe("見送り");
-    expect(askerStatusLabel(closedState("WITHDRAWN"), false)).toBe("取り下げ");
+    expect(askerStatusLabel(closedState("RESOLVED"), false, ja.asker)).toBe(
+      "解決済み",
+    );
+    expect(askerStatusLabel(closedState("ANSWERED"), true, ja.asker)).toBe(
+      "回答済み",
+    );
+    expect(askerStatusLabel(closedState("DECLINED"), true, ja.asker)).toBe(
+      "見送り",
+    );
+    expect(askerStatusLabel(closedState("WITHDRAWN"), false, ja.asker)).toBe(
+      "取り下げ",
+    );
   });
 
   it("内部の言葉を含まない", () => {
@@ -42,28 +52,55 @@ describe("askerStatusLabel", () => {
       HANDLING_STATE,
       ASKER_REPLY_STATE,
       closedState("RESOLVED"),
-    ].map((state) => askerStatusLabel(state, true));
+    ].map((state) => askerStatusLabel(state, true, ja.asker));
     for (const label of all) expect(label).not.toMatch(/区間|番|phase/);
   });
 });
 
 describe("endingText", () => {
   it("終わり方ごとの終わりの文言を返し、見送りだけ担当者が書いた理由を続ける", () => {
-    expect(endingText("RESOLVED", null)).toEqual({
+    expect(endingText("RESOLVED", null, ja.asker)).toEqual({
       lead: "解決してよかったです。この内容は記録しておきます。",
       reason: null,
     });
-    expect(endingText("ANSWERED", null).lead).toBe(
+    expect(endingText("ANSWERED", null, ja.asker).lead).toBe(
       "お返事がなかったため、いったん終了しました。解決していなければ、このページから続きを送れます。",
     );
     expect(
-      endingText("DECLINED", { reasonKind: "OTHER", reason: "対象外です" }),
+      endingText(
+        "DECLINED",
+        { reasonKind: "OTHER", reason: "対象外です" },
+        ja.asker,
+      ),
     ).toEqual({
       lead: "担当者から、今回は対応を見送るとの連絡がありました。",
       reason: "対象外です",
     });
-    expect(endingText("WITHDRAWN", null).lead).toBe(
+    expect(endingText("WITHDRAWN", null, ja.asker).lead).toBe(
       "この問い合わせは取り下げました。",
+    );
+  });
+});
+
+describe("英語の状態の言葉（docs/ux-principles.md の「英語の言葉」）", () => {
+  it("待っていること、担当者の結果、終わり方を、対応表の言葉にする", () => {
+    expect(askerStatusLabel(HANDLING_STATE, false, en.asker)).toBe(
+      "The support team is looking into it",
+    );
+    expect(askerStatusLabel(ASKER_REPLY_STATE, true, en.asker)).toBe(
+      "The support team has a question for you",
+    );
+    expect(askerStatusLabel(RESULT_STATE, true, en.asker)).toBe(
+      "The support team has sent you a result",
+    );
+    expect(askerStatusLabel(closedState("RESOLVED"), false, en.asker)).toBe(
+      "Resolved",
+    );
+    expect(askerStatusLabel(closedState("DECLINED"), false, en.asker)).toBe(
+      "Declined",
+    );
+    expect(endingText("WITHDRAWN", null, en.asker).lead).toBe(
+      "This inquiry has been withdrawn.",
     );
   });
 });

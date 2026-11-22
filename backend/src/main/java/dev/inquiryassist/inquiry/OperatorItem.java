@@ -13,6 +13,7 @@ import java.util.UUID;
  *
  * @param id 問い合わせの識別子
  * @param filedAt 担当者に初めて渡した時刻
+ * @param language 本人の言語
  * @param type 種類。決まっていなければ null
  * @param system システム。決まっていなければ null
  * @param function 機能。決まっていなければ null
@@ -29,6 +30,7 @@ import java.util.UUID;
 public record OperatorItem(
         UUID id,
         Instant filedAt,
+        String language,
         Ref type,
         Ref system,
         Ref function,

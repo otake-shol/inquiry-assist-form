@@ -1,8 +1,8 @@
 import type { MouseEvent, ReactNode } from "react";
 import { navigateTo } from "../location.ts";
 import { INQUIRIES_PATH, NEW_INQUIRY_PATH, type Route } from "../path.ts";
-import { USER_TEXT } from "../text/inquiries.ts";
-import { TEXT } from "../text/labels.ts";
+import { useMessages } from "../i18n/context.ts";
+import { LanguageSwitch } from "./LanguageSwitch.tsx";
 
 /** NavLink の props。 */
 interface NavLinkProps {
@@ -66,6 +66,7 @@ export function UserHeader({
   userName,
   unreadReplyCount,
 }: UserHeaderProps) {
+  const { text: TEXT, user: USER_TEXT } = useMessages();
   return (
     <header className="site-header">
       <h1 className="brand">
@@ -89,6 +90,7 @@ export function UserHeader({
           )}
         </NavLink>
         {userName !== null && <span className="user-name">{userName}</span>}
+        <LanguageSwitch />
       </nav>
     </header>
   );

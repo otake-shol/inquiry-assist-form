@@ -27,12 +27,18 @@ public interface InterviewerSkill {
      * @param system システム。決まっていなければ {@code null}
      * @param function 機能。決まっていなければ {@code null}
      * @param scope 投稿者の閲覧範囲
+     * @param language 本人の言語。質問と選択肢はこの言語で書く
      * @return 詳しい質問
      * @throws AiRefusalException モデルが回答を拒否した場合
      * @throws AiUnavailableException モデルを呼び出せなかった場合
      */
     AiResult<Interview> ask(
-            String utterance, InquiryType type, SystemOption system, FunctionOption function, AccessScope scope);
+            String utterance,
+            InquiryType type,
+            SystemOption system,
+            FunctionOption function,
+            AccessScope scope,
+            String language);
 
     /**
      * 設定の質問のうち、答えが本人の文章に既に書かれているものを読み取る。書かれていない質問は含めない。

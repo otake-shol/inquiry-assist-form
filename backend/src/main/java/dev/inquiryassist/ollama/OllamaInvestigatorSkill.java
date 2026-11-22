@@ -62,7 +62,6 @@ public class OllamaInvestigatorSkill implements InvestigatorSkill {
     /** 資料を1度も調べずに結果を出したときに足す指示。 */
     static final String SEARCH_FIRST_INSTRUCTION = "資料を調べずに答えることはできません。まず search で資料を調べてください。";
 
-    private static final String PROGRESS_SEARCH = "資料を検索しています";
 
     private final OllamaClient client;
     private final JsonMapper json;
@@ -89,6 +88,8 @@ public class OllamaInvestigatorSkill implements InvestigatorSkill {
     private final class Session {
         final AccessScope scope;
         final ProgressListener progress;
+        /** 本人の言語。進捗の文言をこの言語にする（モデルに向けた内部の文章は、日本語のまま）。 */
+        final boolean english;
         final EvidenceLocator locator = new EvidenceLocator();
         final Set<String> searched = new HashSet<>();
         final List<Map<String, Object>> messages = new ArrayList<>();
@@ -103,9 +104,15 @@ public class OllamaInvestigatorSkill implements InvestigatorSkill {
         /** 調べずに結果を出したことを、1度指摘したか。 */
         boolean toldToSearch;
 
-        Session(AccessScope scope, ProgressListener progress) {
+        Session(AccessScope scope, ProgressListener progress, String language) {
             this.scope = scope;
             this.progress = progress;
+            this.english = language != null && language.toLowerCase(java.util.Locale.ROOT).startsWith("en");
+        }
+
+        /** 本人に見える進捗の文言。日本語と、英語（日本語以外は英語）。 */
+        String say(String japanese, String english) {
+            return this.english ? english : japanese;
         }
 
         Usage usage() {
@@ -123,12 +130,12 @@ public class OllamaInvestigatorSkill implements InvestigatorSkill {
 
     @Override
     public AiResult<Investigation> investigate(
-            StructuredInquiry inquiry, AccessScope scope, ProgressListener progress) {
+            StructuredInquiry inquiry, AccessScope scope, ProgressListener progress, String language) {
         if (inquiry.type() != null && !inquiry.type().investigates()) {
             throw new IllegalArgumentException("調べない種類: " + inquiry.type());
         }
-        Session session = new Session(scope, progress);
-        session.messages.add(message("system", system));
+        Session session = new Session(scope, progress, language);
+        session.messages.add(message("system", Prompts.withOutputLanguage(system, language)));
         session.messages.add(message("user", userMessage(inquiry)));
 
         for (int round = 1; round <= MAX_ROUNDS; round++) {
@@ -265,7 +272,7 @@ public class OllamaInvestigatorSkill implements InvestigatorSkill {
         if (query == null || query.isBlank()) {
             return Map.of("error", "query に検索する語を入れてください");
         }
-        session.notifyProgress(PROGRESS_SEARCH);
+        session.notifyProgress(session.say("資料を検索しています", "Searching the documents"));
         session.looked = true;
         boolean repeated = !session.searched.add(query.strip().toLowerCase(java.util.Locale.ROOT));
         List<KnowledgeSearch.SearchHit> hits = knowledge.search(query, session.scope, SEARCH_LIMIT);
@@ -317,10 +324,10 @@ public class OllamaInvestigatorSkill implements InvestigatorSkill {
         Citation.SourceType type = session.locator.typeOf(repository);
         session.notifyProgress(
                 switch (type) {
-                    case CODE -> "コードを読んでいます";
-                    case FAQ -> "FAQを読んでいます";
-                    case GLOSSARY -> "用語対応表を確認しています";
-                    case DOCUMENT -> "資料を読んでいます";
+                    case CODE -> session.say("コードを読んでいます", "Reading the code");
+                    case FAQ -> session.say("FAQを読んでいます", "Reading the FAQ");
+                    case GLOSSARY -> session.say("用語対応表を確認しています", "Checking the glossary");
+                    case DOCUMENT -> session.say("資料を読んでいます", "Reading the documents");
                 });
         List<Map<String, Object>> lines = new ArrayList<>();
         int number = excerpt.startLine();

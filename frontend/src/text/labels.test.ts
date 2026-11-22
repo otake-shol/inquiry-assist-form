@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { en } from "../i18n/en.ts";
+import { ja } from "../i18n/ja.ts";
 import { handoverText } from "./labels.ts";
 import { HANDED_OVER_AT, makeView } from "../test/fakes.ts";
 
@@ -7,6 +9,7 @@ describe("handoverText", () => {
     const text = handoverText(
       makeView({ sentImmediately: true }),
       "担当者が確認します。",
+      ja.asker.handover,
     );
     expect(text.lead).toBe(
       "担当者に送りました。書いていただいた内容をそのまま添えています。",
@@ -21,6 +24,7 @@ describe("handoverText", () => {
         sentImmediately: true,
       }),
       null,
+      ja.asker.handover,
     );
     expect(text.lead).toBe(
       "担当者にすぐ届けました。書いていただいた内容をそのまま添えています。",
@@ -29,7 +33,7 @@ describe("handoverText", () => {
 
   it("調べた結果の有無で、添えた内容の言い方が変わる", () => {
     const filed = makeView({ handedOverAt: HANDED_OVER_AT });
-    expect(handoverText(filed, null).lead).toBe(
+    expect(handoverText(filed, null, ja.asker.handover).lead).toBe(
       "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
     );
     const withAnswer = makeView({
@@ -41,8 +45,29 @@ describe("handoverText", () => {
         citations: [],
       },
     });
-    expect(handoverText(withAnswer, null).lead).toBe(
+    expect(handoverText(withAnswer, null, ja.asker.handover).lead).toBe(
       "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
+    );
+  });
+});
+
+describe("handoverText（英語）", () => {
+  it("渡し方で言い方が変わり、案内文はそのまま添える", () => {
+    expect(
+      handoverText(
+        makeView({ urgency: "BLOCKED", sentImmediately: true }),
+        "We will reply on this page.",
+        en.asker.handover,
+      ),
+    ).toEqual({
+      lead: "I delivered this to the support team right away. I attached what you wrote as it is.",
+      guidance: "We will reply on this page.",
+    });
+    expect(
+      handoverText(makeView({ sentImmediately: true }), null, en.asker.handover)
+        .lead,
+    ).toBe(
+      "I sent this to the support team. I attached what you wrote as it is.",
     );
   });
 });

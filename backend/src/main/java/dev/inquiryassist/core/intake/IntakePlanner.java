@@ -28,19 +28,25 @@ public final class IntakePlanner {
     /** 補足の文字数の上限。 */
     public static final int MAX_NOTE_LENGTH = 4000;
 
-    static final String TYPE_TEXT = "何をしたいですか";
-    static final String SYSTEM_TEXT = "どのシステムですか";
-    static final String FUNCTION_TEXT = "どの機能ですか";
-    static final String NOTE_TEXT = "補足があれば書いてください";
-    static final String NOTE_REQUIRED_TEXT = "状況を一言で教えてください";
-
     private final IntakeCatalog catalog;
+    private final IntakeTexts texts;
 
     /**
+     * 日本語の質問文で作る。
+     *
      * @param catalog 種類、システム、機能、マスの設定
      */
     public IntakePlanner(IntakeCatalog catalog) {
+        this(catalog, IntakeTexts.JA);
+    }
+
+    /**
+     * @param catalog 種類、システム、機能、マスの設定（名前は見る人の言語）
+     * @param texts 入口の決まった質問の文言（見る人の言語）
+     */
+    public IntakePlanner(IntakeCatalog catalog, IntakeTexts texts) {
         this.catalog = catalog;
+        this.texts = texts;
     }
 
     /**
@@ -294,11 +300,11 @@ public final class IntakePlanner {
         Reception normalized = Reception.normalize(inferred, catalog.candidates(), IntakeEntries.chosen(entries));
 
         IntakeEntry type = merged(entries, QuestionKind.TYPE, normalized.type() == null ? null : normalized.type().name(),
-                TYPE_TEXT, normalized.type() == null ? null : catalog.typeLabel(normalized.type()));
-        IntakeEntry system = merged(entries, QuestionKind.SYSTEM, normalized.systemId(), SYSTEM_TEXT,
+                texts.type(), normalized.type() == null ? null : catalog.typeLabel(normalized.type()));
+        IntakeEntry system = merged(entries, QuestionKind.SYSTEM, normalized.systemId(), texts.system(),
                 normalized.systemId() == null ? null : catalog.systemLabel(normalized.systemId()));
         String systemId = system != null && system.answer().decides() ? system.answer().optionId() : null;
-        IntakeEntry function = merged(entries, QuestionKind.FUNCTION, normalized.functionId(), FUNCTION_TEXT,
+        IntakeEntry function = merged(entries, QuestionKind.FUNCTION, normalized.functionId(), texts.function(),
                 normalized.functionId() == null || systemId == null
                         ? null
                         : catalog.functionLabel(systemId, normalized.functionId()));
@@ -419,7 +425,7 @@ public final class IntakePlanner {
         return new IntakeQuestion(
                 IntakeQuestion.TYPE_ID,
                 QuestionKind.TYPE,
-                TYPE_TEXT,
+                texts.type(),
                 catalog.types().stream()
                         .map(t -> new Choice(t.type().name(), t.label()))
                         .toList(),
@@ -431,7 +437,7 @@ public final class IntakePlanner {
         return new IntakeQuestion(
                 IntakeQuestion.SYSTEM_ID,
                 QuestionKind.SYSTEM,
-                SYSTEM_TEXT,
+                texts.system(),
                 catalog.systems().stream().map(s -> new Choice(s.id(), s.label())).toList(),
                 false,
                 false);
@@ -439,14 +445,14 @@ public final class IntakePlanner {
 
     private IntakeQuestion functionQuestion(IntakeCatalog.SystemInfo system) {
         return new IntakeQuestion(
-                IntakeQuestion.FUNCTION_ID, QuestionKind.FUNCTION, FUNCTION_TEXT, system.functions(), false, false);
+                IntakeQuestion.FUNCTION_ID, QuestionKind.FUNCTION, texts.function(), system.functions(), false, false);
     }
 
     private IntakeQuestion noteQuestion(boolean canSkip) {
         return new IntakeQuestion(
                 IntakeQuestion.NOTE_ID,
                 QuestionKind.NOTE,
-                canSkip ? NOTE_TEXT : NOTE_REQUIRED_TEXT,
+                canSkip ? texts.note() : texts.noteRequired(),
                 List.of(),
                 true,
                 canSkip);

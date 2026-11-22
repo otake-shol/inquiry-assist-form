@@ -6,13 +6,6 @@ export type AskerColumn = "YOURS" | "THEIRS" | "CLOSED";
 /** 本人のボードの列の並び（左から）。 */
 export const ASKER_COLUMNS: AskerColumn[] = ["YOURS", "THEIRS", "CLOSED"];
 
-/** 本人のボードの列の見出し。 */
-export const ASKER_COLUMN_LABELS: Record<AskerColumn, string> = {
-  YOURS: "あなたの番",
-  THEIRS: "相手の番",
-  CLOSED: "終わり",
-};
-
 /**
  * 日時の新しさを比べるための数値。読み取れない日時は最も古いものとして扱う。
  * @param iso ISO 8601 の日時

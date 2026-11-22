@@ -1,6 +1,7 @@
+import { useMessages } from "../i18n/context.ts";
 import {
-  TAG_EXAMPLE_LIST,
-  TYPE_EXAMPLE_LIST,
+  tagExampleList,
+  typeExampleList,
   type MockExample,
 } from "../text/mockExamples.ts";
 import { skillMixOf, skillMixText } from "../text/skills.ts";
@@ -22,7 +23,9 @@ interface MockBarProps {
  * @param props 例文選択の受け口
  */
 export function MockBar({ skills, onPick, canPick }: MockBarProps) {
-  const mix = skillMixOf(skills);
+  const messages = useMessages();
+  const { mock } = messages;
+  const mix = skillMixOf(skills, messages.skills.labels);
   const renderGroup = (title: string, examples: MockExample[]) => (
     <div className="mock-group" role="group" aria-label={title}>
       <span className="mock-group-title">{title}</span>
@@ -41,25 +44,27 @@ export function MockBar({ skills, onPick, canPick }: MockBarProps) {
   );
 
   return (
-    <section className="mock-bar" aria-label="モックのシナリオ">
+    <section className="mock-bar" aria-label={mock.barLabel}>
       <details>
-        <summary>
-          <span className="badge">{mix.partial ? "一部モック" : "モック"}</span>
-          <span className="mock-note">例文を試す</span>
+        <summary data-open-label={mock.open} data-close-label={mock.close}>
+          <span className="badge">
+            {mix.partial ? mock.badgePartial : mock.badge}
+          </span>
+          <span className="mock-note">{mock.tryExamples}</span>
         </summary>
         {mix.partial && (
-          <p className="mock-note mock-help">{skillMixText(mix)}</p>
+          <p className="mock-note mock-help">
+            {skillMixText(mix, messages.skills)}
+          </p>
         )}
-        <p className="mock-note mock-help">
-          例文を押すと「文章で書く」の入力欄に入ります（最初の画面で使えます）
-        </p>
-        {renderGroup("状況の例", TYPE_EXAMPLE_LIST)}
-        {renderGroup("動きの例", TAG_EXAMPLE_LIST)}
+        <p className="mock-note mock-help">{mock.pickHelp}</p>
+        {renderGroup(mock.situations, typeExampleList(mock))}
+        {renderGroup(mock.actions, tagExampleList(mock))}
         {mix.partial && (
           <div className="mock-note mock-help">
-            <p>タグは、モックで動いているスキルにだけ効きます</p>
-            {mix.mock.includes("調査") && (
-              <p>何を尋ねても、求人の掲載期限についての調査結果が返ります</p>
+            <p>{mock.tagHelp}</p>
+            {mix.mockIds.includes("investigator") && (
+              <p>{mock.investigationHelp}</p>
             )}
           </div>
         )}

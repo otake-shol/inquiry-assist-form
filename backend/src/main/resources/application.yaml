@@ -28,25 +28,25 @@ inquiry:
   mock:
     # モックの [遅延] タグで進捗の各段階が待つ時間
     slow-step-delay: 2s
-  # 名前を持つ言語。先頭が既定の言語で、API が返す名前はこの言語のもの（本人の言語に合わせて返すのは後の段階）
+  # 名前を持つ言語。先頭が既定の言語。API は、リクエストごとの見る人の言語の名前を返す。その言語の名前がない項目は、既定の言語の名前で返す
   languages: [ja, en]
   # 種類と緊急度の名前。種類は聞く順
   types:
     - id: HOW_TO
-      label: { ja: 使い方を知りたい, en: I want to know how to use it }
+      label: { ja: 使い方を知りたい, en: How to use something }
       hint: { ja: 操作の手順, en: Steps for an operation }
     - id: HOW_IT_WORKS
-      label: { ja: 仕組みを知りたい, en: I want to know how it works }
-      hint: { ja: 動きや決まりの理由, en: Why it behaves this way }
+      label: { ja: 仕組みを知りたい, en: How something works }
+      hint: { ja: 動きや決まりの理由, en: Why it behaves the way it does }
     - id: LOOKS_WRONG
       label: { ja: おかしいかもしれない, en: Something looks wrong }
-      hint: { ja: 思った動きと違う, en: Not what I expected }
+      hint: { ja: 思った動きと違う, en: It does not behave as expected }
     - id: DO_FOR_ME
-      label: { ja: やってほしい, en: I want someone to do it }
-      hint: { ja: データの修正や設定の変更, en: Fixing data or changing settings }
+      label: { ja: やってほしい, en: Do something for me }
+      hint: { ja: データの修正や設定の変更, en: Fix data or change a setting }
     - id: CHANGE_REQUEST
-      label: { ja: 変えてほしい, en: I want it changed }
-      hint: { ja: 機能の追加や改善, en: Adding or improving a feature }
+      label: { ja: 変えてほしい, en: Change something }
+      hint: { ja: 機能の追加や改善, en: Add or improve a feature }
   urgencies:
     - id: NORMAL
       label: { ja: 通常, en: Normal }
@@ -88,7 +88,9 @@ inquiry:
             - { id: earlier, label: { ja: もっと前から, en: Earlier } }
   # Slack の既定の投稿先は INQUIRY_SLACK_DEFAULT_WEBHOOK_URL で、リンクの基点は INQUIRY_PUBLIC_BASE_URL で与える
   # 担当者に送った後に画面が見せる案内文。連絡方法が決まったら差し替える
-  filed-guidance: 担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。
+  filed-guidance:
+    ja: 担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。
+    en: "The support team will review this and reply on this page. When a reply arrives, a mark appears in “My inquiries”."
   # スキルの実行記録（trace）を画面に見せるか。本番では false にする（内部の言葉とモデルの名前を本人に見せないため）
   trace:
     enabled: true

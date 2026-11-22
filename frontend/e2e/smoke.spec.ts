@@ -555,6 +555,87 @@ test("本人が問い合わせを取り下げられる", async ({ page }) => {
 });
 
 /**
+ * 英語に切り替えて、入口から結果まで通せる。
+ * 画面の文言と設定の名前は見る人の言語で出て、AI が書いたものは本人の言語（英語）で書かれ、
+ * 根拠の引用は資料の原文のまま出る。日本語に戻すと、名前だけが日本語に戻る。
+ */
+test("英語に切り替えて通せ、書かれた内容は言語を戻しても変わらない", async ({
+  page,
+}) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+  const note = `The list shows an expired posting ${Date.now()}`;
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "English" }).click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page).toHaveTitle("Inquiry Assist");
+
+  await expect(page.getByText("What can we help you with?")).toBeVisible();
+  await page.getByRole("button", { name: /Something looks wrong/ }).click();
+  await page.getByRole("button", { name: "System A", exact: true }).click();
+  await page.getByRole("button", { name: "Function A-1", exact: true }).click();
+  await expect(
+    page.getByText("Since when has this been happening?"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Since today", exact: true }).click();
+  await page.getByRole("textbox").first().fill(note);
+  await page.getByRole("button", { name: "Next" }).click();
+
+  // 言い直しは、本人の言語（英語）で書かれる
+  await expect(page.getByText("Here is what I understood.")).toBeVisible();
+  const restatement = page
+    .getByText(/About Function A-1 in System A: Something may be behaving/)
+    .first();
+  await expect(restatement).toBeVisible();
+  await page.getByRole("button", { name: "That's right" }).click();
+  await expect(
+    page.getByText("The support team is looking into it"),
+  ).toBeVisible();
+
+  // 説明は英語、根拠の引用は資料の原文（日本語）のまま
+  await expect(
+    page.getByText(/A job posting is treated as expired/).first(),
+  ).toBeVisible();
+  await page.getByText(/^Sources \(2\)/).click();
+  await expect(
+    page.locator('[lang="ja"]').filter({
+      hasText: "掲載期限を過ぎた求人は応募者向けの一覧に表示されません。",
+    }),
+  ).toBeVisible();
+  const askerUrl = page.url();
+
+  // 開き直しても、選んだ言語のまま
+  await page.reload();
+  await expect(
+    page.getByText("The support team is looking into it"),
+  ).toBeVisible();
+
+  // 日本語に戻すと、画面の文言と設定の名前は日本語に、書かれた内容は英語のまま
+  await page.getByRole("button", { name: "日本語" }).click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "ja");
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+  const answered = page.locator(".answered-row");
+  await expect(
+    answered.filter({ hasText: "おかしいかもしれない" }),
+  ).toBeVisible();
+  await expect(answered.filter({ hasText: "今日から" })).toBeVisible();
+  await expect(restatement).toBeVisible();
+
+  // 担当者には、本人の言語が画面の言語と違うことが分かる
+  await page.goto(askerUrl.replace("/inquiries/", "/operator/"));
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+  await expect(detail.getByText("本人の言語: English")).toBeVisible();
+  await page.getByRole("button", { name: "English" }).click();
+  await expect(
+    page.getByRole("region", { name: /^Staff's turn/ }),
+  ).toBeVisible();
+  await expect(page.getByText(/Requester's language/)).toHaveCount(0);
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
  * スマホの幅では、ボードの列は横にスクロールして見るが、ページ全体は横にはみ出さない。
  * （視覚的に隠した文字の位置の基準が列の外にあり、ページ全体が横に広がったことがある）
  */

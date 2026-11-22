@@ -44,6 +44,7 @@ public class OllamaRestaterSkill implements RestaterSkill {
      * @param function 決まっている機能
      * @param answers 詳しい質問と答え
      * @param corrections 本人が伝えた違う点の一言（伝えられた順）
+     * @param language 本人の言語。日本語以外のときだけ、指示文の末尾に書く言語の指示を足す
      * @return 整形後の問い
      */
     @Override
@@ -53,7 +54,8 @@ public class OllamaRestaterSkill implements RestaterSkill {
             SystemOption system,
             FunctionOption function,
             List<AnsweredQuestion> answers,
-            List<String> corrections) {
+            List<String> corrections,
+            String language) {
         StringBuilder user = new StringBuilder("## 種類\n").append(type == null ? "（未定）" : type.name());
         user.append("\n\n## システム\n").append(system == null ? "なし" : system.label());
         user.append("\n\n## 機能\n").append(function == null ? "なし" : function.label());
@@ -75,7 +77,10 @@ public class OllamaRestaterSkill implements RestaterSkill {
             user.append("\n## 本人が後から直したこと\n");
             corrections.forEach(c -> user.append("- ").append(c.strip()).append('\n'));
         }
-        return call.call(this.system, user.toString().stripTrailing(), node -> toStructured(node, type, system));
+        return call.call(
+                Prompts.withOutputLanguage(this.system, language),
+                user.toString().stripTrailing(),
+                node -> toStructured(node, type, system));
     }
 
     private static StructuredInquiry toStructured(JsonNode node, InquiryType type, SystemOption system) {
