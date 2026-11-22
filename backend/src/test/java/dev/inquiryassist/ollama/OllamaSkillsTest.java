@@ -12,6 +12,9 @@ import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
+import dev.inquiryassist.core.intake.Choice;
+import dev.inquiryassist.core.intake.IntakeQuestion;
+import dev.inquiryassist.core.intake.QuestionKind;
 import dev.inquiryassist.core.skill.Finding;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.inquiry.InquiryProperties;
@@ -208,6 +211,73 @@ class OllamaSkillsTest {
         assertThat(userMessage(0))
                 .isEqualTo("## 本人の問い\n本人の問い。\n\n## 種類\nHOW_IT_WORKS\n\n## 確かめられた事実\n- 事実A\n- 事実B");
         assertThat(userMessage(1)).contains("## 種類\n（未定）");
+    }
+
+    // ---- 聞き手（答えを読み取る） ----
+
+    private static final IntakeQuestion SINCE = new IntakeQuestion(
+            "since",
+            QuestionKind.DETAIL,
+            "いつから起きていますか",
+            List.of(new Choice("today", "今日から"), new Choice("earlier", "もっと前から")),
+            false,
+            false);
+    private static final IntakeQuestion PARTNER =
+            new IntakeQuestion("partner", QuestionKind.DETAIL, "対象の取引先はどこですか", List.of(), false, false);
+
+    @Test
+    void 読み取りは専用の指示文と見出しの入力で呼び_利用量のpromptVersionにprefill_v1を入れる() {
+        ollama.reply("{\"answers\":[{\"questionId\":\"since\",\"optionId\":\"today\",\"text\":null}]}", 12, 3);
+
+        var result = interviewer().prefill("今朝から出ません", List.of(SINCE, PARTNER));
+
+        assertThat(request(0).path("messages").get(0).path("content").asString())
+                .isEqualTo(Prompts.prefillOf(Skill.INTERVIEWER, "v1"));
+        assertThat(userMessage(0))
+                .isEqualTo("## 本人が書いた文章\n今朝から出ません\n\n## 質問\n- since: いつから起きていますか\n"
+                        + "  - today: 今日から\n  - earlier: もっと前から\n- partner: 対象の取引先はどこですか\n  - （文章で答える）");
+        assertThat(result.value().answers()).singleElement().satisfies(a -> {
+            assertThat(a.questionId()).isEqualTo("since");
+            assertThat(a.optionId()).isEqualTo("today");
+            assertThat(a.text()).isNull();
+        });
+        assertThat(result.usage().promptVersion()).isEqualTo("prefill-v1");
+        assertThat(result.usage().inputTokens()).isEqualTo(12);
+        assertThat(result.usage().model()).isEqualTo("test-model");
+    }
+
+    @Test
+    void 読み取りの出力は形だけを読み_文章の答えと空の答えも読め_答えがなければ空() {
+        ollama.reply(
+                        "{\"answers\":[{\"questionId\":\"partner\",\"optionId\":null,\"text\":\" A社 \"},{\"optionId\":\"x\"}]}",
+                        1,
+                        1)
+                .reply("{\"answers\":[]}", 1, 1);
+
+        var withText = interviewer().prefill("A社", List.of(PARTNER)).value();
+        var none = interviewer().prefill("A社", List.of(PARTNER)).value();
+
+        // 質問の id のない答えは捨て、文章は前後の空白を除く。選択肢にあるか、文章に含まれるかは、ここでは確かめない
+        assertThat(withText.answers()).singleElement().satisfies(a -> {
+            assertThat(a.questionId()).isEqualTo("partner");
+            assertThat(a.text()).isEqualTo("A社");
+        });
+        assertThat(none.answers()).isEmpty();
+    }
+
+    @Test
+    void 読み取りの出力が読めなければ1回だけ求め直し_それでも読めなければAiUnavailableException() {
+        ollama.reply("読めません", 5, 1).reply("{\"answers\":[{\"questionId\":\"since\",\"optionId\":\"today\"}]}", 6, 2);
+
+        var retried = interviewer().prefill("今日から", List.of(SINCE));
+
+        assertThat(ollama.requests()).hasSize(2);
+        assertThat(retried.value().answers()).hasSize(1);
+        assertThat(retried.usage().inputTokens()).isEqualTo(11);
+
+        ollama.reply("{\"noAnswers\":1}", 1, 1).reply("{\"noAnswers\":2}", 1, 1);
+        assertThatThrownBy(() -> interviewer().prefill("今日から", List.of(SINCE)))
+                .isInstanceOf(AiUnavailableException.class);
     }
 
     // ---- (c) JSON の読み取り ----

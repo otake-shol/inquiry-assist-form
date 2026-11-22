@@ -2,6 +2,7 @@ package dev.inquiryassist.core.intake;
 
 import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.Urgency;
+import dev.inquiryassist.core.skill.Prefill;
 import dev.inquiryassist.core.skill.Reception;
 import java.util.ArrayList;
 import java.util.List;
@@ -85,6 +86,15 @@ public final class IntakePlanner {
         boolean noteAnswered = IntakeEntries.find(entries, QuestionKind.NOTE) != null;
         if (!noteAnswered && snapshot.urgency() != Urgency.BLOCKED) {
             List<IntakeQuestion> configured = detailQuestions(IntakeEntries.placement(entries));
+            if (snapshot.hasText()) {
+                // 文章に答えが書かれていれば聞かない。読み取りは、質問ごとに1回だけ行う
+                List<IntakeQuestion> pending = configured.stream()
+                        .filter(q -> !hasDetailEntry(entries, q.id()) && !snapshot.prefillAttempted().contains(q.id()))
+                        .toList();
+                if (!pending.isEmpty()) {
+                    return new IntakeNext.NeedsPrefill(pending);
+                }
+            }
             List<IntakeQuestion> plan = configured;
             if (plan.isEmpty()) {
                 if (snapshot.interviewed() == null) {
@@ -104,6 +114,71 @@ public final class IntakePlanner {
             return new IntakeNext.Complete();
         }
         return ask(noteQuestion(canSkipNote(snapshot)));
+    }
+
+    private static boolean hasDetailEntry(List<IntakeEntry> entries, String questionId) {
+        return entries.stream().anyMatch(e -> e.kind() == QuestionKind.DETAIL && e.questionId().equals(questionId));
+    }
+
+    /**
+     * 聞き手が読み取った答えを確かめて、答え終えた質問にする。モデルの出力は信用しない。モックでも実際のモデルでも
+     * 同じ確かめを通すため、聞き手の実装ではここで行う。
+     *
+     * <p>選択肢のある質問は、返された選択肢がその質問の選択肢にあれば採る。文章で答える質問は、返された答えが
+     * 本人の文章の中にそのまま含まれていれば採る（空白の違いは無視する。AI が文章にない答えを作るのを防ぐため）。
+     * 読み取る質問にない識別子の答えは捨てる。同じ質問への答えが複数あれば、先のものだけを採る。
+     * 採れなかった質問は、通常どおり本人に聞く。
+     *
+     * @param entries 答え終えた質問
+     * @param asked 読み取りを頼んだ質問
+     * @param utterance 本人が書いた文章
+     * @param prefill 聞き手の出力
+     * @return 採れた答え（読み取りを頼んだ質問の順）。呼び出し側が、答えの一覧の末尾に足す
+     */
+    public List<IntakeEntry> acceptPrefill(
+            List<IntakeEntry> entries, List<IntakeQuestion> asked, String utterance, Prefill prefill) {
+        String squeezed = squeeze(utterance);
+        List<IntakeEntry> result = new ArrayList<>();
+        for (IntakeQuestion question : asked) {
+            if (hasDetailEntry(entries, question.id())) {
+                continue;
+            }
+            for (Prefill.Answer answer : prefill.answers()) {
+                if (!question.id().equals(answer.questionId())) {
+                    continue;
+                }
+                IntakeAnswer taken = takeAnswer(question, answer, squeezed);
+                if (taken != null) {
+                    result.add(new IntakeEntry(question.id(), QuestionKind.DETAIL, question.text(), taken));
+                }
+                // 同じ質問への答えが複数あっても、先のものだけを見る
+                break;
+            }
+        }
+        return result;
+    }
+
+    private static IntakeAnswer takeAnswer(
+            IntakeQuestion question, Prefill.Answer answer, String squeezedUtterance) {
+        if (!question.options().isEmpty()) {
+            return question.options().stream()
+                    .filter(o -> o.id().equals(answer.optionId()))
+                    .findFirst()
+                    .map(o -> IntakeAnswer.inferred(o.id(), o.label()))
+                    .orElse(null);
+        }
+        if (answer.text() == null || answer.text().isBlank()) {
+            return null;
+        }
+        String squeezedAnswer = squeeze(answer.text());
+        return !squeezedUtterance.isEmpty() && squeezedUtterance.contains(squeezedAnswer)
+                ? IntakeAnswer.inferredText(answer.text().strip())
+                : null;
+    }
+
+    /** 空白をすべて除く。空白の違いを無視して、文章に含まれるかを比べるため。 */
+    private static String squeeze(String text) {
+        return text == null ? "" : text.replaceAll("[\\s\\u3000]+", "");
     }
 
     /**

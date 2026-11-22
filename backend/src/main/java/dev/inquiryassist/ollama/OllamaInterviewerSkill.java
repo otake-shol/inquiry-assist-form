@@ -6,8 +6,10 @@ import dev.inquiryassist.core.FollowUpQuestion;
 import dev.inquiryassist.core.FunctionOption;
 import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.SystemOption;
+import dev.inquiryassist.core.intake.IntakeQuestion;
 import dev.inquiryassist.core.skill.Interview;
 import dev.inquiryassist.core.skill.InterviewerSkill;
+import dev.inquiryassist.core.skill.Prefill;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.inquiry.InquiryProperties;
 import java.util.ArrayList;
@@ -26,8 +28,13 @@ public class OllamaInterviewerSkill implements InterviewerSkill {
     private static final Set<String> SCREEN_PROVIDED = Set.of("わからない", "その他");
     private static final int MAX_OPTIONS = 4;
 
+    /** 答えを読み取る指示文の版。利用量の {@code promptVersion} に入り、質問を作る呼び出しと区別できる。 */
+    static final String PREFILL_VERSION = "prefill-v1";
+
     private final JsonSkillCall call;
+    private final JsonSkillCall prefillCall;
     private final String system;
+    private final String prefillSystem;
 
     /**
      * @param client Ollama のクライアント
@@ -38,6 +45,8 @@ public class OllamaInterviewerSkill implements InterviewerSkill {
         InquiryProperties.SkillSettings settings = properties.skill(Skill.INTERVIEWER);
         this.system = Prompts.systemOf(Skill.INTERVIEWER, settings.promptVersion());
         this.call = new JsonSkillCall(client, json, settings, settings.promptVersion());
+        this.prefillSystem = Prompts.prefillOf(Skill.INTERVIEWER, "v1");
+        this.prefillCall = new JsonSkillCall(client, json, settings, PREFILL_VERSION);
     }
 
     /**
@@ -59,6 +68,46 @@ public class OllamaInterviewerSkill implements InterviewerSkill {
                 + "\n\n## 機能\n" + (function == null ? "なし" : function.label())
                 + "\n\n## 本人が書いた文章\n" + (utterance == null || utterance.isBlank() ? "（なし）" : utterance);
         return call.call(this.system, user, OllamaInterviewerSkill::toInterview);
+    }
+
+    /**
+     * 設定の質問の答えが文章に書かれているかを読み取る。出力の確かめ（選択肢にあるか、文章に含まれるか）は、
+     * 入口の処理が行う。ここでは、形の読み取りだけを行う。
+     *
+     * @param utterance 本人が書いた文章
+     * @param questions まだ答えていない設定の質問
+     * @return 読み取った答え
+     */
+    @Override
+    public AiResult<Prefill> prefill(String utterance, List<IntakeQuestion> questions) {
+        StringBuilder user = new StringBuilder("## 本人が書いた文章\n").append(utterance).append("\n\n## 質問\n");
+        for (IntakeQuestion q : questions) {
+            user.append("- ").append(q.id()).append(": ").append(q.text()).append('\n');
+            if (q.options().isEmpty()) {
+                user.append("  - （文章で答える）\n");
+            }
+            q.options().forEach(o -> user.append("  - ").append(o.id()).append(": ").append(o.label()).append('\n'));
+        }
+        return prefillCall.call(prefillSystem, user.toString().stripTrailing(), OllamaInterviewerSkill::toPrefill);
+    }
+
+    private static Prefill toPrefill(JsonNode node) {
+        JsonNode answers = node.path("answers");
+        if (!answers.isArray()) {
+            throw new IllegalArgumentException("answers がない");
+        }
+        List<Prefill.Answer> result = new ArrayList<>();
+        for (JsonNode a : answers) {
+            String questionId = string(a.path("questionId"));
+            if (questionId != null) {
+                result.add(new Prefill.Answer(questionId, string(a.path("optionId")), string(a.path("text"))));
+            }
+        }
+        return new Prefill(result);
+    }
+
+    private static String string(JsonNode node) {
+        return node.isString() && !node.asString().isBlank() ? node.asString().strip() : null;
     }
 
     private static Interview toInterview(JsonNode node) {

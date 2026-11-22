@@ -231,6 +231,33 @@ test("文章で書いて、入口から結果まで通せる", async ({ page }) 
 });
 
 /**
+ * 文章に答えが書かれている設定の質問は、聞かれない。
+ * システムA の「おかしいかもしれない」には「いつから起きていますか」が設定されている。
+ */
+test("文章に答えが書かれている質問は、もう一度聞かれない", async ({ page }) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+
+  await startByText(
+    page,
+    "システムAの機能A-1で、今日から一覧の表示がおかしい。",
+  );
+  // 文章から読み取られ、答え終えた質問として並ぶ
+  const answered = page
+    .locator(".answered-row")
+    .filter({ hasText: "いつから起きていますか" });
+  await expect(answered).toContainText("今日から");
+  await expect(answered).toContainText("（文章から読み取りました）");
+  // 置き場所も設定の質問も文章から読み取れたので、質問は1つも聞かれずに言い直しへ進む
+  await expect(page.getByText("つまり、こういうことですね。")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "今日から", exact: true }),
+  ).toHaveCount(0);
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
  * Slack の通知に載るリンク（`/operator/{id}`）を直接開くと、
  * オペレータ画面でその問い合わせの詳細が開く。
  */

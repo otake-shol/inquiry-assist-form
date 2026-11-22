@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.Urgency;
+import dev.inquiryassist.core.skill.Prefill;
 import dev.inquiryassist.core.skill.Reception;
 import java.util.ArrayList;
 import java.util.List;
@@ -697,5 +698,140 @@ class IntakePlannerTest {
         assertThat(IntakeEntries.placedBy(entries, QuestionKind.TYPE)).isEqualTo(PlacedBy.ASKER);
         assertThat(IntakeEntries.placedBy(entries, QuestionKind.SYSTEM)).isEqualTo(PlacedBy.AI);
         assertThat(IntakeEntries.placedBy(entries, QuestionKind.FUNCTION)).isNull();
+    }
+
+    // ---- 設定の質問の答えの読み取り ----
+
+    private static final List<IntakeEntry> LOOKS_WRONG_PLACED = List.of(
+            type(InquiryType.LOOKS_WRONG), system("job-admin"), unknown("function", QuestionKind.FUNCTION));
+
+    private static IntakeSnapshot withText(List<IntakeEntry> entries, List<String> attempted, Urgency urgency) {
+        return new IntakeSnapshot(entries, null, true, urgency, attempted);
+    }
+
+    @Test
+    void 文章があり設定の質問があれば_まず答えの読み取りを頼む() {
+        IntakeNext next = planner.next(withText(LOOKS_WRONG_PLACED, List.of(), Urgency.NORMAL));
+
+        assertThat(next).isInstanceOf(IntakeNext.NeedsPrefill.class);
+        assertThat(((IntakeNext.NeedsPrefill) next).questions()).containsExactly(SINCE);
+    }
+
+    @Test
+    void 文章がなければ答えの読み取りを頼まず_そのまま聞く() {
+        assertThat(asked(snapshot(LOOKS_WRONG_PLACED)).id()).isEqualTo("since");
+    }
+
+    @Test
+    void 緊急度が止まっているときは読み取りも行わない() {
+        IntakeNext next = planner.next(withText(LOOKS_WRONG_PLACED, List.of(), Urgency.BLOCKED));
+
+        assertThat(next).isInstanceOf(IntakeNext.Complete.class);
+    }
+
+    @Test
+    void 読み取りを済ませた質問は聞き_答え終えた質問は読み取らない() {
+        // 読み取りを済ませ、答えが採れなかった質問は聞く
+        IntakeNext attempted = planner.next(withText(LOOKS_WRONG_PLACED, List.of("since"), Urgency.NORMAL));
+        assertThat(attempted).isInstanceOf(IntakeNext.Ask.class);
+        assertThat(((IntakeNext.Ask) attempted).question().id()).isEqualTo("since");
+        // 答え終えていれば、読み取りの対象にしない
+        List<IntakeEntry> answered = new ArrayList<>(LOOKS_WRONG_PLACED);
+        answered.add(answered(SINCE, "today"));
+        assertThat(planner.next(withText(answered, List.of(), Urgency.NORMAL))).isInstanceOf(IntakeNext.Complete.class);
+    }
+
+    @Test
+    void 設定に質問がなければ読み取りは頼まず聞き手の質問に進む() {
+        IntakeNext next = planner.next(withText(List.of(type(InquiryType.HOW_TO), system("reports")), List.of(), Urgency.NORMAL));
+
+        assertThat(next).isInstanceOf(IntakeNext.NeedsInterviewer.class);
+    }
+
+    @Test
+    void 読み取った選択肢は_その質問の選択肢にあるものだけ採る() {
+        List<IntakeEntry> taken = planner.acceptPrefill(
+                List.of(),
+                List.of(SINCE),
+                "今日から出ません",
+                new Prefill(List.of(new Prefill.Answer("since", "today", null))));
+        List<IntakeEntry> notInOptions = planner.acceptPrefill(
+                List.of(), List.of(SINCE), "x", new Prefill(List.of(new Prefill.Answer("since", "yesterday", null))));
+        List<IntakeEntry> missing = planner.acceptPrefill(
+                List.of(), List.of(SINCE), "x", new Prefill(List.of(new Prefill.Answer("since", null, "今日から"))));
+
+        assertThat(taken).singleElement().satisfies(e -> {
+            assertThat(e.questionId()).isEqualTo("since");
+            assertThat(e.kind()).isEqualTo(QuestionKind.DETAIL);
+            assertThat(e.text()).isEqualTo("いつから");
+            assertThat(e.answer()).isEqualTo(IntakeAnswer.inferred("today", "今日から"));
+        });
+        assertThat(notInOptions).isEmpty();
+        assertThat(missing).isEmpty();
+    }
+
+    @Test
+    void 設定にない質問の答えは捨て_同じ質問の答えは先のものだけ採る() {
+        List<IntakeEntry> taken = planner.acceptPrefill(
+                List.of(),
+                List.of(SINCE),
+                "今日から",
+                new Prefill(List.of(
+                        new Prefill.Answer("nothing", "today", null),
+                        new Prefill.Answer("since", "earlier", null),
+                        new Prefill.Answer("since", "today", null))));
+
+        assertThat(taken).singleElement().satisfies(e -> assertThat(e.answer().optionId()).isEqualTo("earlier"));
+        assertThat(planner.acceptPrefill(
+                        List.of(),
+                        List.of(SINCE),
+                        "今日から",
+                        new Prefill(List.of(new Prefill.Answer("nothing", "today", null)))))
+                .isEmpty();
+    }
+
+    @Test
+    void 文章で答える質問は_本人の文章にそのまま含まれる答えだけ採り_空白の違いは無視する() {
+        Prefill inText = new Prefill(List.of(new Prefill.Answer("partner", null, "A社")));
+        Prefill madeUp = new Prefill(List.of(new Prefill.Answer("partner", null, "B社")));
+        Prefill spaced = new Prefill(List.of(new Prefill.Answer("partner", null, "株式会社 A")));
+        Prefill blank = new Prefill(List.of(new Prefill.Answer("partner", null, "  ")));
+        Prefill optionOnly = new Prefill(List.of(new Prefill.Answer("partner", "x", null)));
+
+        List<IntakeEntry> taken = planner.acceptPrefill(List.of(), List.of(PARTNER), "A社の請求書を直して", inText);
+        assertThat(taken).singleElement().satisfies(e -> assertThat(e.answer()).isEqualTo(IntakeAnswer.inferredText("A社")));
+        assertThat(planner.acceptPrefill(List.of(), List.of(PARTNER), "A社の請求書を直して", madeUp)).isEmpty();
+        // 文章の側の空白（全角を含む）と、答えの側の空白が違っても、同じ並びなら採る
+        assertThat(planner.acceptPrefill(List.of(), List.of(PARTNER), "株式会社　A　の請求書", spaced)).hasSize(1);
+        assertThat(planner.acceptPrefill(List.of(), List.of(PARTNER), "A社", blank)).isEmpty();
+        assertThat(planner.acceptPrefill(List.of(), List.of(PARTNER), "A社", optionOnly)).isEmpty();
+        assertThat(planner.acceptPrefill(List.of(), List.of(PARTNER), "", inText)).isEmpty();
+    }
+
+    @Test
+    void 読み取りの結果は読み取りを頼んだ質問の順で_答え終えた質問は採らない() {
+        IntakeQuestion second = detail("second", "2問目", "a", "A");
+        Prefill prefill = new Prefill(List.of(
+                new Prefill.Answer("second", "a", null), new Prefill.Answer("since", "today", null)));
+
+        List<IntakeEntry> both = planner.acceptPrefill(List.of(), List.of(SINCE, second), "x", prefill);
+        List<IntakeEntry> skipsAnswered = planner.acceptPrefill(
+                List.of(answered(SINCE, "earlier")), List.of(SINCE, second), "x", prefill);
+
+        assertThat(both).extracting(IntakeEntry::questionId).containsExactly("since", "second");
+        assertThat(skipsAnswered).extracting(IntakeEntry::questionId).containsExactly("second");
+    }
+
+    @Test
+    void 読み取った答えは通常の答えと同じく_戻って答え直せる() {
+        List<IntakeEntry> entries = new ArrayList<>(LOOKS_WRONG_PLACED);
+        entries.add(new IntakeEntry("since", QuestionKind.DETAIL, "いつから", IntakeAnswer.inferred("today", "今日から")));
+
+        IntakePlanner.Back back = planner.back(entries, "since");
+
+        assertThat(back.entries()).hasSize(3);
+        // 読み取りを済ませてあれば、戻った質問は聞かれる
+        IntakeNext next = planner.next(withText(back.entries(), List.of("since"), Urgency.NORMAL));
+        assertThat(((IntakeNext.Ask) next).question().id()).isEqualTo("since");
     }
 }

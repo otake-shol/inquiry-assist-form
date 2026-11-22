@@ -33,3 +33,18 @@ inquiry:
       questions:
         - id: partner
           text: { ja: 対象の取引先はどこですか, en: "Which business partner is it for?" }
+    # 答えの読み取りの確認用。2問あり、選択肢の名前が文章に含まれていれば読み取られる
+    - system: job-admin
+      function: applicants
+      type: CHANGE_REQUEST
+      questions:
+        - id: scope
+          text: { ja: どのくらいの範囲ですか, en: "How wide is the scope?" }
+          options:
+            - { id: once, label: { ja: 今回だけ, en: Only this time } }
+            - { id: always, label: { ja: 常に, en: Always } }
+        - id: effect
+          text: { ja: 何に困っていますか, en: "What is the trouble?" }
+          options:
+            - { id: slow, label: { ja: 遅い, en: Slow } }
+            - { id: wrong, label: { ja: 間違える, en: Wrong } }

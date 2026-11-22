@@ -14,6 +14,9 @@ import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
+import dev.inquiryassist.core.intake.Choice;
+import dev.inquiryassist.core.intake.IntakeQuestion;
+import dev.inquiryassist.core.intake.QuestionKind;
 import dev.inquiryassist.core.skill.AnswerPipeline;
 import dev.inquiryassist.core.skill.Finding;
 import dev.inquiryassist.core.skill.Investigation;
@@ -136,6 +139,46 @@ class MockSkillsTest {
         assertThat(interviewer.ask("[質問なし] 仕様", InquiryType.HOW_IT_WORKS, null, null, scope).value().questions())
                 .isEmpty();
         assertThatThrownBy(() -> interviewer.ask("[質問エラー] 仕様", InquiryType.HOW_IT_WORKS, null, null, scope))
+                .isInstanceOf(AiUnavailableException.class);
+    }
+
+    // ---- 聞き手（答えを読み取る） ----
+
+    private static final IntakeQuestion SINCE = new IntakeQuestion(
+            "since",
+            QuestionKind.DETAIL,
+            "いつから",
+            List.of(new Choice("today", "今日から"), new Choice("week", "今週から"), new Choice("earlier", "もっと前から")),
+            false,
+            false);
+    private static final IntakeQuestion PARTNER =
+            new IntakeQuestion("partner", QuestionKind.DETAIL, "取引先", List.of(), false, false);
+
+    @Test
+    void 読み取りは選択肢の名前が文章に含まれていればその選択肢を返し_複数あれば設定の順で先のもの() {
+        var one = interviewer.prefill("今朝ではなく今日から出ません", List.of(SINCE)).value();
+        var both = interviewer.prefill("今週からというか、今日からです", List.of(SINCE)).value();
+
+        assertThat(one.answers()).singleElement().satisfies(a -> {
+            assertThat(a.questionId()).isEqualTo("since");
+            assertThat(a.optionId()).isEqualTo("today");
+            assertThat(a.text()).isNull();
+        });
+        assertThat(both.answers()).singleElement().satisfies(a -> assertThat(a.optionId()).isEqualTo("today"));
+    }
+
+    @Test
+    void 読み取りは名前が含まれなければ何も返さず_文章で答える質問は読み取らない() {
+        assertThat(interviewer.prefill("表示がおかしい", List.of(SINCE)).value().answers()).isEmpty();
+        assertThat(interviewer.prefill("A社の件です", List.of(PARTNER)).value().answers()).isEmpty();
+        assertThat(interviewer.prefill("今日から。A社", List.of(PARTNER, SINCE)).value().answers())
+                .extracting(a -> a.questionId())
+                .containsExactly("since");
+    }
+
+    @Test
+    void 質問エラータグは読み取りでもAI利用不可になる() {
+        assertThatThrownBy(() -> interviewer.prefill("[質問エラー] 今日から", List.of(SINCE)))
                 .isInstanceOf(AiUnavailableException.class);
     }
 

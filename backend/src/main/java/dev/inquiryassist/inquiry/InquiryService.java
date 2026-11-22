@@ -31,6 +31,7 @@ import dev.inquiryassist.core.skill.AnswerPipeline;
 import dev.inquiryassist.core.skill.ExplanationFailedException;
 import dev.inquiryassist.core.skill.Interview;
 import dev.inquiryassist.core.skill.InterviewerSkill;
+import dev.inquiryassist.core.skill.Prefill;
 import dev.inquiryassist.core.skill.ProgressListener;
 import dev.inquiryassist.core.skill.Reception;
 import dev.inquiryassist.core.skill.ReceptionSkill;
@@ -209,6 +210,8 @@ public class InquiryService {
         InquiryEntity inquiry = load(id);
         requireStep(inquiry, InquiryStep.INTAKE);
         inquiry.texts.add(written);
+        // 新しい文章は、まだ答えていない設定の質問について、改めて読み取る
+        inquiry.prefillAttempted.clear();
         place(inquiry);
         return settleAndCompose(inquiry, users.currentScope());
     }
@@ -506,6 +509,11 @@ public class InquiryService {
      */
     private IntakeNext settle(InquiryEntity inquiry, AccessScope scope) {
         IntakeNext next = planner.next(inquiry.snapshot());
+        if (next instanceof IntakeNext.NeedsPrefill prefill) {
+            // 読み取りは質問ごとに1回で、結果にかかわらず済みにする。読み取った後は、設定の質問か補足に進む
+            prefill(inquiry, prefill.questions());
+            next = planner.next(inquiry.snapshot());
+        }
         if (next instanceof IntakeNext.NeedsInterviewer) {
             inquiry.detailQuestions = askInterviewer(inquiry, scope);
             next = planner.next(inquiry.snapshot());
@@ -579,6 +587,7 @@ public class InquiryService {
             inquiry.intake = new ArrayList<>(placed.entries());
             if (placed.detailsReset()) {
                 inquiry.detailQuestions = null;
+                inquiry.prefillAttempted.clear();
             }
         } catch (AiRefusalException | AiUnavailableException e) {
             log.warn("受付が失敗したため、置き場所を質問として聞きます id={}", inquiry.id, e);
@@ -588,11 +597,37 @@ public class InquiryService {
 
     private void applyBack(InquiryEntity inquiry, String questionId) {
         IntakePlanner.Back back = planner.back(inquiry.intake, questionId);
+        List<IntakeEntry> removed = inquiry.intake.subList(back.entries().size(), inquiry.intake.size());
         inquiry.intake = new ArrayList<>(back.entries());
         if (back.detailsReset()) {
-            // 置き場所が変わりうるので、前の置き場所のために作った質問を残さない
+            // 置き場所が変わりうるので、前の置き場所のために作った質問を残さない。読み取りも、置き場所が決まってからやり直す
             inquiry.detailQuestions = null;
+            inquiry.prefillAttempted.clear();
+        } else {
+            // 戻った質問は本人が答えるまで聞く。同じ文章から読み取り直して消さないよう、読み取り済みにしておく
+            removed.stream()
+                    .filter(e -> e.kind() == QuestionKind.DETAIL)
+                    .map(IntakeEntry::questionId)
+                    .filter(id -> !inquiry.prefillAttempted.contains(id))
+                    .forEach(inquiry.prefillAttempted::add);
         }
+    }
+
+    /**
+     * 聞き手に、設定の質問の答えが本人の文章に書かれているかを読み取らせ、確かめて採れたものを答え終えた質問にする。
+     * 失敗しても本人を止めず、設定の質問をそのまま聞く。失敗はログと利用量（失敗した呼び出しとして）に残す。
+     */
+    private void prefill(InquiryEntity inquiry, List<IntakeQuestion> questions) {
+        long start = System.nanoTime();
+        try {
+            AiResult<Prefill> result = interviewer.prefill(inquiry.writtenText(), questions);
+            inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start));
+            inquiry.intake.addAll(planner.acceptPrefill(inquiry.intake, questions, inquiry.writtenText(), result.value()));
+        } catch (AiRefusalException | AiUnavailableException e) {
+            log.warn("答えの読み取りが失敗したため、設定の質問をすべて聞きます id={}", inquiry.id, e);
+            inquiry.addUsage(new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true, millisSince(start)));
+        }
+        questions.stream().map(IntakeQuestion::id).forEach(inquiry.prefillAttempted::add);
     }
 
     /**
@@ -671,7 +706,8 @@ public class InquiryService {
 
     private static String answerText(IntakeEntry entry) {
         return switch (entry.answer().kind()) {
-            case OPTION, INFERRED -> entry.answer().label();
+            case OPTION -> entry.answer().label();
+            case INFERRED -> entry.answer().label() != null ? entry.answer().label() : entry.answer().text();
             case TEXT -> entry.answer().text();
             case UNKNOWN, SKIPPED -> null;
         };

@@ -26,4 +26,21 @@ final class Prompts {
             throw new UncheckedIOException("プロンプトを読めません: " + resource.getPath(), e);
         }
     }
+
+    /**
+     * 聞き手の「答えを読み取る」指示文（{@code skills/<識別子>/prefill-<版>.md}）を読む。
+     *
+     * @param skill スキル
+     * @param version 指示文の版（例: {@code v1}）
+     * @return 指示文の本文
+     * @throws UncheckedIOException その版のファイルがない場合
+     */
+    static String prefillOf(Skill skill, String version) {
+        ClassPathResource resource = new ClassPathResource("skills/" + skill.id() + "/prefill-" + version + ".md");
+        try (InputStream in = resource.getInputStream()) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException("プロンプトを読めません: " + resource.getPath(), e);
+        }
+    }
 }

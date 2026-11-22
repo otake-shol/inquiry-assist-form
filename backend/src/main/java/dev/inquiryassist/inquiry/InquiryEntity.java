@@ -103,6 +103,11 @@ class InquiryEntity {
     @Column(nullable = false)
     List<IntakeEntry> intake = new ArrayList<>();
 
+    /** 答えの読み取りを済ませた設定の質問の識別子。質問ごとに1回だけ読み取る。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "prefill_attempted", nullable = false)
+    List<String> prefillAttempted = new ArrayList<>();
+
     /**
      * 聞き手が作った詳しい質問。聞き手をまだ呼んでいなければ null、呼んで質問がなければ空。
      * 次の質問を、答えるたびに作り直さないために保存する。
@@ -314,7 +319,7 @@ class InquiryEntity {
      * @return 入口の状態
      */
     IntakeSnapshot snapshot() {
-        return new IntakeSnapshot(intake, detailQuestions, !texts.isEmpty(), urgency);
+        return new IntakeSnapshot(intake, detailQuestions, !texts.isEmpty(), urgency, prefillAttempted);
     }
 
     /**

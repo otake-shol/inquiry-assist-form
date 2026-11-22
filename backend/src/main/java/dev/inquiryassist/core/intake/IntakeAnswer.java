@@ -4,9 +4,9 @@ package dev.inquiryassist.core.intake;
  * 入口の質問への答え。
  *
  * @param kind 答え方
- * @param optionId 選んだ選択肢（または受付が置いた値）の識別子。{@code OPTION} と {@code INFERRED} だけ
+ * @param optionId 選んだ選択肢（または読み取った値）の識別子。{@code OPTION} と、選択肢の {@code INFERRED}
  * @param label 選んだ時点の名前。{@code OPTION} と {@code INFERRED} だけ
- * @param text 本人が書いた文章。{@code TEXT} だけ
+ * @param text 本人が書いた文章。{@code TEXT} と、文章で答える質問の {@code INFERRED}
  */
 public record IntakeAnswer(AnswerKind kind, String optionId, String label, String text) {
 
@@ -58,6 +58,16 @@ public record IntakeAnswer(AnswerKind kind, String optionId, String label, Strin
      */
     public static IntakeAnswer inferred(String id, String label) {
         return new IntakeAnswer(AnswerKind.INFERRED, id, label, null);
+    }
+
+    /**
+     * 受付が文章から置いた答え（文章で答える質問に、聞き手が本人の文章から抜き出した答え）。
+     *
+     * @param text 抜き出した答え
+     * @return 答え
+     */
+    public static IntakeAnswer inferredText(String text) {
+        return new IntakeAnswer(AnswerKind.INFERRED, null, null, text);
     }
 
     /**

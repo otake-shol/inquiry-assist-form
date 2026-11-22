@@ -234,7 +234,8 @@ class IntakeApiTest extends ApiSupport {
         pick(id, "since", "today")
                 .andExpect(jsonPath("$.step").value("STRUCTURED"))
                 .andExpect(jsonPath("$.intake.complete").value(true));
-        assertThat(usageSteps(id)).containsExactly("reception", "restater");
+        // 設定の質問の答えを文章から読み取る聞き手の呼び出しが、受付と言い直しの間に入る
+        assertThat(usageSteps(id)).containsExactly("reception", "interviewer", "restater");
     }
 
     @Test
