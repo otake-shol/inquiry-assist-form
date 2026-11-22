@@ -17,6 +17,7 @@ import type {
   HandlingStatus,
   OperatorDetail,
   OperatorItem,
+  SystemOption,
 } from "../api/types.ts";
 import { BoardColumn } from "../components/BoardColumn.tsx";
 import { DevLink } from "../components/Navigation.tsx";
@@ -28,7 +29,8 @@ import {
   OP_TEXT,
   formatFiledAt,
   movedText,
-  opCategoryLabel,
+  opTypeLabel,
+  opUrgencyLabel,
 } from "./labels.ts";
 import {
   OPERATOR_COLUMNS,
@@ -54,6 +56,8 @@ interface OperatorAppProps {
 /** OperatorCard の props。 */
 interface OperatorCardProps {
   item: OperatorItem;
+  /** 設定の緊急度の選択肢（緊急度の名前に使う。取得前は空） */
+  urgencies: SystemOption[];
   /** 詳細のパネルで開いているか */
   selected: boolean;
   /** いま掴まれているか */
@@ -71,6 +75,7 @@ interface OperatorCardProps {
  */
 function OperatorCard({
   item,
+  urgencies,
   selected,
   dragging,
   onOpen,
@@ -104,10 +109,16 @@ function OperatorCard({
               <span className="visually-hidden">{OP_TEXT.unread}</span>
             </>
           )}
-          <span className="op-badge">{opCategoryLabel(item.category)}</span>
+          <span className="op-badge">{opTypeLabel(item.type)}</span>
           <span className="op-system">
             {item.system?.label ?? OP_TEXT.systemUnknown}
+            {item.function !== null && ` / ${item.function.label}`}
           </span>
+          {item.urgency !== "NORMAL" && (
+            <span className="op-badge warn strong-warn">
+              {opUrgencyLabel(item.urgency, urgencies)}
+            </span>
+          )}
           {item.sentImmediately && (
             <span className="op-badge strong">{OP_TEXT.sentImmediately}</span>
           )}
@@ -365,7 +376,8 @@ export function OperatorApp({
     if (ok) {
       const summary =
         itemsRef.current.find((i) => i.id === current.id)?.summary ??
-        current.utterance;
+        current.utterance ??
+        "";
       setAnnouncement(movedText(summary, status));
     }
     return ok;
@@ -380,6 +392,7 @@ export function OperatorApp({
     const dragged = items.find((item) => item.id === dragId);
     return dragged === undefined ? null : operatorColumnOf(dragged);
   }, [items, dragId]);
+  const urgencies = config?.urgencies ?? [];
   const showDevLink = config !== null && (config.mock || config.trace === true);
   const showColumns = state.loaded && !state.failed;
 
@@ -492,6 +505,7 @@ export function OperatorApp({
                     <OperatorCard
                       key={item.id}
                       item={item}
+                      urgencies={urgencies}
                       selected={item.id === selectedId}
                       dragging={item.id === dragId}
                       onOpen={() => onNavigate(item.id)}
@@ -533,6 +547,7 @@ export function OperatorApp({
             {detail !== null && (
               <DetailView
                 detail={detail}
+                urgencies={urgencies}
                 trace={config?.trace === true}
                 busy={acting}
                 failed={failedId === detail.id}

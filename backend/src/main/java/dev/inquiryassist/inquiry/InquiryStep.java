@@ -2,8 +2,8 @@ package dev.inquiryassist.inquiry;
 
 /** 問い合わせ1件の進行位置（契約書の「段階」）。 */
 public enum InquiryStep {
-    /** 種別の判定と追加質問が出た。 */
-    TRIAGED,
+    /** 入口の質問に答えている。 */
+    INTAKE,
     /** 整形後の問いが出た。 */
     STRUCTURED,
     /** 0次回答の生成待ち。 */

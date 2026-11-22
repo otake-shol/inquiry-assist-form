@@ -2,28 +2,21 @@ import { describe, expect, it } from "vitest";
 import { handlingStatusLabel, listStatusLabel } from "./inquiries.ts";
 
 describe("listStatusLabel", () => {
-  it("設計方針の表どおりの言葉を返す", () => {
+  it("設計方針の表どおりの言葉を返し、表にない終わり方は「終了」と示す", () => {
     const cases: [Parameters<typeof listStatusLabel>[0], string][] = [
       [
         { step: "STRUCTURED", outcome: "IN_PROGRESS", handlingStatus: null },
         "途中（続きから再開できます）",
       ],
       [
-        { step: "TRIAGED", outcome: "IN_PROGRESS", handlingStatus: null },
+        { step: "INTAKE", outcome: "IN_PROGRESS", handlingStatus: null },
         "途中（続きから再開できます）",
       ],
       [
         { step: "CLOSED", outcome: "SELF_RESOLVED", handlingStatus: null },
         "解決済み",
       ],
-      [
-        {
-          step: "CLOSED",
-          outcome: "INCIDENT_REDIRECTED",
-          handlingStatus: null,
-        },
-        "障害の窓口を案内",
-      ],
+      [{ step: "CLOSED", outcome: "ABANDONED", handlingStatus: null }, "終了"],
       [
         { step: "CLOSED", outcome: "FILED", handlingStatus: "OPEN" },
         "担当者の確認待ち",

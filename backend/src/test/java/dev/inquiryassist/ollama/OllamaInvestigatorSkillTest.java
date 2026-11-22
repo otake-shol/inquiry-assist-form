@@ -8,7 +8,7 @@ import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.CitationVerifier;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.KnowledgeSearch;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.skill.Investigation;
@@ -48,6 +48,10 @@ class OllamaInvestigatorSkillTest {
     private OllamaInvestigatorSkill skill() {
         SkillSettings settings = new SkillSettings("ollama", "test-model", 0, false, Duration.ofSeconds(5), "v1");
         InquiryProperties properties = new InquiryProperties(
+                List.of("ja"),
+                List.of(),
+                List.of(),
+                List.of(),
                 List.of(),
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
                 null,
@@ -58,12 +62,12 @@ class OllamaInvestigatorSkillTest {
         return new OllamaInvestigatorSkill(new OllamaClient(ollama.baseUrl(), "30m", 42, JSON), JSON, properties, knowledge);
     }
 
-    private static StructuredInquiry inquiry(InquiryCategory category) {
-        return new StructuredInquiry("掲載期限を過ぎた求人がどうなるかを知りたい。", category, "求人管理画面", "目的", "一覧に出ない", null, null);
+    private static StructuredInquiry inquiry(InquiryType type) {
+        return new StructuredInquiry("掲載期限を過ぎた求人がどうなるかを知りたい。", type, "求人管理画面", "目的", "一覧に出ない", null);
     }
 
     private AiResult<Investigation> investigate(AccessScope scope) {
-        return skill().investigate(inquiry(InquiryCategory.SPEC_QUESTION), scope, progress::add);
+        return skill().investigate(inquiry(InquiryType.HOW_IT_WORKS), scope, progress::add);
     }
 
     /** 道具の呼び出しを求める応答を積む。calls は「名前, 引数」の並び。 */
@@ -162,7 +166,7 @@ class OllamaInvestigatorSkillTest {
         String user = first.path("messages").get(1).path("content").asString();
         assertThat(user)
                 .contains("## 本人の問い\n掲載期限を過ぎた求人がどうなるかを知りたい。")
-                .contains("## 種別\nSPEC_QUESTION")
+                .contains("## 種類\nHOW_IT_WORKS")
                 .contains("## 対象のシステム\n求人管理画面")
                 .contains("## 起きていること\n一覧に出ない")
                 .doesNotContain("期待していた結果");
@@ -404,8 +408,8 @@ class OllamaInvestigatorSkillTest {
     }
 
     @Test
-    void 調べない種別を渡すと_モデルを呼ばずに拒む() {
-        assertThatThrownBy(() -> skill().investigate(inquiry(InquiryCategory.WORK_REQUEST), ALL, progress::add))
+    void 調べない種類を渡すと_モデルを呼ばずに拒む() {
+        assertThatThrownBy(() -> skill().investigate(inquiry(InquiryType.CHANGE_REQUEST), ALL, progress::add))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(ollama.requests()).isEmpty();
     }

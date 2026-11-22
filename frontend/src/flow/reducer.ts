@@ -1,37 +1,14 @@
-import type { ErrorBody, InquiryView, SystemOption } from "../api/types.ts";
-
-/** 対象システムで「わからない」を明示的に選んだ状態。 */
-export const UNKNOWN_SYSTEM = "__unknown__";
-
-/**
- * 選択状態を API に送る systemId に変える。未選択と「わからない」はどちらも null。
- * @param choice 画面での選択（未選択は null）
- */
-export function systemIdOf(choice: string | null): string | null {
-  return choice === null || choice === UNKNOWN_SYSTEM ? null : choice;
-}
+import type {
+  ErrorBody,
+  InquiryView,
+  TypeOption,
+  Urgency,
+  SystemOption,
+} from "../api/types.ts";
 
 /** 画面に出すエラー。`source` は発生元（通信の操作か、進捗ストリームか）。 */
 export interface FlowError extends ErrorBody {
   source: "action" | "stream";
-}
-
-/**
- * 送信済みの回答を、質問の順に並べた回答の配列に直す。
- * 答えが記録されている先頭からの連続ぶんだけを返す（記録がなければ空）。
- * 開き直したときに、答えた質問を「質問 → 回答」の形で再現するために使う。
- * @param view 取得した問い合わせ
- */
-export function answersFromSubmitted(view: InquiryView): (string | null)[] {
-  const submitted = view.submittedAnswers;
-  if (submitted == null) return [];
-  const answers: (string | null)[] = [];
-  for (const question of view.questions) {
-    const found = submitted.find((a) => a.questionId === question.id);
-    if (found === undefined) break;
-    answers.push(found.answer);
-  }
-  return answers;
 }
 
 /** 画面全体の状態。 */
@@ -41,26 +18,25 @@ export interface FlowState {
   skills: Record<string, string> | null;
   /** 担当者に送った後の案内文（GET /api/config） */
   filedGuidance: string | null;
-  /** 対象システムの選択肢（GET /api/config） */
-  systems: SystemOption[];
+  /** 種類の選択肢（GET /api/config）。問い合わせの作成前の1問目に使う */
+  types: TypeOption[];
+  /** 緊急度の選択肢（GET /api/config） */
+  urgencies: SystemOption[];
   /** 利用者の名前（GET /api/config の `user.name`。無ければ null） */
   userName: string | null;
   /** スキルの実行記録を見せるか（GET /api/config の `trace`） */
   trace: boolean;
   /** URL で開いた問い合わせの取得状況。読み込み中、見つからない、またはどちらでもない */
   resume: "idle" | "loading" | "notFound";
-  /** 入力時に選んだ対象システム（未選択は null、「わからない」は UNKNOWN_SYSTEM） */
-  systemChoice: string | null;
+  /** 「文章で書く」の入力欄を開いているか */
+  writing: boolean;
+  /** 「文章で書く」の入力欄の中身 */
   draft: string;
+  /** 問い合わせの作成前に選んだ緊急度（作成後は問い合わせの値を使う） */
+  urgencyChoice: Urgency;
   view: InquiryView | null;
   busy: boolean;
   error: FlowError | null;
-  /** 判定のAI失敗で保存された問い合わせの id。担当者へ送る操作に使う。 */
-  savedInquiryId: string | null;
-  /** 追加質問への回答（順番どおり。「わからない」は null）。 */
-  answers: (string | null)[];
-  /** 受け取りの「変更」で選択肢を開いているか */
-  categoryOpen: boolean;
   progress: string[];
   /** 進捗ストリームの購読回数。再試行で増やし、購読し直すきっかけにする。 */
   streamAttempt: number;
@@ -73,18 +49,19 @@ export type FlowAction =
       mock: boolean;
       skills: Record<string, string> | null;
       filedGuidance: string | null;
-      systems: SystemOption[];
+      types: TypeOption[];
+      urgencies: SystemOption[];
       userName?: string | null;
       trace?: boolean;
     }
-  | { type: "systemChosen"; choice: string | null }
+  | { type: "writingOpened" }
   | { type: "draftChanged"; draft: string }
+  | { type: "textSent" }
+  | { type: "urgencyChosen"; urgency: Urgency }
   | { type: "requestStarted" }
   | { type: "viewReceived"; view: InquiryView }
+  | { type: "viewRefreshed"; view: InquiryView }
   | { type: "requestFailed"; error: ErrorBody }
-  | { type: "answerGiven"; index: number; answer: string | null }
-  | { type: "answersRewound"; index: number }
-  | { type: "categoryToggled" }
   | { type: "streamProgress"; message: string }
   | { type: "streamFailed"; error: ErrorBody }
   | { type: "streamRetried" }
@@ -96,25 +73,24 @@ export type FlowAction =
 
 /**
  * 最初の状態を作る。
- * @param draft 入力欄の初期値（URL の `?text=`）
+ * @param draft 「文章で書く」の入力欄の初期値（URL の `?text=`）。空でなければ入力欄を開いておく
  */
 export function createInitialState(draft = ""): FlowState {
   return {
     mock: false,
     skills: null,
     filedGuidance: null,
-    systems: [],
+    types: [],
+    urgencies: [],
     userName: null,
     trace: false,
     resume: "idle",
-    systemChoice: null,
+    writing: draft !== "",
     draft,
+    urgencyChoice: "NORMAL",
     view: null,
     busy: false,
     error: null,
-    savedInquiryId: null,
-    answers: [],
-    categoryOpen: false,
     progress: [],
     streamAttempt: 0,
   };
@@ -133,14 +109,20 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         mock: action.mock,
         skills: action.skills,
         filedGuidance: action.filedGuidance,
-        systems: action.systems,
+        types: action.types,
+        urgencies: action.urgencies,
         userName: action.userName ?? null,
         trace: action.trace ?? false,
       };
-    case "systemChosen":
-      return { ...state, systemChoice: action.choice };
+    case "writingOpened":
+      return { ...state, writing: true };
     case "draftChanged":
-      return { ...state, draft: action.draft };
+      // 例文を選んだときも、入力欄を開いて入れる
+      return { ...state, draft: action.draft, writing: true };
+    case "textSent":
+      return { ...state, draft: "", writing: false };
+    case "urgencyChosen":
+      return { ...state, urgencyChoice: action.urgency };
     case "requestStarted":
       return { ...state, busy: true, error: null };
     case "viewReceived":
@@ -149,33 +131,24 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         view: action.view,
         busy: false,
         error: null,
-        savedInquiryId: null,
-        categoryOpen: false,
-        // 追加質問に（戻って）入り直したら、質問を最初から聞き直す
-        answers: action.view.step === "TRIAGED" ? [] : state.answers,
         progress: action.view.step === "ANSWERING" ? state.progress : [],
+      };
+    case "viewRefreshed":
+      // 失敗のあとに、保存された最新の状態を取り直したもの。エラーの表示は残す。
+      // 作成の途中で失敗した問い合わせ（本文が保存済み）なら、送った文章の入力欄は閉じて空にする
+      return {
+        ...state,
+        view: action.view,
+        ...(state.view === null && action.view.utterance !== null
+          ? { writing: false, draft: "" }
+          : {}),
       };
     case "requestFailed":
       return {
         ...state,
         busy: false,
         error: { ...action.error, source: "action" },
-        savedInquiryId: action.error.inquiryId ?? state.savedInquiryId,
       };
-    case "answerGiven":
-      return {
-        ...state,
-        answers: [...state.answers.slice(0, action.index), action.answer],
-        error: null,
-      };
-    case "answersRewound":
-      return {
-        ...state,
-        answers: state.answers.slice(0, action.index),
-        error: null,
-      };
-    case "categoryToggled":
-      return { ...state, categoryOpen: !state.categoryOpen };
     case "streamProgress":
       return { ...state, progress: [...state.progress, action.message] };
     case "streamFailed":
@@ -200,13 +173,6 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         busy: false,
         error: null,
         resume: "idle",
-        savedInquiryId: null,
-        categoryOpen: false,
-        // 追加質問の途中は保存していないため、最初から聞く。それ以外は送信済みの回答を再現する
-        answers:
-          action.view.step === "TRIAGED"
-            ? []
-            : answersFromSubmitted(action.view),
         progress: [],
       };
     case "resumeNotFound":
@@ -231,7 +197,8 @@ function resetKeepingConfig(state: FlowState): FlowState {
     mock: state.mock,
     skills: state.skills,
     filedGuidance: state.filedGuidance,
-    systems: state.systems,
+    types: state.types,
+    urgencies: state.urgencies,
     userName: state.userName,
     trace: state.trace,
   };

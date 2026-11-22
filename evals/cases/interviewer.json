@@ -6,7 +6,7 @@
       "split": "dev",
       "note": "情報が少ない。少なくとも1つは聞く必要がある",
       "utterance": "求人が消えたんだけど、昨日まで出てたのに",
-      "category": "SUSPECTED_BUG",
+      "type": "LOOKS_WRONG",
       "systemLabel": null,
       "expect": { "minQuestions": 1, "maxQuestions": 3, "forbidEngineerTerms": true }
     },
@@ -15,7 +15,7 @@
       "split": "dev",
       "note": "対象のシステムが分かっている。場所を尋ねない",
       "utterance": "求人が消えたんだけど、昨日まで出てたのに",
-      "category": "SUSPECTED_BUG",
+      "type": "LOOKS_WRONG",
       "systemLabel": "応募者向けの一覧",
       "expect": { "minQuestions": 1, "maxQuestions": 3, "forbidLocationQuestion": true, "forbidEngineerTerms": true }
     },
@@ -23,7 +23,7 @@
       "id": "iv-03",
       "split": "dev",
       "utterance": "なんか請求書の金額がおかしい気がするんですが、こういうものですか？",
-      "category": "SUSPECTED_BUG",
+      "type": "LOOKS_WRONG",
       "systemLabel": "請求管理",
       "expect": { "minQuestions": 1, "maxQuestions": 3, "forbidLocationQuestion": true, "forbidEngineerTerms": true }
     },
@@ -32,7 +32,7 @@
       "split": "dev",
       "note": "仕様の確認。質問が0個でもよい",
       "utterance": "求人の掲載期限は、何日まで延長できますか？",
-      "category": "SPEC_QUESTION",
+      "type": "HOW_IT_WORKS",
       "systemLabel": "求人管理画面",
       "expect": { "minQuestions": 0, "maxQuestions": 2, "forbidLocationQuestion": true, "forbidEngineerTerms": true }
     },
@@ -41,7 +41,7 @@
       "split": "dev",
       "note": "時期、件数、対象がすべて書かれている。既に書かれていることを聞かない",
       "utterance": "応募者向けの一覧で、今日の朝9時ごろから、A社の営業職の求人1件だけが表示されなくなりました。昨日の夕方までは出ていました。",
-      "category": "SUSPECTED_BUG",
+      "type": "LOOKS_WRONG",
       "systemLabel": "応募者向けの一覧",
       "expect": {
         "minQuestions": 0,
@@ -55,7 +55,7 @@
       "id": "iv-06",
       "split": "dev",
       "utterance": "応募者の一覧って、どういう順番で並んでるんでしたっけ",
-      "category": "SPEC_QUESTION",
+      "type": "HOW_IT_WORKS",
       "systemLabel": "応募者向けの一覧",
       "expect": { "minQuestions": 0, "maxQuestions": 2, "forbidLocationQuestion": true, "forbidEngineerTerms": true }
     },
@@ -63,7 +63,7 @@
       "id": "iv-07",
       "split": "holdout",
       "utterance": "請求書のPDFをダウンロードしようとするとエラーになります",
-      "category": "SUSPECTED_BUG",
+      "type": "LOOKS_WRONG",
       "systemLabel": "請求管理",
       "expect": { "minQuestions": 1, "maxQuestions": 3, "forbidLocationQuestion": true, "forbidEngineerTerms": true }
     },
@@ -71,7 +71,7 @@
       "id": "iv-08",
       "split": "holdout",
       "utterance": "お客様から、応募したのに確認メールが来ないと言われました",
-      "category": "SUSPECTED_BUG",
+      "type": "LOOKS_WRONG",
       "systemLabel": null,
       "expect": { "minQuestions": 1, "maxQuestions": 3, "forbidEngineerTerms": true }
     },
@@ -79,7 +79,7 @@
       "id": "iv-09",
       "split": "holdout",
       "utterance": "先週から、求人管理画面で保存ボタンを押しても反映されないことがあります",
-      "category": "SUSPECTED_BUG",
+      "type": "LOOKS_WRONG",
       "systemLabel": "求人管理画面",
       "expect": {
         "minQuestions": 1,
@@ -93,7 +93,7 @@
       "id": "iv-10",
       "split": "holdout",
       "utterance": "請求の締め日について教えてください",
-      "category": "SPEC_QUESTION",
+      "type": "HOW_IT_WORKS",
       "systemLabel": "請求管理",
       "expect": { "minQuestions": 0, "maxQuestions": 2, "forbidLocationQuestion": true, "forbidEngineerTerms": true }
     }

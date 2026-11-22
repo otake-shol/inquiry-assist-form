@@ -1,6 +1,6 @@
 package dev.inquiryassist.eval;
 
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -25,23 +25,24 @@ final class Scorer {
     // ---- 受付 ----
 
     /**
-     * 受付の出力を採点する。{@code systemId} の null は「推測しない」が正解であることを表し、{@code systemIdAnyOf} に
+     * 受付の出力を採点する。{@code systemId} の null は「置かない」が正解であることを表し、{@code systemIdAnyOf} に
      * null を含めると「推測しない」も正解になる。
      *
      * @param expect 条件
-     * @param category 出力の種別
-     * @param systemId 出力の対象システム（推測しなければ null）
+     * @param type 出力の種類（読み取れなければ null）
+     * @param systemId 出力のシステム（置かなければ null）
      * @return 落ちた条件
      */
-    static List<Failure> scoreReception(JsonNode expect, InquiryCategory category, String systemId) {
+    static List<Failure> scoreReception(JsonNode expect, InquiryType type, String systemId) {
         List<Failure> failures = new ArrayList<>();
-        if (expect.has("category") && !expect.get("category").asString().equals(category.name())) {
-            failures.add(new Failure("category", "期待 " + expect.get("category").asString() + "、出力 " + category));
+        String actual = type == null ? "（なし）" : type.name();
+        if (expect.has("type") && !expect.get("type").asString().equals(actual)) {
+            failures.add(new Failure("type", "期待 " + expect.get("type").asString() + "、出力 " + actual));
         }
-        if (expect.has("categoryAnyOf")) {
-            List<String> allowed = strings(expect.get("categoryAnyOf"));
-            if (!allowed.contains(category.name())) {
-                failures.add(new Failure("categoryAnyOf", "期待 " + allowed + "、出力 " + category));
+        if (expect.has("typeAnyOf")) {
+            List<String> allowed = strings(expect.get("typeAnyOf"));
+            if (!allowed.contains(actual)) {
+                failures.add(new Failure("typeAnyOf", "期待 " + allowed + "、出力 " + actual));
             }
         }
         if (expect.has("systemId") && !sameSystem(expect.get("systemId"), systemId)) {

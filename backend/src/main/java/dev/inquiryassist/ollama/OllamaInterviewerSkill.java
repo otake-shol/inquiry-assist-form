@@ -3,7 +3,8 @@ package dev.inquiryassist.ollama;
 import dev.inquiryassist.core.AccessScope;
 import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.FollowUpQuestion;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.FunctionOption;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.skill.Interview;
 import dev.inquiryassist.core.skill.InterviewerSkill;
@@ -40,19 +41,23 @@ public class OllamaInterviewerSkill implements InterviewerSkill {
     }
 
     /**
-     * 追加質問を作る。出力は信用せず、空の質問文を捨て、4個以上なら先頭の3個にする。
+     * 詳しい質問を作る。出力は信用せず、空の質問文を捨て、3個以上なら先頭の2個にする。
      * 選択肢の「わからない」「その他」は取り除き、5個以上なら先頭の4個にする。質問の id は実装が振る。
      *
-     * @param utterance 本人が書いた元の発話
-     * @param category 種別
-     * @param system 決まっている対象システム
+     * @param utterance 本人が書いた文章。書いていなければ null
+     * @param type 種類。決まっていなければ null
+     * @param system 決まっているシステム
+     * @param function 決まっている機能
      * @param scope 投稿者の閲覧範囲
-     * @return 追加質問
+     * @return 詳しい質問
      */
     @Override
-    public AiResult<Interview> ask(String utterance, InquiryCategory category, SystemOption system, AccessScope scope) {
-        String user = "## 問い合わせ\n" + utterance + "\n\n## 種別\n" + category.name() + "\n\n## 対象のシステム\n"
-                + (system == null ? "なし" : system.label());
+    public AiResult<Interview> ask(
+            String utterance, InquiryType type, SystemOption system, FunctionOption function, AccessScope scope) {
+        String user = "## 種類\n" + (type == null ? "（未定）" : type.name())
+                + "\n\n## システム\n" + (system == null ? "なし" : system.label())
+                + "\n\n## 機能\n" + (function == null ? "なし" : function.label())
+                + "\n\n## 本人が書いた文章\n" + (utterance == null || utterance.isBlank() ? "（なし）" : utterance);
         return call.call(this.system, user, OllamaInterviewerSkill::toInterview);
     }
 

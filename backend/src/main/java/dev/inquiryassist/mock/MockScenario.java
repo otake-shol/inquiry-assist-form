@@ -1,12 +1,12 @@
 package dev.inquiryassist.mock;
 
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
 import java.util.List;
 
 /**
  * モックのシナリオを選ぶ、発話のキーワードとタグの解釈。契約書「モックのシナリオ」に対応する。
  *
- * <p>種別はキーワードで決まり、振る舞いは {@code [質問なし]} などの角括弧のタグで切り替える。
+ * <p>種類はキーワードで決まり、振る舞いは {@code [質問なし]} などの角括弧のタグで切り替える。
  */
 final class MockScenario {
 
@@ -30,8 +30,10 @@ final class MockScenario {
     static final String TAG_EXPLAIN_ERROR = "[説明エラー]";
     /** 説明が「確かめられた事実は問いに答えていない」と判定する。 */
     static final String TAG_OFF_TOPIC = "[的外れ]";
-    /** 受付（種別の判定）が AI_UNAVAILABLE になる。 */
-    static final String TAG_TRIAGE_ERROR = "[判定エラー]";
+    /** 受付が AI_UNAVAILABLE になる。 */
+    static final String TAG_RECEPTION_ERROR = "[判定エラー]";
+    /** 言い直し（問いの組み立て）が AI_UNAVAILABLE になる。 */
+    static final String TAG_RESTATE_ERROR = "[言い直しエラー]";
 
     private static final List<String> ALL_TAGS = List.of(
             TAG_NO_QUESTIONS,
@@ -44,39 +46,44 @@ final class MockScenario {
             TAG_REFUSED,
             TAG_EXPLAIN_ERROR,
             TAG_OFF_TOPIC,
-            TAG_TRIAGE_ERROR);
-    private static final List<String> INCIDENT_WORDS = List.of("障害", "止まって", "落ちて", "つながらない");
-    private static final List<String> WORK_REQUEST_WORDS = List.of("依頼", "してほしい", "お願いします", "してください");
-    private static final List<String> BUG_WORDS = List.of("不具合", "バグ", "おかしい");
+            TAG_RECEPTION_ERROR,
+            TAG_RESTATE_ERROR);
+    private static final List<String> CHANGE_REQUEST_WORDS = List.of("変えてほしい", "要望", "改善");
+    private static final List<String> DO_FOR_ME_WORDS = List.of("依頼", "してほしい", "お願いします", "してください");
+    private static final List<String> LOOKS_WRONG_WORDS = List.of("不具合", "バグ", "おかしい");
+    private static final List<String> HOW_TO_WORDS = List.of("使い方", "やり方", "手順", "どうやって");
 
     private MockScenario() {}
 
     /**
-     * 発話のキーワードから種別を決める。優先順位は障害、作業依頼、不具合の疑い、仕様確認。
+     * 文章のキーワードから種類を決める。優先順位は、変えてほしい、やってほしい、おかしい、使い方、それ以外の順。
      *
-     * @param utterance 発話
-     * @return 種別
+     * @param text 本人が書いた文章
+     * @return 種類
      */
-    static InquiryCategory classify(String utterance) {
-        if (containsAny(utterance, INCIDENT_WORDS)) {
-            return InquiryCategory.INCIDENT;
+    static InquiryType classify(String text) {
+        if (containsAny(text, CHANGE_REQUEST_WORDS)) {
+            return InquiryType.CHANGE_REQUEST;
         }
-        if (containsAny(utterance, WORK_REQUEST_WORDS)) {
-            return InquiryCategory.WORK_REQUEST;
+        if (containsAny(text, DO_FOR_ME_WORDS)) {
+            return InquiryType.DO_FOR_ME;
         }
-        if (containsAny(utterance, BUG_WORDS)) {
-            return InquiryCategory.SUSPECTED_BUG;
+        if (containsAny(text, LOOKS_WRONG_WORDS)) {
+            return InquiryType.LOOKS_WRONG;
         }
-        return InquiryCategory.SPEC_QUESTION;
+        if (containsAny(text, HOW_TO_WORDS)) {
+            return InquiryType.HOW_TO;
+        }
+        return InquiryType.HOW_IT_WORKS;
     }
 
     /**
-     * @param text 調べる文章
+     * @param text 調べる文章。書かれていなければ {@code null}
      * @param tag タグ
      * @return 文章にそのタグが含まれる場合は true
      */
     static boolean has(String text, String tag) {
-        return text.contains(tag);
+        return text != null && text.contains(tag);
     }
 
     /**

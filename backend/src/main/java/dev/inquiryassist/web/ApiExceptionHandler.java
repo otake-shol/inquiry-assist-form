@@ -2,9 +2,10 @@ package dev.inquiryassist.web;
 
 import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiUnavailableException;
+import dev.inquiryassist.inquiry.ComposeFailedException;
 import dev.inquiryassist.inquiry.InquiryNotFoundException;
 import dev.inquiryassist.inquiry.InvalidStateException;
-import dev.inquiryassist.inquiry.TriageFailedException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -82,16 +83,16 @@ public class ApiExceptionHandler {
     }
 
     /**
-     * 種別の判定の失敗を、原因に応じて 422／503 にし、保存した問い合わせの id を本文に加える。
+     * 問いの組み立て（言い直し）の失敗を、原因に応じて 422／503 にし、保存した問い合わせの id を本文に加える。
      *
      * @param e 例外
      * @return エラー応答
      */
-    @ExceptionHandler(TriageFailedException.class)
-    public ResponseEntity<ErrorBody> triageFailed(TriageFailedException e) {
+    @ExceptionHandler(ComposeFailedException.class)
+    public ResponseEntity<ErrorBody> composeFailed(ComposeFailedException e) {
         boolean refused = e.getCause() instanceof AiRefusalException;
         if (!refused) {
-            log.warn("種別の判定で AI を呼び出せませんでした id={}", e.inquiryId(), e);
+            log.warn("問いの組み立てで AI を呼び出せませんでした id={}", e.inquiryId(), e);
         }
         return ResponseEntity.status(refused ? HttpStatus.UNPROCESSABLE_ENTITY : HttpStatus.SERVICE_UNAVAILABLE)
                 .contentType(MediaType.APPLICATION_JSON)

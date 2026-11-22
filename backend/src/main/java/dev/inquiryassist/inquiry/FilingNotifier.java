@@ -1,8 +1,9 @@
 package dev.inquiryassist.inquiry;
 
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.TechnicalMemo;
+import dev.inquiryassist.core.Urgency;
 import java.util.UUID;
 
 /** 起票を担当者へ通知するポート。起票先が確定したら実装を差し替える。 */
@@ -19,18 +20,22 @@ public interface FilingNotifier {
      * 起票の通知内容。
      *
      * @param inquiryId 問い合わせの識別子
-     * @param category 確認済みの種別
-     * @param utterance 本人が書いた元の発話
-     * @param systemLabel 対象システムの名前。決まっていなければ {@code null}
-     * @param structured 整形後の問い。整形前に「今すぐ送る」を実行した場合は {@code null}
+     * @param type 種類。決まっていなければ {@code null}
+     * @param urgency 緊急度
+     * @param utterance 本人が書いた文章。書いていなければ {@code null}
+     * @param systemLabel システムの名前。決まっていなければ {@code null}
+     * @param functionLabel 機能の名前。決まっていなければ {@code null}
+     * @param structured 整形後の問い。組み立てる前に送る場合は {@code null}
      * @param memo 技術メモ。0次回答が出る前は {@code null}
-     * @param sentImmediately 「今すぐ担当者に送る」による起票か
+     * @param sentImmediately 答えを待たずに送られたか
      */
     record FilingNotice(
             UUID inquiryId,
-            InquiryCategory category,
+            InquiryType type,
+            Urgency urgency,
             String utterance,
             String systemLabel,
+            String functionLabel,
             StructuredInquiry structured,
             TechnicalMemo memo,
             boolean sentImmediately) {}

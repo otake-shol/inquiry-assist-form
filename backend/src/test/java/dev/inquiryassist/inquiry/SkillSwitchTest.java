@@ -2,9 +2,7 @@ package dev.inquiryassist.inquiry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
 import dev.inquiryassist.core.skill.ReceptionSkill;
@@ -13,11 +11,9 @@ import dev.inquiryassist.mock.MockInterviewerSkill;
 import dev.inquiryassist.mock.MockReceptionSkill;
 import dev.inquiryassist.ollama.FakeOllama;
 import dev.inquiryassist.ollama.OllamaReceptionSkill;
-import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
@@ -73,15 +69,18 @@ class SkillSwitchTest extends ApiSupport {
 
     @Test
     void 一部モックの問い合わせ記録はmockがtrueで実際のモデルの利用量も残る() throws Exception {
-        OLLAMA.reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 77, 9);
+        OLLAMA.reply("{\"type\":\"HOW_IT_WORKS\",\"systemId\":null,\"functionId\":null}", 77, 9);
 
-        String created = create("期限の仕様", null);
+        String created = create("期限の仕様");
         String id = idOf(created);
 
-        // 受付は実際のモデル（フェイク）、聞き手はモック
-        assertThat((String) JsonPath.read(created, "$.category")).isEqualTo("SPEC_QUESTION");
-        assertThat((List<?>) JsonPath.read(created, "$.questions")).hasSize(2);
-        assertThat((Boolean) JsonPath.read(created, "$.mock")).isTrue();
+        // 受付は実際のモデル（フェイク）が置いた
+        assertThat((String) JsonPath.read(created, "$.type.id")).isEqualTo("HOW_IT_WORKS");
+        assertThat((String) JsonPath.read(created, "$.type.by")).isEqualTo("AI");
+        assertThat((Boolean) JsonPath.read(created, "$.mock")).isFalse();
+        // 聞き手と言い直しはモック
+        String structured = finishIntake(id, null);
+        assertThat((Boolean) JsonPath.read(structured, "$.mock")).isTrue();
         assertThat(row(id).get("mock")).isEqualTo(true);
         var usages = jdbc.queryForList(
                 "select u->>'step' as step, u->>'model' as model, (u->>'mock')::boolean as mock,"
@@ -95,9 +94,10 @@ class SkillSwitchTest extends ApiSupport {
 
     @Test
     void traceのproviderは実際のモデルの呼び出しだけollamaでモックの呼び出しはmockになる() throws Exception {
-        OLLAMA.reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 77, 9);
+        OLLAMA.reply("{\"type\":\"HOW_IT_WORKS\",\"systemId\":null,\"functionId\":null}", 77, 9);
 
-        String id = idOf(create("期限の仕様", null));
+        String id = idOf(create("期限の仕様"));
+        finishIntake(id, null);
 
         mvc.perform(get("/api/inquiries/" + id))
                 .andExpect(jsonPath("$.trace[0].skill").value("reception"))
@@ -109,16 +109,15 @@ class SkillSwitchTest extends ApiSupport {
     }
 
     @Test
-    void 実際のモデルの受付が失敗すると503で失敗した呼び出しの利用量はモック由来ではない() throws Exception {
+    void 実際のモデルの受付が失敗してもエラーにならず質問として聞き_失敗した呼び出しの利用量はモック由来ではない() throws Exception {
         OLLAMA.status(500);
 
-        String body = text(mvc.perform(post("/api/inquiries")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"utterance\":\"期限の仕様\"}"))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.code").value("AI_UNAVAILABLE")));
-        String id = JsonPath.read(body, "$.inquiryId");
+        String created = create("期限の仕様");
+        String id = idOf(created);
 
+        // 何も置かれず、種類から順に聞く
+        assertThat((Object) JsonPath.read(created, "$.type")).isNull();
+        assertThat((String) JsonPath.read(created, "$.intake.next.questionId")).isEqualTo("type");
         // 受付が実際のモデルなので、この記録はモックではない
         assertThat(row(id).get("mock")).isEqualTo(false);
         assertThat(jdbc.queryForObject(
@@ -131,12 +130,11 @@ class SkillSwitchTest extends ApiSupport {
 
     @Test
     void モックのタグは実際のモデルで動くスキルには効かない() throws Exception {
-        // 受付が ollama のため、[判定エラー] を書いても失敗しない
-        OLLAMA.reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 1, 1);
+        // 受付が ollama のため、[判定エラー] を書いても失敗せず、モデルが読み取った種類が置かれる
+        OLLAMA.reply("{\"type\":\"HOW_IT_WORKS\",\"systemId\":null,\"functionId\":null}", 1, 1);
 
-        mvc.perform(post("/api/inquiries")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"utterance\":\"[判定エラー] 期限の仕様\"}"))
-                .andExpect(status().isCreated());
+        String created = create("[判定エラー] 期限の仕様");
+
+        assertThat((String) JsonPath.read(created, "$.type.id")).isEqualTo("HOW_IT_WORKS");
     }
 }

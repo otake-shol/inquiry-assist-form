@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,23 +57,33 @@ class SlackNotificationTest extends ApiSupport {
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         String base = "http://127.0.0.1:" + server.getAddress().getPort();
-        Map<String, String> systems = new java.util.LinkedHashMap<>();
-        systems.put("job-admin", "求人管理画面");
-        systems.put("applicant-list", "応募者向けの一覧");
-        systems.put("billing", "請求管理");
-        systems.put("slow", "遅いシステム");
-        int i = 0;
-        for (var e : systems.entrySet()) {
-            registry.add("inquiry.systems[" + i + "].id", e::getKey);
-            registry.add("inquiry.systems[" + i + "].label", e::getValue);
-            i++;
-        }
-        registry.add("inquiry.systems[0].slack-webhook-url", () -> base + "/job-admin");
-        registry.add("inquiry.systems[2].slack-webhook-url", () -> base + "/error");
-        registry.add("inquiry.systems[3].slack-webhook-url", () -> base + "/slow");
+        // リストは、設定の置き場所が違うと丸ごと置き換わる（要素ごとには重ならない）ため、すべてのシステムを与える。
+        // job-admin と billing は投稿先を持ち、billing の投稿先は500を返す。reports は個別の投稿先を持たず、
+        // slow の投稿先は応答が遅い
+        systems(registry, 0, "job-admin", "求人管理画面", base + "/job-admin", "posting", "求人の掲載", "applicants", "応募者の一覧");
+        systems(registry, 1, "billing", "請求管理", base + "/error", "invoice", "請求書");
+        systems(registry, 2, "reports", "レポート", null);
+        systems(registry, 3, "slow", "遅いシステム", base + "/slow");
         registry.add("inquiry.slack.default-webhook-url", () -> base + "/default");
         registry.add("inquiry.slack.timeout", () -> "2s");
         registry.add("inquiry.public-base-url", () -> "https://example.com/");
+    }
+
+    /** システム1件を設定に加える。functions は「機能の id, 機能の名前」の並び。 */
+    private static void systems(
+            DynamicPropertyRegistry registry, int index, String id, String label, String url, String... functions) {
+        String prefix = "inquiry.systems[" + index + "].";
+        registry.add(prefix + "id", () -> id);
+        registry.add(prefix + "label.ja", () -> label);
+        if (url != null) {
+            registry.add(prefix + "slack-webhook-url", () -> url);
+        }
+        for (int i = 0; i < functions.length; i += 2) {
+            String fid = functions[i];
+            String flabel = functions[i + 1];
+            registry.add(prefix + "functions[" + i / 2 + "].id", () -> fid);
+            registry.add(prefix + "functions[" + i / 2 + "].label.ja", () -> flabel);
+        }
     }
 
     @BeforeEach
@@ -109,9 +118,7 @@ class SlackNotificationTest extends ApiSupport {
 
     @Test
     void 投稿に成功するとPOSTEDになる() throws Exception {
-        String id = idOf(create("期限の仕様", "job-admin"));
-
-        sendNow(id);
+        String id = filedNow("期限の仕様", "job-admin");
 
         awaitRecorded(id);
         assertThat(slackStatusOf(id)).isEqualTo("POSTED");
@@ -119,11 +126,9 @@ class SlackNotificationTest extends ApiSupport {
 
     @Test
     void サーバーエラーとタイムアウトはFAILEDになる() throws Exception {
-        String serverError = idOf(create("期限の仕様", "billing"));
-        sendNow(serverError);
+        String serverError = filedNow("期限の仕様", "billing");
         awaitRecorded(serverError);
-        String timeout = idOf(create("期限の仕様", "slow"));
-        sendNow(timeout);
+        String timeout = filedNow("期限の仕様", "slow");
         awaitRecorded(timeout);
 
         assertThat(slackStatusOf(serverError)).isEqualTo("FAILED");
@@ -132,9 +137,7 @@ class SlackNotificationTest extends ApiSupport {
 
     @Test
     void 投稿先はあるが結果がまだ出ていない間はPENDINGで結果が出るとFAILEDになる() throws Exception {
-        String id = idOf(create("期限の仕様", "slow"));
-
-        sendNow(id);
+        String id = filedNow("期限の仕様", "slow");
 
         // 遅いハンドラが応答を保留している間（タイムアウト前）に詳細を読む
         awaitPost("/slow");
@@ -145,9 +148,7 @@ class SlackNotificationTest extends ApiSupport {
 
     @Test
     void システム別の設定だけがある場合_投稿先のない別システムは既定のURLが使われPOSTEDになる() throws Exception {
-        String id = idOf(create("期限の仕様", "applicant-list"));
-
-        sendNow(id);
+        String id = filedNow("期限の仕様", "reports");
 
         awaitRecorded(id);
         assertThat(slackStatusOf(id)).isEqualTo("POSTED");
@@ -155,15 +156,15 @@ class SlackNotificationTest extends ApiSupport {
 
     @Test
     void システム別のURLがあればそこへ届き既定のURLには届かない() throws Exception {
-        String id = idOf(create("期限の仕様", "job-admin"));
-
-        sendNow(id).andExpect(status().isOk());
+        String id = filedNow("期限の仕様", "job-admin");
 
         String body = awaitPost("/job-admin");
         awaitRecorded(id);
         assertThat(received.stream().map(r -> r[0])).doesNotContain("/default");
         String text = JsonPath.read(body, "$.text");
-        assertThat(text).contains("仕様の確認・相談", "求人管理画面", "期限の仕様", "「今すぐ送る」による送付");
+        assertThat(text).contains("種類: 仕組みを知りたい", "システム: 求人管理画面", "期限の仕様", "「今すぐ送る」による送付");
+        // 通常の緊急度は載せない
+        assertThat(text).doesNotContain("緊急度");
         assertThat(text).contains("https://example.com/operator/" + id);
         assertThat(jdbc.queryForObject("select slack_notified from inquiries where id = ?::uuid", Boolean.class, id))
                 .isTrue();
@@ -171,17 +172,15 @@ class SlackNotificationTest extends ApiSupport {
 
     @Test
     void 個別のURLがないシステムと対象未定は既定のURLへ届く() throws Exception {
-        String noUrl = idOf(create("期限の仕様", "applicant-list"));
-        sendNow(noUrl);
+        String noUrl = filedNow("期限の仕様", "reports");
         awaitPost("/default");
         awaitRecorded(noUrl);
         received.clear();
 
-        String unknown = idOf(create("期限の仕様", null));
-        sendNow(unknown);
+        String unknown = filedNow("期限の仕様", null);
 
         String text = JsonPath.read(awaitPost("/default"), "$.text");
-        assertThat(text).contains("対象システム: （未定）");
+        assertThat(text).contains("システム: （未定）");
         awaitRecorded(unknown);
     }
 
@@ -194,9 +193,9 @@ class SlackNotificationTest extends ApiSupport {
 
         String text = JsonPath.read(awaitPost("/job-admin"), "$.text");
         assertThat(text)
-                .contains("種別: 仕様の確認・相談")
-                .contains("対象システム: 求人管理画面")
-                .contains("「期限の仕様」について、いまの仕組みがどうなっているかを知りたい。")
+                .contains("種類: 仕組みを知りたい")
+                .contains("システム: 求人管理画面")
+                .contains("求人管理画面について、いまの仕組みがどうなっているかを知りたい。 書かれた内容: 期限の仕様")
                 .contains("送付: 通常の送付")
                 .contains("https://example.com/operator/" + id);
         // 技術メモ・回答の説明・コードの抜粋は載せない
@@ -208,10 +207,34 @@ class SlackNotificationTest extends ApiSupport {
     }
 
     @Test
-    void 本文中のSlackの特殊文字は無害化される() throws Exception {
-        String id = idOf(create("<!channel> &amp;", "job-admin"));
+    void 本文に機能の名前と通常以外の緊急度が載る() throws Exception {
+        String id = idOf(create("求人管理画面の求人の掲載がおかしい", "HURRY"));
+        finishIntake(id, null);
+        confirm(id).andExpect(status().isOk());
+        stream(id);
 
-        sendNow(id);
+        String text = JsonPath.read(awaitPost("/job-admin"), "$.text");
+
+        assertThat(text)
+                .contains("種類: おかしいかもしれない")
+                .contains("システム: 求人管理画面 / 求人の掲載")
+                .contains("緊急度: 急ぎ");
+    }
+
+    @Test
+    void 業務が止まっているときは入口を終えた時点で投稿される() throws Exception {
+        String id = idOf(create("求人管理画面が使えない", "BLOCKED"));
+
+        finishIntake(id, null);
+
+        String text = JsonPath.read(awaitPost("/job-admin"), "$.text");
+        assertThat(text).contains("緊急度: 業務が止まっている").contains("「今すぐ送る」による送付");
+        awaitRecorded(id);
+    }
+
+    @Test
+    void 本文中のSlackの特殊文字は無害化される() throws Exception {
+        filedNow("<!channel> &amp;", "job-admin");
 
         String text = JsonPath.read(awaitPost("/job-admin"), "$.text");
         assertThat(text).contains("&lt;!channel&gt;").doesNotContain("<!channel>");
@@ -219,9 +242,7 @@ class SlackNotificationTest extends ApiSupport {
 
     @Test
     void Slackが500を返しても問い合わせは担当者に送付済みのままで失敗が記録される() throws Exception {
-        String id = idOf(create("期限の仕様", "billing"));
-
-        sendNow(id).andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("FILED"));
+        String id = filedNow("期限の仕様", "billing");
 
         awaitPost("/error");
         awaitRecorded(id);
@@ -237,7 +258,7 @@ class SlackNotificationTest extends ApiSupport {
 
     @Test
     void Slackがタイムアウトしても送付は取り消されず失敗が記録される() throws Exception {
-        String id = idOf(create("期限の仕様", "slow"));
+        String id = toAnswering("期限の仕様", "slow");
         long start = System.nanoTime();
 
         sendNow(id).andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("FILED"));

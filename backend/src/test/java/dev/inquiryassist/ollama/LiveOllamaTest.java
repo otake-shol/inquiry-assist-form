@@ -7,7 +7,8 @@ import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.AnsweredQuestion;
 import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.FollowUpQuestion;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
+import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.Usage;
@@ -40,9 +41,13 @@ class LiveOllamaTest {
     private static final String UTTERANCE = "求人管理画面で、掲載期限を過ぎた求人が応募者向けの一覧に出なくなった。仕様どおりなのか知りたい。";
 
     private static InquiryProperties properties() {
-        SkillSettings fast = new SkillSettings("ollama", MODEL, 0, false, Duration.ofSeconds(60), "v1");
-        SkillSettings thinking = new SkillSettings("ollama", MODEL, 0, true, Duration.ofSeconds(120), "v1");
+        SkillSettings fast = new SkillSettings("ollama", MODEL, 0, false, Duration.ofSeconds(60), "v2");
+        SkillSettings thinking = new SkillSettings("ollama", MODEL, 0, true, Duration.ofSeconds(120), "v2");
         return new InquiryProperties(
+                List.of("ja"),
+                List.of(),
+                List.of(),
+                List.of(),
                 List.of(),
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
                 null,
@@ -58,7 +63,7 @@ class LiveOllamaTest {
 
     private static void assertUsage(Usage usage) {
         assertThat(usage.model()).isEqualTo(MODEL);
-        assertThat(usage.promptVersion()).isEqualTo("v1");
+        assertThat(usage.promptVersion()).isEqualTo("v2");
         assertThat(usage.inputTokens()).isPositive();
         assertThat(usage.outputTokens()).isPositive();
         assertThat(usage.mock()).isFalse();
@@ -74,15 +79,15 @@ class LiveOllamaTest {
     }
 
     @Test
-    void 受付は種別を返し対象システムは候補のidかnull() {
+    void 受付は種類を返しシステムと機能は候補のidかnull() {
         var skill = new OllamaReceptionSkill(client(), JSON, properties());
         long start = System.nanoTime();
 
-        var result = skill.receive(UTTERANCE, SYSTEMS, null);
+        var result = skill.receive(UTTERANCE, SYSTEMS, Placement.NONE);
 
         report("reception", start, result);
-        assertThat(result.value().category()).isNotNull();
-        assertThat(result.value().guessedSystemId()).isIn(null, "job-admin", "billing");
+        assertThat(result.value().type()).isNotNull();
+        assertThat(result.value().systemId()).isIn(null, "job-admin", "billing");
         assertUsage(result.usage());
     }
 
@@ -91,11 +96,11 @@ class LiveOllamaTest {
         var skill = new OllamaInterviewerSkill(client(), JSON, properties());
         long start = System.nanoTime();
 
-        var result = skill.ask(UTTERANCE, InquiryCategory.SPEC_QUESTION, null, SCOPE);
+        var result = skill.ask(UTTERANCE, InquiryType.HOW_IT_WORKS, null, null, SCOPE);
 
         report("interviewer", start, result);
         List<FollowUpQuestion> questions = result.value().questions();
-        assertThat(questions.size()).isBetween(0, 3);
+        assertThat(questions.size()).isBetween(0, 2);
         for (int i = 0; i < questions.size(); i++) {
             assertThat(questions.get(i).id()).isEqualTo("q" + (i + 1));
             assertThat(questions.get(i).text()).isNotBlank();
@@ -113,18 +118,17 @@ class LiveOllamaTest {
                 new AnsweredQuestion(new FollowUpQuestion("q2", "いつからですか", List.of()), null));
         long start = System.nanoTime();
 
-        var first = skill.restate(UTTERANCE, InquiryCategory.SPEC_QUESTION, answers, SYSTEMS.get(0), List.of());
+        var first = skill.restate(UTTERANCE, InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), null, answers, List.of());
         report("restater", start, first);
         var corrected = skill.restate(
-                UTTERANCE, InquiryCategory.SPEC_QUESTION, answers, SYSTEMS.get(0), List.of("消えたのは昨日から"));
+                UTTERANCE, InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), null, answers, List.of("消えたのは昨日から"));
 
         for (var result : List.of(first, corrected)) {
             StructuredInquiry value = result.value();
             assertThat(value.summary()).isNotBlank();
             assertThat(value.goal()).isNotBlank();
-            assertThat(value.category()).isEqualTo(InquiryCategory.SPEC_QUESTION);
+            assertThat(value.type()).isEqualTo(InquiryType.HOW_IT_WORKS);
             assertThat(value.targetSystem()).isEqualTo("求人管理画面");
-            assertThat(value.urgency()).isNotNull();
             assertUsage(result.usage());
         }
     }
@@ -138,10 +142,9 @@ class LiveOllamaTest {
                 new Finding("期限切れの求人は延長できない", List.of(citation)));
         var inquiry = new StructuredInquiry(
                 "求人の掲載期限を過ぎると一覧に出なくなった。仕様どおりかを知りたい。",
-                InquiryCategory.SPEC_QUESTION,
+                InquiryType.HOW_IT_WORKS,
                 "求人管理画面",
                 UTTERANCE,
-                null,
                 null,
                 null);
         long start = System.nanoTime();

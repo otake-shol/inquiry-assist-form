@@ -40,8 +40,7 @@ class CustomizedSettingsTest extends ApiSupport {
                 .andExpect(jsonPath("$.user.name").value("テスト利用者"))
                 .andExpect(jsonPath("$.user.id").value(FixedCurrentUserProvider.USER_ID))
                 .andExpect(jsonPath("$.operatorName").value("テスト担当者"));
-        String id = idOf(create("期限の仕様", null));
-        sendNow(id);
+        String id = filedNow("期限の仕様", null);
 
         mvc.perform(post("/api/operator/inquiries/" + id + "/replies")
                         .contentType(MediaType.APPLICATION_JSON)

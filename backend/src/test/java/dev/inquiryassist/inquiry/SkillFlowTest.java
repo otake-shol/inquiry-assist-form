@@ -12,7 +12,7 @@ import java.util.Map;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 
-/** スキルの構成に伴う、API から見た動き（照合、説明の失敗、聞き手の失敗、追加質問の回答の状態、利用量）を確認する。 */
+/** スキルの構成に伴う、API から見た動き（照合、説明の失敗、聞き手の失敗、入口の答えの記録、利用量）を確認する。 */
 class SkillFlowTest extends ApiSupport {
 
     private static final String SPEC = "期限の仕様";
@@ -27,14 +27,6 @@ class SkillFlowTest extends ApiSupport {
                 .orElseThrow()
                 .substring("data:".length())
                 .trim();
-    }
-
-    private List<String> usageSteps(String id) {
-        return jdbc.queryForList(
-                "select u->>'step' from inquiries, jsonb_array_elements(usages) with ordinality as t(u, ord)"
-                        + " where id = ?::uuid order by ord",
-                String.class,
-                id);
     }
 
     private String operatorDetail(String id) throws Exception {
@@ -213,12 +205,12 @@ class SkillFlowTest extends ApiSupport {
         assertThat((String) JsonPath.read(done, "$.answer.askerExplanation")).isNotBlank();
         assertThat((List<?>) JsonPath.read(done, "$.answer.citations")).hasSize(2);
         assertThat((List<?>) JsonPath.read(done, "$.answer.memo.findings")).hasSize(2);
-        // 種別ごとの終わり方は変わらない: 仕様確認は本人の判定を待つ
+        // 種類ごとの終わり方は変わらない: 仕組みを知りたいは本人の判定を待つ
         assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("ANSWERED");
     }
 
     @Test
-    void 不具合の疑いは的外れでも担当者に送られる() throws Exception {
+    void おかしいかもしれないは的外れでも担当者に送られる() throws Exception {
         String id = toAnswering("[的外れ] 表示がおかしい", null);
 
         String done = doneOf(stream(id));
@@ -230,20 +222,17 @@ class SkillFlowTest extends ApiSupport {
     // ---- 聞き手 ----
 
     @Test
-    void 質問エラーでも201が返り質問なしで言い直しまで進める() throws Exception {
-        String utterance = "[質問エラー] " + SPEC;
+    void 質問エラーでも質問なしで言い直しまで進め_失敗した呼び出しとして利用量に残る() throws Exception {
+        String id = idOf(create("[質問エラー] " + SPEC));
 
-        String created = create(utterance, null);
-        String id = idOf(created);
+        String last = finishIntake(id, null);
 
-        assertThat((List<?>) JsonPath.read(created, "$.questions")).isEmpty();
-        assertThat((String) JsonPath.read(created, "$.category")).isEqualTo("SPEC_QUESTION");
-        answers(id, EMPTY_ANSWERS)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
-                .andExpect(jsonPath("$.structured.summary").isNotEmpty());
-        // 失敗した呼び出しとして利用量に残る
-        assertThat(usageSteps(id)).startsWith("reception", "interviewer", "restater");
+        assertThat((String) JsonPath.read(last, "$.step")).isEqualTo("STRUCTURED");
+        assertThat((String) JsonPath.read(last, "$.structured.summary")).isNotEmpty();
+        // 詳しい質問はなく、システムへの答えと文章だけで進んだ
+        assertThat((List<String>) JsonPath.read(last, "$.intake.entries[*].questionId"))
+                .containsExactly("type", "system");
+        assertThat(usageSteps(id)).containsExactly("reception", "interviewer", "restater");
         assertThat(jdbc.queryForObject(
                         "select (usages->1->>'failed')::boolean from inquiries where id = ?::uuid", Boolean.class, id))
                 .isTrue();
@@ -256,98 +245,60 @@ class SkillFlowTest extends ApiSupport {
                 .isTrue();
     }
 
-    @Test
-    void 種別変更で聞き手が失敗しても200で質問は空になり次の変更で再び呼ばれる() throws Exception {
-        String id = idOf(create("[質問エラー] 延長をお願いします", null));
-
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/inquiries/" + id + "/category")
-                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                        .content("{\"category\":\"SPEC_QUESTION\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.questions").isEmpty());
-
-        assertThat(usageSteps(id)).containsExactly("reception", "interviewer");
-    }
-
     // ---- 利用量 ----
 
     @Test
-    void 利用量のstepはスキルの識別子で作業依頼では聞き手と調査が現れない() throws Exception {
-        String id = idOf(create("延長をお願いします", null));
-        answers(id, EMPTY_ANSWERS);
+    void 変えてほしいは調査せず_利用量に聞き手と言い直しだけが現れる() throws Exception {
+        String id = toStructured("画面を変えてほしい", null);
         confirm(id).andExpect(jsonPath("$.outcome").value("FILED"));
 
-        assertThat(usageSteps(id)).containsExactly("reception", "restater");
+        assertThat(usageSteps(id)).containsExactly("reception", "interviewer", "restater");
     }
 
     @Test
-    void 仕様確認の全経路の利用量は受付_聞き手_言い直し_調査_説明の順() throws Exception {
+    void 仕組みを知りたいの全経路の利用量は受付_聞き手_言い直し_調査_説明の順() throws Exception {
         String id = toAnswering(SPEC, null);
         stream(id);
 
         assertThat(usageSteps(id)).containsExactly("reception", "interviewer", "restater", "investigator", "explainer");
     }
 
-    // ---- 追加質問の回答の状態 ----
+    // ---- 入口の答えの記録 ----
 
     @Test
-    void followUpsのstatusは回答あり_わからない_答える前に送ったの3通り() throws Exception {
-        String answered = idOf(create(SPEC, null));
-        answers(answered, "{\"answers\":[{\"questionId\":\"q1\",\"answer\":\"求人管理画面\"},{\"questionId\":\"q2\",\"answer\":null}]}");
-        sendNow(answered);
-        String before = idOf(create(SPEC, null));
-        sendNow(before);
+    void 担当者の詳細には入口の答えが聞いた順に入り_選んだ_わからない_書かずに進んだが区別できる() throws Exception {
+        String id = idOf(start());
+        pick(id, "type", "HOW_TO");
+        pick(id, "system", "job-admin");
+        unknown(id, "function");
+        pick(id, "q1", "o2");
+        skip(id, "note").andExpect(jsonPath("$.step").value("STRUCTURED"));
+        confirm(id);
+        sendNow(id).andExpect(jsonPath("$.outcome").value("FILED"));
 
-        String a = operatorDetail(answered);
-        assertThat((List<String>) JsonPath.read(a, "$.followUps[*].status")).containsExactly("ANSWERED", "UNKNOWN");
-        assertThat((String) JsonPath.read(a, "$.followUps[0].answer")).isEqualTo("求人管理画面");
-        assertThat((Object) JsonPath.read(a, "$.followUps[1].answer")).isNull();
+        String detail = operatorDetail(id);
 
-        String b = operatorDetail(before);
-        assertThat((List<String>) JsonPath.read(b, "$.followUps[*].status")).containsOnly("NOT_ANSWERED").hasSize(2);
-        assertThat((List<Object>) JsonPath.read(b, "$.followUps[*].answer")).containsOnlyNulls();
+        assertThat((List<String>) JsonPath.read(detail, "$.intake[*].questionId"))
+                .containsExactly("type", "system", "function", "q1", "note");
+        assertThat((List<String>) JsonPath.read(detail, "$.intake[*].kind"))
+                .containsExactly("TYPE", "SYSTEM", "FUNCTION", "DETAIL", "NOTE");
+        assertThat((List<String>) JsonPath.read(detail, "$.intake[*].answer.kind"))
+                .containsExactly("OPTION", "OPTION", "UNKNOWN", "OPTION", "SKIPPED");
+        assertThat((String) JsonPath.read(detail, "$.intake[3].answer.label")).isEqualTo("保存したとき");
+        assertThat((String) JsonPath.read(detail, "$.intake[3].text")).isEqualTo("どの場面での話ですか");
+        assertThat((Object) JsonPath.read(detail, "$.utterance")).isNull();
     }
 
     @Test
-    void 質問がなければfollowUpsは空のまま() throws Exception {
-        String id = idOf(create("[質問なし] " + SPEC, null));
-        answers(id, EMPTY_ANSWERS);
-        sendNow(id);
-
-        assertThat((List<?>) JsonPath.read(operatorDetail(id), "$.followUps")).isEmpty();
-    }
-
-    @Test
-    void 追加質問へ戻った後に答えずに送ると未回答になる() throws Exception {
-        String id = idOf(create(SPEC, null));
-        answers(id, "{\"answers\":[{\"questionId\":\"q1\",\"answer\":\"求人管理画面\"},{\"questionId\":\"q2\",\"answer\":\"掲載中\"}]}");
-        mvc.perform(post("/api/inquiries/" + id + "/reopen")).andExpect(jsonPath("$.step").value("TRIAGED"));
-
+    void 補足に書いた文章は本人が書いた文章に入り_詳しい質問がなければ入口の答えは置き場所だけ() throws Exception {
+        String id = idOf(create("[質問なし] " + SPEC));
+        finishIntake(id, null);
+        confirm(id);
         sendNow(id);
 
         String detail = operatorDetail(id);
-        assertThat((List<String>) JsonPath.read(detail, "$.followUps[*].status")).containsOnly("NOT_ANSWERED");
-        assertThat((List<Object>) JsonPath.read(detail, "$.followUps[*].answer")).containsOnlyNulls();
-    }
 
-    @Test
-    void 追加質問へ戻って答え直すと回答あり扱いに戻る() throws Exception {
-        String id = idOf(create(SPEC, null));
-        answers(id, EMPTY_ANSWERS);
-        mvc.perform(post("/api/inquiries/" + id + "/reopen"));
-        answers(id, "{\"answers\":[{\"questionId\":\"q1\",\"answer\":\"その他\"}]}");
-        sendNow(id);
-
-        assertThat((List<String>) JsonPath.read(operatorDetail(id), "$.followUps[*].status"))
-                .containsExactly("ANSWERED", "UNKNOWN");
-    }
-
-    @Test
-    void 障害の固定質問に答えて案内された問い合わせは回答ありになる() throws Exception {
-        String id = idOf(create("サイトが止まっていて障害になっている", null));
-        answers(id, "{\"answers\":[{\"questionId\":\"incident-check\",\"answer\":\"いいえ\"}]}");
-        sendNow(id);
-
-        assertThat((List<String>) JsonPath.read(operatorDetail(id), "$.followUps[*].status")).containsExactly("ANSWERED");
+        assertThat((List<String>) JsonPath.read(detail, "$.intake[*].kind")).containsExactly("TYPE", "SYSTEM");
+        assertThat((String) JsonPath.read(detail, "$.utterance")).isEqualTo("[質問なし] " + SPEC);
     }
 }

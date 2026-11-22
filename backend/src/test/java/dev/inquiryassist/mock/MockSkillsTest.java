@@ -9,7 +9,9 @@ import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.AnsweredQuestion;
 import dev.inquiryassist.core.CitationVerifier;
 import dev.inquiryassist.core.FollowUpQuestion;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.FunctionOption;
+import dev.inquiryassist.core.InquiryType;
+import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.skill.AnswerPipeline;
@@ -28,9 +30,13 @@ class MockSkillsTest {
 
     private static final Duration DELAY = Duration.ofMillis(40);
     private static final List<SystemOption> SYSTEMS = List.of(
-            new SystemOption("job-admin", "求人管理画面"),
-            new SystemOption("applicant-list", "応募者向けの一覧"),
-            new SystemOption("billing", "請求管理"));
+            new SystemOption(
+                    "job-admin",
+                    "求人管理画面",
+                    List.of(new FunctionOption("posting", "求人の掲載"), new FunctionOption("applicants", "応募者の一覧"))),
+            new SystemOption("billing", "請求管理", List.of(new FunctionOption("invoice", "請求書"))),
+            new SystemOption("reports", "レポート"));
+    private static final FunctionOption POSTING = SYSTEMS.get(0).functions().get(0);
 
     private final MockReceptionSkill reception = new MockReceptionSkill();
     private final MockInterviewerSkill interviewer = new MockInterviewerSkill();
@@ -40,8 +46,8 @@ class MockSkillsTest {
     private final AccessScope scope = new AccessScope("u", Set.of("job-board", "faq", "glossary"));
     private final CitationVerifier verifier = new CitationVerifier(new MockKnowledgeSearch());
 
-    private StructuredInquiry inquiry(InquiryCategory category, String goal) {
-        return new StructuredInquiry("言い直し", category, null, goal, null, null, null);
+    private StructuredInquiry inquiry(InquiryType type, String goal) {
+        return new StructuredInquiry("言い直し", type, null, goal, null, null);
     }
 
     private AnswerPipeline pipeline() {
@@ -52,99 +58,194 @@ class MockSkillsTest {
 
     @ParameterizedTest
     @CsvSource({
-        "サイトがつながらない, INCIDENT",
-        "システムが落ちている, INCIDENT",
-        "本番が落ちています, INCIDENT",
-        "掲載の延長をお願いします, WORK_REQUEST",
-        "障害だが対応してください, INCIDENT", // 障害が依頼より優先
-        "依頼したいがバグかもしれない, WORK_REQUEST", // 依頼がバグより優先
-        "一覧の表示がおかしい, SUSPECTED_BUG",
-        "期限の仕様を教えて, SPEC_QUESTION"
+        "ここを変えてほしい, CHANGE_REQUEST",
+        "要望です, CHANGE_REQUEST",
+        "一覧を改善してください, CHANGE_REQUEST", // 変えてほしい系が依頼より優先
+        "掲載の延長をお願いします, DO_FOR_ME",
+        "依頼したいがバグかもしれない, DO_FOR_ME", // 依頼がバグより優先
+        "一覧の表示がおかしい, LOOKS_WRONG",
+        "不具合かも, LOOKS_WRONG",
+        "バグだと思う, LOOKS_WRONG",
+        "おかしいが手順を知りたい, LOOKS_WRONG", // おかしいが使い方より優先
+        "使い方を教えて, HOW_TO",
+        "やり方が分からない, HOW_TO",
+        "手順を知りたい, HOW_TO",
+        "どうやって登録しますか, HOW_TO",
+        "期限の仕様を教えて, HOW_IT_WORKS"
     })
-    void 受付はキーワードの優先順位で種別を判定する(String utterance, InquiryCategory expected) {
-        assertThat(reception.receive(utterance, SYSTEMS, null).value().category()).isEqualTo(expected);
+    void 受付はキーワードの優先順位で種類を決める(String text, InquiryType expected) {
+        assertThat(reception.receive(text, SYSTEMS, Placement.NONE).value().type()).isEqualTo(expected);
     }
 
     @Test
-    void 受付は発話に候補の名前があれば対象システムを推測し選ばれていれば推測しない() {
-        assertThat(reception.receive("請求管理の期限の仕様", SYSTEMS, null).value().guessedSystemId())
+    void 受付は文章にシステムの名前があればそのシステムを置く() {
+        assertThat(reception.receive("請求管理の期限の仕様", SYSTEMS, Placement.NONE).value().systemId())
                 .isEqualTo("billing");
-        assertThat(reception.receive("期限の仕様", SYSTEMS, null).value().guessedSystemId()).isNull();
-        assertThat(reception.receive("請求管理の期限の仕様", SYSTEMS, SYSTEMS.get(0)).value().guessedSystemId())
-                .isNull();
+        assertThat(reception.receive("期限の仕様", SYSTEMS, Placement.NONE).value().systemId()).isNull();
+    }
+
+    @Test
+    void 受付はシステムが決まっていて文章に機能の名前があれば機能を置く() {
+        // 文章に機能の名前だけがあっても、システムが決まらなければ機能は置かない
+        assertThat(reception.receive("求人の掲載の仕様", SYSTEMS, Placement.NONE).value().functionId()).isNull();
+        var fromText = reception.receive("求人管理画面の求人の掲載の仕様", SYSTEMS, Placement.NONE).value();
+        assertThat(fromText.systemId()).isEqualTo("job-admin");
+        assertThat(fromText.functionId()).isEqualTo("posting");
+        // 本人が選んだシステムの機能も置ける
+        assertThat(reception.receive("応募者の一覧の仕様", SYSTEMS, new Placement(null, "job-admin", null)).value().functionId())
+                .isEqualTo("applicants");
+        // 文章に機能の名前がなければ置かない
+        assertThat(reception.receive("求人管理画面の仕様", SYSTEMS, Placement.NONE).value().functionId()).isNull();
+    }
+
+    @Test
+    void 受付は緊急度を文章から決めない() {
+        assertThat(reception.receive("至急。止まっていて障害です", SYSTEMS, Placement.NONE).value().type())
+                .isEqualTo(InquiryType.HOW_IT_WORKS);
     }
 
     @Test
     void 判定エラータグは受付でAI利用不可になる() {
-        assertThatThrownBy(() -> reception.receive("[判定エラー] 期限の仕様", SYSTEMS, null))
+        assertThatThrownBy(() -> reception.receive("[判定エラー] 期限の仕様", SYSTEMS, Placement.NONE))
                 .isInstanceOf(AiUnavailableException.class);
     }
 
     // ---- 聞き手 ----
 
     @Test
-    void 聞き手は対象システムが未定なら2問_決まっていれば画面を尋ねる質問を除いた1問() {
-        var unknown = interviewer.ask("期限の仕様", InquiryCategory.SPEC_QUESTION, null, scope).value();
-        var known = interviewer.ask("期限の仕様", InquiryCategory.SPEC_QUESTION, SYSTEMS.get(0), scope).value();
+    void 聞き手は1問を返し_idはq1で選択肢のidはo1から() {
+        var questions = interviewer
+                .ask("期限の仕様", InquiryType.HOW_IT_WORKS, null, null, scope)
+                .value()
+                .questions();
 
-        assertThat(unknown.questions()).extracting(FollowUpQuestion::id).containsExactly("q1", "q2");
-        assertThat(unknown.questions()).allSatisfy(q -> assertThat(q.options()).isNotEmpty());
-        assertThat(known.questions()).extracting(FollowUpQuestion::id).containsExactly("q2");
+        assertThat(questions).singleElement().satisfies(q -> {
+            assertThat(q.id()).isEqualTo("q1");
+            assertThat(q.text()).isEqualTo("どの場面での話ですか");
+            assertThat(q.options()).containsExactly("画面を開いたとき", "保存したとき", "一覧を見たとき");
+        });
     }
 
     @Test
-    void 質問なしタグは追加質問を出さず質問エラータグは聞き手が失敗する() {
-        assertThat(interviewer.ask("[質問なし] 仕様", InquiryCategory.SPEC_QUESTION, null, scope).value().questions())
+    void 聞き手は文章がなくても質問を返す() {
+        assertThat(interviewer.ask(null, null, SYSTEMS.get(0), POSTING, scope).value().questions()).hasSize(1);
+    }
+
+    @Test
+    void 質問なしタグは詳しい質問を出さず質問エラータグは聞き手が失敗する() {
+        assertThat(interviewer.ask("[質問なし] 仕様", InquiryType.HOW_IT_WORKS, null, null, scope).value().questions())
                 .isEmpty();
-        assertThatThrownBy(() -> interviewer.ask("[質問エラー] 仕様", InquiryCategory.SPEC_QUESTION, null, scope))
+        assertThatThrownBy(() -> interviewer.ask("[質問エラー] 仕様", InquiryType.HOW_IT_WORKS, null, null, scope))
                 .isInstanceOf(AiUnavailableException.class);
     }
 
     // ---- 言い直し ----
 
+    private static List<AnsweredQuestion> answers(String... textAndAnswer) {
+        List<AnsweredQuestion> list = new ArrayList<>();
+        for (int i = 0; i < textAndAnswer.length; i += 2) {
+            list.add(new AnsweredQuestion(new FollowUpQuestion("q" + (i / 2 + 1), textAndAnswer[i], List.of()), textAndAnswer[i + 1]));
+        }
+        return list;
+    }
+
     @Test
-    void 整形では確定した対象システムの名前をtargetSystemに入れgoalは発話のまま() {
-        var withSystem = restater.restate("[遅延] x", InquiryCategory.SPEC_QUESTION, List.of(), SYSTEMS.get(2), List.of()).value();
-        var without = restater.restate("x", InquiryCategory.SPEC_QUESTION, List.of(), null, List.of()).value();
+    void 言い直しは確定したシステムの名前をtargetSystemに入れgoalは本人が書いた文章のまま() {
+        var withSystem = restater
+                .restate("[遅延] x", InquiryType.HOW_IT_WORKS, SYSTEMS.get(1), null, List.of(), List.of())
+                .value();
+        var without = restater.restate("x", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of()).value();
 
         assertThat(withSystem.targetSystem()).isEqualTo("請求管理");
         assertThat(withSystem.goal()).isEqualTo("[遅延] x");
+        assertThat(withSystem.type()).isEqualTo(InquiryType.HOW_IT_WORKS);
         assertThat(without.targetSystem()).isNull();
     }
 
     @Test
-    void 言い直しは種別ごとの形でタグを含まず回答が末尾に足される() {
-        var answered = List.of(
-                new AnsweredQuestion(new FollowUpQuestion("q1", "どの画面での話ですか", List.of()), "求人管理画面"),
-                new AnsweredQuestion(new FollowUpQuestion("q2", "状態は", List.of()), null));
+    void 言い直しは置き場所の前置きと種類ごとの文で始まる() {
+        assertThat(summary(InquiryType.HOW_TO, SYSTEMS.get(0), POSTING))
+                .isEqualTo("求人管理画面の求人の掲載について、使い方を知りたい。");
+        assertThat(summary(InquiryType.HOW_IT_WORKS, SYSTEMS.get(0), null))
+                .isEqualTo("求人管理画面について、いまの仕組みがどうなっているかを知りたい。");
+        assertThat(summary(InquiryType.LOOKS_WRONG, null, null))
+                .isEqualTo("動きがおかしいかもしれない。意図した動きかどうかを確認したい。");
+        assertThat(summary(InquiryType.DO_FOR_ME, SYSTEMS.get(1), null)).isEqualTo("請求管理について、作業をしてほしい。");
+        assertThat(summary(InquiryType.CHANGE_REQUEST, null, null)).isEqualTo("変えてほしい点がある。");
+        assertThat(summary(null, null, null)).isEqualTo("相談したいことがある。");
+    }
 
-        assertThat(restater.restate("[質問なし] [遅延] 期限", InquiryCategory.SPEC_QUESTION, List.of(), null, List.of()).value().summary())
-                .isEqualTo("「期限」について、いまの仕組みがどうなっているかを知りたい。");
-        assertThat(restater.restate("期限", InquiryCategory.SUSPECTED_BUG, answered, null, List.of()).value().summary())
-                .isEqualTo("「期限」という状況が起きている。これが意図した動きかどうかを確認したい。（どの画面での話ですか: 求人管理画面）");
+    private String summary(InquiryType type, SystemOption system, FunctionOption function) {
+        return restater.restate(null, type, system, function, List.of(), List.of()).value().summary();
     }
 
     @Test
-    void 作業依頼の言い直しは固定3問の回答から作り分からない項目を省く() {
-        var answers = List.of(
-                new AnsweredQuestion(new FollowUpQuestion("wr-what", "何を", List.of()), "期間の延長"),
-                new AnsweredQuestion(new FollowUpQuestion("wr-when", "いつ", List.of()), null),
-                new AnsweredQuestion(new FollowUpQuestion("wr-target", "対象", List.of()), "求人A"));
+    void 言い直しは文章のタグを取り除いて続け_goalにはそのまま入れる() {
+        var result = restater
+                .restate("[質問なし] [遅延] 期限", InquiryType.HOW_TO, null, null, List.of(), List.of())
+                .value();
 
-        assertThat(restater.restate("延長をお願いします", InquiryCategory.WORK_REQUEST, answers, null, List.of()).value().summary())
-                .isEqualTo("期間の延長を対応してほしい。対象は求人A。");
+        assertThat(result.summary()).isEqualTo("使い方を知りたい。 書かれた内容: 期限");
+        assertThat(result.goal()).isEqualTo("[質問なし] [遅延] 期限");
+    }
+
+    @Test
+    void 言い直しは文章がなければgoalに種類ごとの文を入れる() {
+        var result = restater.restate(null, InquiryType.DO_FOR_ME, null, null, List.of(), List.of()).value();
+
+        assertThat(result.goal()).isEqualTo("作業をしてほしい。");
+    }
+
+    @Test
+    void 言い直しは詳しい質問の答えのうちわからない以外を続ける() {
+        var result = restater
+                .restate(
+                        null,
+                        InquiryType.LOOKS_WRONG,
+                        SYSTEMS.get(0),
+                        POSTING,
+                        answers("いつから起きていますか", "今日から", "どの場面での話ですか", null, "対象の取引先はどこですか", "A社"),
+                        List.of())
+                .value();
+
+        assertThat(result.summary())
+                .isEqualTo("求人管理画面の求人の掲載について、動きがおかしいかもしれない。意図した動きかどうかを確認したい。"
+                        + " （いつから起きていますか: 今日から） （対象の取引先はどこですか: A社）");
+    }
+
+    @Test
+    void 言い直しは置き場所と文章と答えと訂正を順につなぐ() {
+        var result = restater
+                .restate(
+                        "表示がおかしい",
+                        InquiryType.LOOKS_WRONG,
+                        SYSTEMS.get(0),
+                        null,
+                        answers("いつから起きていますか", "今日から"),
+                        List.of("一昨日から"))
+                .value();
+
+        assertThat(result.summary())
+                .isEqualTo("求人管理画面について、動きがおかしいかもしれない。意図した動きかどうかを確認したい。"
+                        + " 書かれた内容: 表示がおかしい （いつから起きていますか: 今日から） 補足: 一昨日から");
     }
 
     @Test
     void 訂正があれば伝えられた順に補足を足しgoalを変えない() {
-        var first = restater.restate("期限", InquiryCategory.SPEC_QUESTION, List.of(), null, List.of()).value();
+        var first = restater.restate("期限", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of()).value();
 
         var revised = restater
-                .restate("期限", InquiryCategory.SPEC_QUESTION, List.of(), null, List.of("一昨日から", "画面は管理画面"))
+                .restate("期限", InquiryType.HOW_IT_WORKS, null, null, List.of(), List.of("一昨日から", "画面は管理画面"))
                 .value();
 
         assertThat(revised.summary()).isEqualTo(first.summary() + " 補足: 一昨日から 補足: 画面は管理画面");
         assertThat(revised.goal()).isEqualTo(first.goal());
+    }
+
+    @Test
+    void 言い直しエラータグは言い直しが失敗する() {
+        assertThatThrownBy(() -> restater.restate("[言い直しエラー] x", null, null, null, List.of(), List.of()))
+                .isInstanceOf(AiUnavailableException.class);
     }
 
     // ---- 調査・説明（パイプライン経由） ----
@@ -153,7 +254,7 @@ class MockSkillsTest {
     void 正常系は事実2件がすべて確かめられ説明は事実の文をつないだものになる() {
         List<String> progress = new ArrayList<>();
 
-        var result = pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "期限の仕様"), scope, progress::add);
+        var result = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "期限の仕様"), scope, progress::add);
 
         assertThat(progress).hasSize(5).endsWith(AnswerPipeline.PROGRESS_VERIFYING, AnswerPipeline.PROGRESS_EXPLAINING);
         assertThat(result.answer().grounded()).isTrue();
@@ -167,8 +268,8 @@ class MockSkillsTest {
     }
 
     @Test
-    void 不具合の疑いの説明は現在の動作として書き仕様の正否を断定しない() {
-        var answer = pipeline().run(inquiry(InquiryCategory.SUSPECTED_BUG, "表示がおかしい"), scope, m -> {}).answer();
+    void おかしいかもしれないの説明は現在の動作として書き仕様の正否を断定しない() {
+        var answer = pipeline().run(inquiry(InquiryType.LOOKS_WRONG, "表示がおかしい"), scope, m -> {}).answer();
 
         assertThat(answer.askerExplanation())
                 .startsWith("現在の実装では、")
@@ -179,8 +280,8 @@ class MockSkillsTest {
 
     @Test
     void 説明は通常は問いに答えていると判定し的外れタグでは答えていないと判定する() {
-        var normal = pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "期限"), scope, m -> {}).answer();
-        var offTopic = pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "[的外れ] 期限"), scope, m -> {}).answer();
+        var normal = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "期限"), scope, m -> {}).answer();
+        var offTopic = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[的外れ] 期限"), scope, m -> {}).answer();
 
         assertThat(normal.grounded()).isTrue();
         assertThat(normal.answered()).isTrue();
@@ -194,11 +295,11 @@ class MockSkillsTest {
     @Test
     void 一部幽霊タグは確かめられた事実だけから説明を書き落ちた事実は説明に現れない() {
         Investigation raw = investigator
-                .investigate(inquiry(InquiryCategory.SPEC_QUESTION, "[一部幽霊] 期限"), scope, m -> {})
+                .investigate(inquiry(InquiryType.HOW_IT_WORKS, "[一部幽霊] 期限"), scope, m -> {})
                 .value();
         String ghostStatement = raw.findings().get(1).statement();
 
-        var answer = pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "[一部幽霊] 期限"), scope, m -> {}).answer();
+        var answer = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[一部幽霊] 期限"), scope, m -> {}).answer();
 
         assertThat(answer.grounded()).isTrue();
         assertThat(answer.askerExplanation()).contains(raw.findings().get(0).statement()).doesNotContain(ghostStatement);
@@ -209,7 +310,7 @@ class MockSkillsTest {
 
     @Test
     void 幽霊出典タグは事実が全部落ちて根拠なしになりunconfirmedに残る() {
-        var answer = pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "[幽霊出典] 期限"), scope, m -> {}).answer();
+        var answer = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[幽霊出典] 期限"), scope, m -> {}).answer();
 
         assertThat(answer.grounded()).isFalse();
         assertThat(answer.askerExplanation()).isNull();
@@ -219,7 +320,7 @@ class MockSkillsTest {
 
     @Test
     void 根拠なしタグは事実を返さず根拠なしになる() {
-        var answer = pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "[根拠なし] 期限"), scope, m -> {}).answer();
+        var answer = pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[根拠なし] 期限"), scope, m -> {}).answer();
 
         assertThat(answer.grounded()).isFalse();
         assertThat(answer.memo().unconfirmed()).isEmpty();
@@ -228,11 +329,11 @@ class MockSkillsTest {
 
     @Test
     void エラータグは調査で_拒否タグは調査で_説明エラータグは説明で失敗する() {
-        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "[エラー] x"), scope, m -> {}))
+        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[エラー] x"), scope, m -> {}))
                 .isInstanceOf(AiUnavailableException.class);
-        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "[拒否] x"), scope, m -> {}))
+        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[拒否] x"), scope, m -> {}))
                 .isInstanceOf(AiRefusalException.class);
-        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryCategory.SPEC_QUESTION, "[説明エラー] x"), scope, m -> {}))
+        assertThatThrownBy(() -> pipeline().run(inquiry(InquiryType.HOW_IT_WORKS, "[説明エラー] x"), scope, m -> {}))
                 .isInstanceOf(dev.inquiryassist.core.skill.ExplanationFailedException.class)
                 .satisfies(e -> {
                     var failed = (dev.inquiryassist.core.skill.ExplanationFailedException) e;
@@ -245,7 +346,7 @@ class MockSkillsTest {
         List<Long> times = new ArrayList<>();
         long start = System.nanoTime();
 
-        investigator.investigate(inquiry(InquiryCategory.SPEC_QUESTION, "[遅延] x"), scope, m -> times.add(System.nanoTime()));
+        investigator.investigate(inquiry(InquiryType.HOW_IT_WORKS, "[遅延] x"), scope, m -> times.add(System.nanoTime()));
 
         long previous = start;
         for (long t : times) {
@@ -259,14 +360,17 @@ class MockSkillsTest {
     void 遅延タグがなければ待たない() {
         long start = System.nanoTime();
 
-        investigator.investigate(inquiry(InquiryCategory.SPEC_QUESTION, "x"), scope, m -> {});
+        investigator.investigate(inquiry(InquiryType.HOW_IT_WORKS, "x"), scope, m -> {});
 
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(DELAY);
     }
 
     @Test
-    void 調査は回答を出さない種別を渡すと拒否する() {
-        assertThatThrownBy(() -> investigator.investigate(inquiry(InquiryCategory.WORK_REQUEST, "x"), scope, m -> {}))
+    void 調査は調べない種類を渡すと拒否し_種類が決まっていなければ調べる() {
+        assertThatThrownBy(() -> investigator.investigate(inquiry(InquiryType.CHANGE_REQUEST, "x"), scope, m -> {}))
                 .isInstanceOf(IllegalArgumentException.class);
+        assertThat(investigator.investigate(inquiry(null, "x"), scope, m -> {}).value().findings()).hasSize(2);
+        assertThat(investigator.investigate(inquiry(InquiryType.DO_FOR_ME, "x"), scope, m -> {}).value().findings())
+                .hasSize(2);
     }
 }

@@ -1,6 +1,6 @@
 package dev.inquiryassist.eval;
 
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.SystemOption;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,7 +31,7 @@ final class CaseLoader {
             "mustInclude", "mustIncludeAny", "mustNotInclude", "mustNotMatch", "minSentences", "maxSentences", "style");
 
     private static final Set<String> RECEPTION_CONDITIONS =
-            Set.of("category", "categoryAnyOf", "systemId", "systemIdAnyOf");
+            Set.of("type", "typeAnyOf", "systemId", "systemIdAnyOf");
 
     private static final Set<String> INTERVIEWER_CONDITIONS = Set.of(
             "minQuestions", "maxQuestions", "forbidLocationQuestion", "forbidEngineerTerms", "mustNotMatch");
@@ -167,12 +167,12 @@ final class CaseLoader {
             }
             case INTERVIEWER -> {
                 requireString(node, "utterance", label, errors);
-                requireCategory(node, label, errors);
+                requireType(node, label, errors);
                 requireKey(node, "systemLabel", label, errors);
             }
             case RESTATER -> {
                 requireString(node, "utterance", label, errors);
-                requireCategory(node, label, errors);
+                requireType(node, label, errors);
                 requireKey(node, "systemLabel", label, errors);
                 if (!node.path("answers").isArray()) {
                     errors.add(label + ": answers は配列で必須（なければ空の配列）");
@@ -189,7 +189,7 @@ final class CaseLoader {
             }
             case EXPLAINER -> {
                 requireString(node, "question", label, errors);
-                requireCategory(node, label, errors);
+                requireType(node, label, errors);
                 if (!node.path("facts").isArray() || node.path("facts").isEmpty()) {
                     errors.add(label + ": facts は1件以上の配列で必須");
                 }
@@ -209,12 +209,12 @@ final class CaseLoader {
         }
     }
 
-    private static void requireCategory(JsonNode node, String label, List<String> errors) {
-        String value = node.path("category").isString() ? node.path("category").asString() : "";
+    private static void requireType(JsonNode node, String label, List<String> errors) {
+        String value = node.path("type").isString() ? node.path("type").asString() : "";
         try {
-            InquiryCategory.valueOf(value);
+            InquiryType.valueOf(value);
         } catch (IllegalArgumentException e) {
-            errors.add(label + ": category が不正: " + value);
+            errors.add(label + ": type が不正: " + value);
         }
     }
 
@@ -233,8 +233,8 @@ final class CaseLoader {
             validateValue(name, expect.get(name), label, errors);
         }
         if (skill == EvalSkill.RECEPTION) {
-            if (!expect.has("category") && !expect.has("categoryAnyOf")) {
-                errors.add(label + ": category か categoryAnyOf が必要");
+            if (!expect.has("type") && !expect.has("typeAnyOf")) {
+                errors.add(label + ": type か typeAnyOf が必要");
             }
             if (!expect.has("systemId") && !expect.has("systemIdAnyOf")) {
                 errors.add(label + ": systemId か systemIdAnyOf が必要（null は「推測しない」が正解であることを表す）");
@@ -275,12 +275,12 @@ final class CaseLoader {
                     errors.add(where + " は plain か polite");
                 }
             }
-            case "category" -> requireCategoryValue(value, where, errors);
-            case "categoryAnyOf" -> {
+            case "type" -> requireTypeValue(value, where, errors);
+            case "typeAnyOf" -> {
                 if (!value.isArray() || value.isEmpty()) {
-                    errors.add(where + " は種別の配列");
+                    errors.add(where + " は種類の配列");
                 } else {
-                    value.forEach(v -> requireCategoryValue(v, where, errors));
+                    value.forEach(v -> requireTypeValue(v, where, errors));
                 }
             }
             case "systemId" -> {
@@ -320,11 +320,11 @@ final class CaseLoader {
         }
     }
 
-    private static void requireCategoryValue(JsonNode value, String where, List<String> errors) {
+    private static void requireTypeValue(JsonNode value, String where, List<String> errors) {
         try {
-            InquiryCategory.valueOf(value.asString(""));
+            InquiryType.valueOf(value.asString(""));
         } catch (IllegalArgumentException e) {
-            errors.add(where + " の種別が不正: " + value.asString(""));
+            errors.add(where + " の種類が不正: " + value.asString(""));
         }
     }
 }

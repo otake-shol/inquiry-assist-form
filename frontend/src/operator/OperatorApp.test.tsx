@@ -31,7 +31,7 @@ const unreadItem = makeItem({ id: "op-1" });
 const readItem = makeItem({
   id: "op-2",
   read: true,
-  category: "SPEC_QUESTION",
+  type: { id: "HOW_IT_WORKS", label: "仕組みを知りたい" },
   system: null,
   summary: "掲載期限の延長日数を知りたい。",
   sentImmediately: true,
@@ -54,7 +54,7 @@ function operatorRoutes(items = [unreadItem, readItem]) {
       body: makeDetail({
         id: "op-2",
         read: true,
-        category: "SPEC_QUESTION",
+        type: { id: "HOW_IT_WORKS", label: "仕組みを知りたい", by: "ASKER" },
         system: null,
         sentImmediately: true,
         answer: null,
@@ -83,7 +83,7 @@ describe("オペレータ画面", () => {
     );
     expect(rows[0]).toHaveClass("unread");
     expect(within(rows[0]).getByText("未読")).toBeInTheDocument();
-    expect(rows[0]).toHaveTextContent("不具合の疑い");
+    expect(rows[0]).toHaveTextContent("おかしいかもしれない");
     expect(rows[0]).toHaveTextContent("求人管理画面");
     expect(rows[1]).not.toHaveClass("unread");
     expect(within(rows[1]).queryByText("未読")).not.toBeInTheDocument();
@@ -112,8 +112,8 @@ describe("オペレータ画面", () => {
     ).toBeInTheDocument();
     expect(count(calls, "POST", "/api/operator/inquiries/op-1/read")).toBe(1);
     expect(count(calls, "GET", "/api/operator/inquiries/op-1")).toBe(0);
-    // 追加質問と回答（null は「わからない」）、作り直しの一言、調べた結果
-    expect(within(detail).getByText("掲載中")).toBeInTheDocument();
+    // 入口の答え（わからないを含む）、作り直しの一言、調べた結果
+    expect(within(detail).getByText("今日から")).toBeInTheDocument();
     expect(within(detail).getByText("わからない")).toBeInTheDocument();
     expect(
       within(detail).getByText("消えたのは一昨日から"),
@@ -149,7 +149,7 @@ describe("オペレータ画面", () => {
     const fresh = makeItem({
       id: "op-9",
       summary: "請求書の宛名を変えてほしい。",
-      category: "WORK_REQUEST",
+      type: { id: "DO_FOR_ME", label: "やってほしい" },
       system: { id: "billing", label: "請求管理" },
     });
     const calls = installFakeFetch({
@@ -173,7 +173,7 @@ describe("オペレータ画面", () => {
       screen.getByRole("region", { name: "受付一覧" }),
     ).getAllByRole("button");
     expect(rows[0]).toHaveTextContent("請求書の宛名を変えてほしい。");
-    expect(rows[0]).toHaveTextContent("作業依頼");
+    expect(rows[0]).toHaveTextContent("やってほしい");
     const banner = screen.getByRole("status");
     expect(banner).toHaveTextContent("新しい問い合わせが届きました");
     expect(banner).toHaveTextContent("請求書の宛名を変えてほしい。");
@@ -273,7 +273,7 @@ describe("オペレータ画面の URL", () => {
     ).toBeInTheDocument();
     // 本人向けの画面ではない
     expect(
-      screen.queryByRole("button", { name: "送信する" }),
+      screen.queryByRole("group", { name: "何をしたいですか" }),
     ).not.toBeInTheDocument();
     expect(count(calls, "GET", "/api/operator/inquiries/op-1")).toBe(1);
     expect(count(calls, "POST", "/api/operator/inquiries/op-1/read")).toBe(1);
@@ -481,37 +481,178 @@ describe("調べた結果の区別と追加質問の状態", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("(b) 追加質問は回答・わからない・未回答を区別して示し、status が無ければ従来の表示", async () => {
+  it("(b) 入口の答えを、聞いた順に、選んだもの・文章・わからない・書かずに進んだ・文章から読み取ったに分けて示す。未回答の表示は無い", async () => {
     const detail = await openDetail(
       makeDetail({
         read: true,
-        followUps: [
-          { text: "どの画面ですか", answer: "一覧", status: "ANSWERED" },
-          { text: "いつからですか", answer: null, status: "UNKNOWN" },
-          { text: "状態はどれですか", answer: null, status: "NOT_ANSWERED" },
-          { text: "旧形式の質問", answer: null },
+        intake: [
+          {
+            questionId: "type",
+            kind: "TYPE",
+            text: "何をしたいですか",
+            answer: {
+              kind: "INFERRED",
+              optionId: "LOOKS_WRONG",
+              label: "おかしいかもしれない",
+            },
+          },
+          {
+            questionId: "system",
+            kind: "SYSTEM",
+            text: "どのシステムですか",
+            answer: { kind: "OPTION", optionId: "billing", label: "請求管理" },
+          },
+          {
+            questionId: "function",
+            kind: "FUNCTION",
+            text: "どの機能ですか",
+            answer: { kind: "UNKNOWN" },
+          },
+          {
+            questionId: "target",
+            kind: "DETAIL",
+            text: "対象の取引先はどこですか",
+            answer: { kind: "TEXT", text: "株式会社サンプル" },
+          },
+          {
+            questionId: "note",
+            kind: "NOTE",
+            text: "補足があれば書いてください",
+            answer: { kind: "SKIPPED" },
+          },
         ],
       }),
     );
-    const row = (text: string) => within(detail).getByText(text).closest("li")!;
-
-    expect(within(row("どの画面ですか")).getByText("一覧")).toBeInTheDocument();
+    const section = within(detail)
+      .getByRole("heading", { name: "入口の質問と答え" })
+      .closest("section")!;
+    const rows = within(section).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "何をしたいですかおかしいかもしれない（文章から読み取り）",
+      "どのシステムですか請求管理",
+      "どの機能ですかわからない",
+      "対象の取引先はどこですか株式会社サンプル",
+      "補足があれば書いてください書かずに進みました",
+    ]);
+    expect(within(detail).queryByText(/未回答/)).not.toBeInTheDocument();
     expect(
-      within(row("いつからですか")).getByText("わからない"),
-    ).toBeInTheDocument();
-    const notAnswered = row("状態はどれですか");
-    expect(
-      within(notAnswered).getByText("未回答（答える前に送られました）"),
-    ).toHaveClass("not-answered");
-    expect(
-      within(notAnswered).queryByText("わからない"),
+      within(detail).queryByText("追加質問と回答"),
     ).not.toBeInTheDocument();
-    expect(
-      within(row("いつからですか")).getByText("わからない"),
-    ).not.toHaveClass("not-answered");
-    expect(
-      within(row("旧形式の質問")).getByText("わからない"),
-    ).toBeInTheDocument();
+  });
+
+  it("入口の答えが無ければ見出しを出さず、本人の文章が無ければ元の発話も出さない", async () => {
+    window.history.replaceState({}, "", "/operator/op-1");
+    installFakeFetch({
+      ...operatorRoutes([readItem]),
+      "GET /api/operator/inquiries/op-1": {
+        body: makeDetail({ read: true, intake: [], utterance: null }),
+      },
+    });
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    const region = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+    await within(region).findByText("言い直し");
+    expect(within(region).queryByText("入口の質問と答え")).toBeNull();
+    expect(within(region).queryByText("元の発話")).toBeNull();
+  });
+});
+
+describe("種類・機能・緊急度の表示", () => {
+  /** 指定の一覧の1件と詳細を開く。 */
+  async function openCard(
+    item: ReturnType<typeof makeItem>,
+    detail: ReturnType<typeof makeDetail>,
+    config: object = { mock: false },
+  ) {
+    window.history.replaceState({}, "", "/operator");
+    installFakeFetch({
+      "GET /api/config": { body: config },
+      ...operatorRoutes([item]),
+      "GET /api/operator/inquiries/op-1": { body: detail },
+      "POST /api/operator/inquiries/op-1/read": { body: detail },
+    });
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    return await screen.findByRole("button", {
+      name: /求人が一覧に出なくなった/,
+    });
+  }
+
+  it("カードに種類、システムと機能、通常以外の緊急度を出す。通常のときは緊急度を出さない", async () => {
+    const card = await openCard(
+      makeItem({
+        read: true,
+        function: { id: "posting", label: "求人の掲載" },
+        urgency: "HURRY",
+      }),
+      makeDetail({ read: true }),
+    );
+    expect(card).toHaveTextContent("おかしいかもしれない");
+    expect(card).toHaveTextContent("求人管理画面 / 求人の掲載");
+    expect(card).toHaveTextContent("急ぎ");
+    cleanup();
+
+    const plain = await openCard(
+      makeItem({ read: true }),
+      makeDetail({ read: true }),
+    );
+    expect(plain).not.toHaveTextContent("急ぎ");
+    expect(plain).not.toHaveTextContent("通常");
+    expect(plain).not.toHaveTextContent(" / ");
+  });
+
+  it("緊急度の名前は、設定の名前があればそれを使う。種類が決まっていなければ「種類未定」", async () => {
+    const card = await openCard(
+      makeItem({ read: true, type: null, urgency: "BLOCKED" }),
+      makeDetail({ read: true }),
+      {
+        mock: false,
+        urgencies: [{ id: "BLOCKED", label: "止まっています" }],
+      },
+    );
+    expect(card).toHaveTextContent("種類未定");
+    await waitFor(() => expect(card).toHaveTextContent("止まっています"));
+  });
+
+  it("詳細の最上部に種類、システム、機能、通常以外の緊急度を出し、AI が置いたものにはそう添える。言い直しの項目に緊急度は出ない", async () => {
+    const user = userEvent.setup();
+    const card = await openCard(
+      makeItem({ read: true }),
+      makeDetail({
+        read: true,
+        urgency: "BLOCKED",
+        type: { id: "DO_FOR_ME", label: "やってほしい", by: "AI" },
+        system: { id: "billing", label: "請求管理", by: "ASKER" },
+        function: { id: "invoice", label: "請求書", by: "AI" },
+      }),
+    );
+    await user.click(card);
+    const detail = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+    const head = (
+      await within(detail).findByText("やってほしい（AIが文章から置きました）")
+    ).closest("header")!;
+    expect(head).toHaveTextContent("請求管理");
+    expect(head).not.toHaveTextContent("請求管理（AI");
+    expect(head).toHaveTextContent("請求書（AIが文章から置きました）");
+    expect(head).toHaveTextContent("業務が止まっている");
+    expect(within(detail).queryByText("緊急度")).not.toBeInTheDocument();
+  });
+
+  it("通常の緊急度は詳細に出さない", async () => {
+    const user = userEvent.setup();
+    const card = await openCard(
+      makeItem({ read: true }),
+      makeDetail({ read: true }),
+    );
+    await user.click(card);
+    const detail = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+    await within(detail).findByText("元の発話");
+    expect(within(detail).queryByText("通常")).not.toBeInTheDocument();
+    expect(within(detail).queryByText(/急ぎ|業務が止まっている/)).toBeNull();
   });
 });
 

@@ -1,39 +1,57 @@
 import { describe, expect, it } from "vitest";
-import { closingText, receiptText } from "./labels.ts";
+import { closingText } from "./labels.ts";
 import { makeView } from "../test/fakes.ts";
 
-const job = { id: "job-admin", label: "求人管理画面" };
-
-describe("receiptText", () => {
-  it("対象システムが無ければ従来の文言", () => {
-    expect(receiptText("SUSPECTED_BUG")).toBe(
-      "不具合かもしれない件として受け取りました",
-    );
-    expect(receiptText(null)).toBe("内容を受け取りました");
-  });
-
-  it("選んだ対象システムは「〜の、…として」と添える", () => {
-    expect(receiptText("SUSPECTED_BUG", job, false)).toBe(
-      "求人管理画面の、不具合かもしれない件として受け取りました",
-    );
-    expect(receiptText(null, job, false)).toBe(
-      "求人管理画面の話として内容を受け取りました",
-    );
-  });
-
-  it("推測した対象システムは推測と分かる言い方にする", () => {
-    expect(receiptText("SPEC_QUESTION", job, true)).toBe(
-      "求人管理画面の話だと推測しました。仕様の確認・相談として受け取りました",
-    );
-  });
-});
-
 describe("closingText", () => {
-  it("障害では案内文を別枠で返す", () => {
+  it("答えを待たずに送った場合は、書いた内容をそのまま添えたと伝える", () => {
     const text = closingText(
-      makeView({ outcome: "INCIDENT_REDIRECTED", incidentGuidance: "窓口へ" }),
+      makeView({ outcome: "FILED", sentImmediately: true }),
+      "担当者が確認します。",
+    );
+    expect(text.lead).toBe(
+      "担当者に送りました。書いていただいた内容をそのまま添えています。",
+    );
+    expect(text.guidance).toBe("担当者が確認します。");
+  });
+
+  it("業務が止まっている件は、すぐ届けたと伝える", () => {
+    const text = closingText(
+      makeView({
+        outcome: "FILED",
+        urgency: "BLOCKED",
+        sentImmediately: true,
+      }),
       null,
     );
-    expect(text.incident).toBe("窓口へ");
+    expect(text.lead).toBe(
+      "担当者にすぐ届けました。書いていただいた内容をそのまま添えています。",
+    );
+  });
+
+  it("調べた結果の有無で、添えた内容の言い方が変わる", () => {
+    const filed = makeView({ outcome: "FILED" });
+    expect(closingText(filed, null).lead).toBe(
+      "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
+    );
+    const withAnswer = makeView({
+      outcome: "FILED",
+      answer: {
+        grounded: false,
+        askerExplanation: null,
+        memo: { findings: [], notFound: [], nextChecks: [] },
+        citations: [],
+      },
+    });
+    expect(closingText(withAnswer, null).lead).toBe(
+      "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
+    );
+  });
+
+  it("自己解決は記録することを伝え、案内文は添えない", () => {
+    const text = closingText(makeView({ outcome: "SELF_RESOLVED" }), "案内");
+    expect(text).toEqual({
+      lead: "解決してよかったです。この内容は記録しておきます。",
+      guidance: null,
+    });
   });
 });

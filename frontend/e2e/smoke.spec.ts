@@ -1,58 +1,108 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const INPUT_LABEL =
   "うまくまとまっていなくて大丈夫です。起きていること、知りたいことをそのまま書いてください。";
 
-/**
- * 実際の API（モック）につないで正常系を最後まで通し、
- * コンソールエラーとページエラーが出ないことを確認する。
- */
-test("仕様確認の正常系を最後まで通せる", async ({ page }) => {
+/** コンソールとページのエラーを集める。 */
+function watchErrors(page: Page): {
+  consoleErrors: string[];
+  pageErrors: string[];
+} {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  return { consoleErrors, pageErrors };
+}
 
+/** 最初の画面から「文章で書く」で始める。 */
+async function startByText(page: Page, text: string) {
   await page.goto("/");
-  await expect(page.getByText("モック", { exact: true })).toBeVisible();
-
-  // 入力
-  await page
-    .getByLabel(INPUT_LABEL)
-    .fill("求人の掲載期限は、何日まで延長できますか？");
+  await page.getByText("文章で書く", { exact: true }).click();
+  await page.getByLabel(INPUT_LABEL).fill(text);
   await page.getByRole("button", { name: "送信する" }).click();
-  await expect(
-    page.getByText("仕様の確認・相談として受け取りました"),
-  ).toBeVisible();
+  // 書いた文章が吹き出しとして残るまで待つ（問い合わせが作成された合図）。
+  // 待たずに進むと、作成前の画面に出ている1問目のボタンを押しに行ってしまう
+  await expect(page.locator(".utterance")).toBeVisible();
+  await expect(page).toHaveURL(/\/inquiries\/[0-9a-f-]{36}$/);
+}
 
-  // 追加質問（1問ずつ「わからない」で進める。数は決め打ちしない）
+/**
+ * 残りの質問を「わからない」で進め、言い直しの確認まで行って「合っています」を押す。
+ * 何問出るかは決め打ちしない。
+ */
+async function answerUnknownAndConfirm(page: Page) {
   const confirm = page.getByRole("button", { name: "合っています" });
   const unknown = page.getByRole("button", { name: "わからない", exact: true });
-  for (let i = 0; i < 5; i++) {
+  const answered = page.locator(".answered-row");
+  for (let i = 0; i < 6; i++) {
     await expect(unknown.or(confirm)).toBeVisible();
     if (await confirm.isVisible()) break;
+    // 押した質問が「質問 → 答え」の1行に変わるまで待つ。
+    // 待たずに次を見ると、送信中でまだ残っている同じボタンを、もう一度押しに行ってしまう
+    const before = await answered.count();
     await unknown.click();
+    await expect(answered).not.toHaveCount(before);
   }
-
-  // 言い直し
   await expect(page.getByText("つまり、こういうことですね。")).toBeVisible();
   await confirm.click();
+}
 
-  // 調べた結果
+/** 文章で始め、調べた結果を見たうえで「まだ解決していません」で担当者に送る。 */
+async function fileByText(page: Page, text: string) {
+  await startByText(page, text);
+  await answerUnknownAndConfirm(page);
   await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
     timeout: 30_000,
   });
-  await expect(page.getByText("担当者向けの詳しい内容")).toBeVisible();
-  await page.getByRole("button", { name: "解決しました" }).click();
+  await page.getByRole("button", { name: /まだ解決していません/ }).click();
+  await expect(page.getByText(/担当者に送りました/)).toBeVisible();
+}
 
-  // 終わり
+/**
+ * 押して答える入口を、最初の質問から結果まで通す。
+ * 文章を1度も書かずに進められ、問いが選んだ内容から組み立てられる。
+ */
+test("選択肢を押すだけで、入口から結果まで通せる", async ({ page }) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+
+  await page.goto("/");
+  await expect(page.getByText("モック", { exact: true })).toBeVisible();
+  // 入力が揃う前は、担当者に送る道を出さない
+  await expect(
+    page.getByRole("button", { name: "答えを待たずに担当者に送る" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: /使い方を知りたい/ }).click();
+  await expect(page).toHaveURL(/\/inquiries\/[0-9a-f-]{36}$/);
+  await page.getByRole("button", { name: "システムB", exact: true }).click();
+  await page.getByRole("button", { name: "機能B-1", exact: true }).click();
+  // マスに質問の設定がないので、聞き手の質問が1つ出る
+  await page
+    .getByRole("button", { name: "画面を開いたとき", exact: true })
+    .click();
+  await expect(page.getByText("補足があれば書いてください")).toBeVisible();
+  await page.getByRole("button", { name: "書かずに進む" }).click();
+
+  // 選んだ内容から、問いが組み立てられる
+  await expect(page.getByText("つまり、こういうことですね。")).toBeVisible();
+  await expect(
+    page.getByText(/システムBの機能B-1について、使い方を知りたい。/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "合っています" }).click();
+
+  await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
+    timeout: 30_000,
+  });
+  // 問いを確かめた後は、答えを待たずに送る道が出る
+  await expect(
+    page.getByRole("button", { name: "答えを待たずに担当者に送る" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "解決しました" }).click();
   await expect(
     page.getByText("解決してよかったです。この内容は記録しておきます。"),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "新しい問い合わせを書く" }),
   ).toBeVisible();
 
   expect(consoleErrors).toEqual([]);
@@ -60,45 +110,121 @@ test("仕様確認の正常系を最後まで通せる", async ({ page }) => {
 });
 
 /**
- * 本人が対象システムを選んで「今すぐ担当者に送る」→ オペレータ画面の一覧に出て、
- * 開くと詳細が見える。
+ * マスに設定した質問が出ること、補足に書いた文章が担当者に届くこと、
+ * 「おかしいかもしれない」は答えの後に自動で担当者に送られること。
  */
-test("今すぐ担当者に送った問い合わせがオペレータ画面に届く", async ({
+test("マスごとの質問に答えて送った問い合わせが、担当者のボードに届く", async ({
   page,
 }) => {
-  const consoleErrors: string[] = [];
-  const pageErrors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => pageErrors.push(error.message));
-  const utterance = `スモーク確認 ${Date.now()} 掲載期限の延長日数を知りたい`;
+  const { consoleErrors, pageErrors } = watchErrors(page);
+  const mark = `スモーク確認 ${Date.now()}`;
 
   await page.goto("/");
-  await page.getByRole("button", { name: "システムA" }).click();
-  await page.getByLabel(INPUT_LABEL).fill(utterance);
-  await page.getByRole("button", { name: "送信する" }).click();
-  await expect(page.getByText(/として受け取りました/)).toBeVisible();
-  await page.getByRole("button", { name: "今すぐ担当者に送る" }).click();
+  await page.getByRole("button", { name: /おかしいかもしれない/ }).click();
+  await page.getByRole("button", { name: "システムA", exact: true }).click();
+  await page.getByRole("button", { name: "機能A-1", exact: true }).click();
+  // システムA の「おかしいかもしれない」に設定した質問
+  await expect(page.getByText("いつから起きていますか")).toBeVisible();
+  await page.getByRole("button", { name: "今日から", exact: true }).click();
+  await page.getByLabel("補足があれば書いてください").fill(mark);
+  await page.getByRole("button", { name: "次へ" }).click();
+  await page.getByRole("button", { name: "合っています" }).click();
   await expect(
     page.getByText(
-      "担当者に送りました。書いていただいた内容をそのまま添えています。",
+      "いまの動きを調べました。この内容を添えて担当者に送りました。",
     ),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 30_000 });
 
-  // オペレータ画面（本人向けの画面からはリンクしない）
   await page.goto("/operator");
   await expect(
     page.getByRole("heading", { name: "問い合わせ受付" }),
   ).toBeVisible();
-  const row = page.getByRole("button", { name: new RegExp(utterance) });
-  await expect(row).toBeVisible();
-  await expect(row).toContainText("システムA");
-  await expect(row).toContainText("今すぐ送る");
-  await row.click();
+  const board = page.getByRole("region", { name: "受付一覧" });
+  const card = board.getByRole("button").filter({ hasText: mark });
+  await expect(card).toContainText("おかしいかもしれない");
+  await expect(card).toContainText("システムA");
+  await expect(card).toContainText("機能A-1");
+  await card.click();
   const detail = page.getByRole("region", { name: "問い合わせの詳細" });
-  await expect(detail.getByText(utterance).first()).toBeVisible();
-  await expect(detail.getByText("元の発話")).toBeVisible();
+  await expect(detail.getByText("入口の質問と答え")).toBeVisible();
+  await expect(
+    detail.getByText("いつから起きていますか").first(),
+  ).toBeVisible();
+  await expect(detail.getByText("今日から").first()).toBeVisible();
+  await expect(detail.getByText(mark).first()).toBeVisible();
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * 緊急度を「業務が止まっている」にすると、詳しい質問を省き、
+ * 状況の一言を書いた時点で担当者に届く。
+ */
+test("業務が止まっている件は、詳しい質問を省いてすぐ担当者に届く", async ({
+  page,
+}) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+  const mark = `停止確認 ${Date.now()}`;
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /おかしいかもしれない/ }).click();
+  await page.getByRole("button", { name: "システムA", exact: true }).click();
+  // 選ぶと API に送られ、その応答で選択が切り替わる
+  const blocked = page.getByRole("radio", { name: "業務が止まっている" });
+  await blocked.click();
+  await expect(blocked).toBeChecked();
+  await page.getByRole("button", { name: "機能A-1", exact: true }).click();
+  // 設定した質問（いつから起きていますか）は聞かれず、状況の一言を求められる。書かずには進めない
+  await expect(page.getByText("状況を一言で教えてください")).toBeVisible();
+  await expect(page.getByText("いつから起きていますか")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "書かずに進む" })).toHaveCount(
+    0,
+  );
+  await page.getByLabel("状況を一言で教えてください").fill(mark);
+  await page.getByRole("button", { name: "次へ" }).click();
+  await expect(
+    page.getByText(
+      "担当者にすぐ届けました。書いていただいた内容をそのまま添えています。",
+    ),
+  ).toBeVisible();
+
+  // 担当者のボードでは、緊急度が分かる
+  await page.goto("/operator");
+  const card = page
+    .getByRole("region", { name: "受付一覧" })
+    .getByRole("button")
+    .filter({ hasText: mark });
+  await expect(card).toContainText("業務が止まっている");
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * 文章で書く道: 書いた文章から置き場所が読み取られ、読み取れなかった質問だけが続く。
+ */
+test("文章で書いて、入口から結果まで通せる", async ({ page }) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+
+  await startByText(page, "求人の掲載期限は、何日まで延長できますか？");
+  // 文章から読み取った答えには、その旨が添えられる
+  await expect(
+    page.getByText("（文章から読み取りました）").first(),
+  ).toBeVisible();
+  await answerUnknownAndConfirm(page);
+
+  await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByText("担当者向けの詳しい内容")).toBeVisible();
+  await page.getByRole("button", { name: "解決しました" }).click();
+  await expect(
+    page.getByText("解決してよかったです。この内容は記録しておきます。"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "新しい問い合わせを書く" }),
+  ).toBeVisible();
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
@@ -112,21 +238,11 @@ test("/operator/{id} を直接開くとその問い合わせの詳細が見え�
   page,
   request,
 }) => {
-  const consoleErrors: string[] = [];
-  const pageErrors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const { consoleErrors, pageErrors } = watchErrors(page);
   const utterance = `リンク確認 ${Date.now()} 請求書の宛名を知りたい`;
 
   // 本人が送る
-  await page.goto("/");
-  await page.getByLabel(INPUT_LABEL).fill(utterance);
-  await page.getByRole("button", { name: "送信する" }).click();
-  await expect(page.getByText(/として受け取りました/)).toBeVisible();
-  await page.getByRole("button", { name: "今すぐ担当者に送る" }).click();
-  await expect(page.getByText(/担当者に送りました/)).toBeVisible();
+  await fileByText(page, utterance);
 
   // オペレータ一覧の API から id を取る
   const response = await request.get("/api/operator/inquiries");
@@ -172,28 +288,14 @@ test("/operator/{id} を直接開くとその問い合わせの詳細が見え�
 test("根拠を確かめられなかったことは本人には見せず担当者にだけ見せる", async ({
   page,
 }) => {
-  const consoleErrors: string[] = [];
-  const pageErrors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const { consoleErrors, pageErrors } = watchErrors(page);
   const marker = `一部確認 ${Date.now()}`;
 
-  await page.goto("/");
-  await page
-    .getByLabel(INPUT_LABEL)
-    .fill(`求人の掲載期限は、何日まで延長できますか？ ${marker} [一部幽霊]`);
-  await page.getByRole("button", { name: "送信する" }).click();
-
-  const confirm = page.getByRole("button", { name: "合っています" });
-  const unknown = page.getByRole("button", { name: "わからない", exact: true });
-  for (let i = 0; i < 5; i++) {
-    await expect(unknown.or(confirm)).toBeVisible();
-    if (await confirm.isVisible()) break;
-    await unknown.click();
-  }
-  await confirm.click();
+  await startByText(
+    page,
+    `求人の掲載期限は、何日まで延長できますか？ ${marker} [一部幽霊]`,
+  );
+  await answerUnknownAndConfirm(page);
 
   await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
     timeout: 30_000,
@@ -225,27 +327,13 @@ test("根拠を確かめられなかったことは本人には見せず担当�
 test("問いに答えていない結果は関連して分かったこととして示す", async ({
   page,
 }) => {
-  const consoleErrors: string[] = [];
-  const pageErrors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const { consoleErrors, pageErrors } = watchErrors(page);
 
-  await page.goto("/");
-  await page
-    .getByLabel(INPUT_LABEL)
-    .fill("求人の掲載期限は、何日まで延長できますか？ [的外れ]");
-  await page.getByRole("button", { name: "送信する" }).click();
-
-  const confirm = page.getByRole("button", { name: "合っています" });
-  const unknown = page.getByRole("button", { name: "わからない", exact: true });
-  for (let i = 0; i < 5; i++) {
-    await expect(unknown.or(confirm)).toBeVisible();
-    if (await confirm.isVisible()) break;
-    await unknown.click();
-  }
-  await confirm.click();
+  await startByText(
+    page,
+    "求人の掲載期限は、何日まで延長できますか？ [的外れ]",
+  );
+  await answerUnknownAndConfirm(page);
 
   await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
     timeout: 30_000,
@@ -268,25 +356,16 @@ test("問いに答えていない結果は関連して分かったこととし�
 test("送った後に担当者と本人がやり取りでき、開き直しても続きが見える", async ({
   page,
 }) => {
-  const consoleErrors: string[] = [];
-  const pageErrors: string[] = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const { consoleErrors, pageErrors } = watchErrors(page);
 
   const mark = `往復確認 ${Date.now()}`;
   const reply = `担当者からの返信 ${Date.now()}`;
   const append = `本人からの追記 ${Date.now()}`;
 
   // 本人が送る。作成後は URL がその問い合わせを指す
-  await page.goto("/");
-  await page.getByLabel(INPUT_LABEL).fill(`${mark} 請求書の宛名を知りたい`);
-  await page.getByRole("button", { name: "送信する" }).click();
-  await expect(page.getByText("として受け取りました")).toBeVisible();
+  await fileByText(page, `${mark} 請求書の宛名を知りたい`);
   await expect(page).toHaveURL(/\/inquiries\/[0-9a-f-]{36}$/);
   const askerUrl = page.url();
-  await page.getByRole("button", { name: "今すぐ担当者に送る" }).click();
   await expect(page.getByText("担当者の確認を待っています")).toBeVisible();
   await expect(
     page.getByText("担当者からの返信は、ここに表示されます。"),
@@ -352,11 +431,7 @@ test("担当者がカードをドラッグして対応状況を変えられる",
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const mark = `ボード確認 ${Date.now()}`;
 
-  await page.goto("/");
-  await page.getByLabel(INPUT_LABEL).fill(`${mark} 請求書の宛名を知りたい`);
-  await page.getByRole("button", { name: "送信する" }).click();
-  await expect(page.getByText("として受け取りました")).toBeVisible();
-  await page.getByRole("button", { name: "今すぐ担当者に送る" }).click();
+  await fileByText(page, `${mark} 請求書の宛名を知りたい`);
   await expect(page.getByText("担当者の確認を待っています")).toBeVisible();
 
   // 届いた時点では「未対応」の列にある

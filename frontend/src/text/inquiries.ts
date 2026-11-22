@@ -60,8 +60,6 @@ export function listStatusLabel(
   switch (item.outcome) {
     case "SELF_RESOLVED":
       return "解決済み";
-    case "INCIDENT_REDIRECTED":
-      return "障害の窓口を案内";
     case "FILED":
       return FILED_STATUS_LABELS[item.handlingStatus ?? "OPEN"];
     default:

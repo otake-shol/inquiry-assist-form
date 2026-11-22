@@ -4,31 +4,100 @@ import type {
   OperatorStreamHandlers,
 } from "../api/stream.ts";
 import type {
+  AppConfig,
   InquiryListItem,
   InquiryMessage,
   InquiryView,
+  IntakeEntry,
+  IntakeQuestion,
   OperatorDetail,
   OperatorItem,
   TraceEntry,
+  TypeOption,
   ZeroAnswer,
 } from "../api/types.ts";
 
-/** テスト用に問い合わせの表現を作る。省略した項目は仕様確認の初期状態。 */
+/** 設定の種類（聞く順）。 */
+export const TYPE_OPTIONS: TypeOption[] = [
+  { id: "HOW_TO", label: "使い方を知りたい", hint: "操作の手順" },
+  { id: "HOW_IT_WORKS", label: "仕組みを知りたい", hint: "いまの動きの理由" },
+  { id: "LOOKS_WRONG", label: "おかしいかもしれない", hint: "想定と違う動き" },
+  { id: "DO_FOR_ME", label: "やってほしい", hint: "作業の依頼" },
+  { id: "CHANGE_REQUEST", label: "変えてほしい", hint: "機能や画面の要望" },
+];
+
+/** 設定の緊急度の選択肢。 */
+export const URGENCY_OPTIONS = [
+  { id: "NORMAL", label: "通常" },
+  { id: "HURRY", label: "急ぎ" },
+  { id: "BLOCKED", label: "業務が止まっている" },
+];
+
+/** `GET /api/config` の応答を作る。省いた項目は、種類と緊急度つきの既定。 */
+export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
+  return {
+    mock: false,
+    types: TYPE_OPTIONS,
+    urgencies: URGENCY_OPTIONS,
+    ...overrides,
+  };
+}
+
+/** テスト用に入口の質問を作る。省いた項目は、選択肢つきの「どのシステムですか」。 */
+export function makeQuestion(
+  overrides: Partial<IntakeQuestion> = {},
+): IntakeQuestion {
+  return {
+    questionId: "system",
+    kind: "SYSTEM",
+    text: "どのシステムですか",
+    options: [
+      { id: "system-a", label: "システムA" },
+      { id: "system-b", label: "システムB" },
+    ],
+    allowsText: false,
+    canSkip: false,
+    ...overrides,
+  };
+}
+
+/** 入口の1問目（種類）。選択肢に説明（hint）は付かない。 */
+export const TYPE_QUESTION: IntakeQuestion = makeQuestion({
+  questionId: "type",
+  kind: "TYPE",
+  text: "何をしたいですか",
+  options: TYPE_OPTIONS.map(({ id, label }) => ({ id, label })),
+});
+
+/** 答え終えた種類の質問（本人が選んだ）。 */
+export function makeTypeEntry(
+  optionId = "HOW_IT_WORKS",
+  label = "仕組みを知りたい",
+): IntakeEntry {
+  return {
+    questionId: "type",
+    kind: "TYPE",
+    text: "何をしたいですか",
+    answer: { kind: "OPTION", optionId, label },
+  };
+}
+
+/** テスト用に問い合わせの表現を作る。省いた項目は、入口の1問目を聞いている初期状態。 */
 export function makeView(overrides: Partial<InquiryView> = {}): InquiryView {
   return {
     id: "inq-1",
-    step: "TRIAGED",
+    step: "INTAKE",
     outcome: "IN_PROGRESS",
-    utterance: "求人の掲載期限は何日まで延長できますか？",
-    categoryByAi: "SPEC_QUESTION",
-    category: "SPEC_QUESTION",
-    questions: [],
+    urgency: "NORMAL",
+    type: null,
     system: null,
-    systemGuessed: false,
+    function: null,
+    utterance: null,
+    intake: { entries: [], next: TYPE_QUESTION, complete: false },
     revisionsLeft: 2,
     structured: null,
     answer: null,
-    incidentGuidance: null,
+    canSendNow: false,
     sentImmediately: false,
     mock: true,
     ...overrides,
@@ -97,19 +166,20 @@ export function makeFiledView(
   });
 }
 
-/** 整形結果つきの STRUCTURED 状態を作る。 */
+/** 入口を終えて言い直しが出ている STRUCTURED 状態を作る。種類は本人が選んだ「仕組みを知りたい」。 */
 export function makeStructuredView(
   overrides: Partial<InquiryView> = {},
 ): InquiryView {
   return makeView({
     step: "STRUCTURED",
+    type: { id: "HOW_IT_WORKS", label: "仕組みを知りたい", by: "ASKER" },
+    intake: { entries: [makeTypeEntry()], next: null, complete: true },
     structured: {
       summary: "求人の掲載期限を、何日まで延ばせるかを知りたい。",
       targetSystem: "求人管理画面",
       goal: "掲載期限を延ばせる日数を知りたい",
       whatHappened: null,
       expectedResult: null,
-      urgency: "NORMAL",
     },
     ...overrides,
   });
@@ -170,7 +240,7 @@ export function installFakeFetch(
 ): RecordedCall[] {
   const calls: RecordedCall[] = [];
   const allRoutes = {
-    "GET /api/config": { body: { mock: false } },
+    "GET /api/config": { body: makeConfig() },
     ...routes,
   };
   vi.stubGlobal(
@@ -226,8 +296,10 @@ export function makeItem(overrides: Partial<OperatorItem> = {}): OperatorItem {
   return {
     id: "op-1",
     filedAt: "2026-11-21T05:00:00Z",
-    category: "SUSPECTED_BUG",
+    type: { id: "LOOKS_WRONG", label: "おかしいかもしれない" },
     system: { id: "job-admin", label: "求人管理画面" },
+    function: null,
+    urgency: "NORMAL",
     summary: "求人が一覧に出なくなった理由を知りたい。",
     sentImmediately: false,
     read: false,
@@ -244,13 +316,24 @@ export function makeDetail(
     filedAt: "2026-11-21T05:00:00Z",
     askerId: "local-user",
     utterance: "昨日まで見えていた求人が今日は見えません",
-    categoryByAi: "SUSPECTED_BUG",
-    category: "SUSPECTED_BUG",
-    system: { id: "job-admin", label: "求人管理画面" },
-    systemGuessed: false,
-    followUps: [
-      { text: "求人の状態はどれですか", answer: "掲載中" },
-      { text: "どの画面での話ですか", answer: null },
+    urgency: "NORMAL",
+    type: { id: "LOOKS_WRONG", label: "おかしいかもしれない", by: "ASKER" },
+    system: { id: "job-admin", label: "求人管理画面", by: "ASKER" },
+    function: null,
+    intake: [
+      makeTypeEntry("LOOKS_WRONG", "おかしいかもしれない"),
+      {
+        questionId: "since",
+        kind: "DETAIL",
+        text: "いつから起きていますか",
+        answer: { kind: "OPTION", optionId: "today", label: "今日から" },
+      },
+      {
+        questionId: "screen",
+        kind: "DETAIL",
+        text: "どの画面での話ですか",
+        answer: { kind: "UNKNOWN" },
+      },
     ],
     structured: {
       summary: "求人が一覧に出なくなった理由を知りたい。",
@@ -258,7 +341,6 @@ export function makeDetail(
       goal: "理由を知りたい",
       whatHappened: null,
       expectedResult: null,
-      urgency: "NORMAL",
     },
     revisionNotes: ["消えたのは一昨日から"],
     answer: {

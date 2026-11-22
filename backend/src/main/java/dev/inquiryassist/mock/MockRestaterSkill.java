@@ -1,93 +1,94 @@
 package dev.inquiryassist.mock;
 
 import dev.inquiryassist.core.AiResult;
+import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.AnsweredQuestion;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.FunctionOption;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.Usage;
 import dev.inquiryassist.core.skill.RestaterSkill;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * 言い直しのモック。契約書「モックの言い直し」の規則で {@code summary} を作り、発話を {@code goal} にそのまま入れる。
+ * 言い直しのモック。契約書「言い直し（問いの組み立て）」の規則で {@code summary} を作り、本人が書いた文章を
+ * {@code goal} にそのまま入れる（文章がなければ種類ごとの文）。
  */
 @Component
 @ConditionalOnProperty(name = "inquiry.skills.restater.provider", havingValue = "mock", matchIfMissing = true)
 public class MockRestaterSkill implements RestaterSkill {
 
     /**
-     * 言い直しを作る。訂正があれば、伝えられた順に「補足: （一言）」を言い直しの末尾へ足す。
+     * 言い直しを作る。置き場所の前置き、種類ごとの文、書かれた内容、詳しい質問への答え、訂正の順につなぐ。
      *
-     * @param utterance 本人が書いた元の発話
-     * @param category 本人が確認した種別
-     * @param answers 追加質問と回答
-     * @param system 確定した対象システム
+     * @param utterance 本人が書いた文章
+     * @param type 種類
+     * @param system 決まっているシステム
+     * @param function 決まっている機能
+     * @param answers 詳しい質問と答え
      * @param corrections 本人が伝えた違う点の一言（伝えられた順）
      * @return 整形後の問い
+     * @throws AiUnavailableException {@code [言い直しエラー]} の場合
      */
     @Override
     public AiResult<StructuredInquiry> restate(
             String utterance,
-            InquiryCategory category,
-            List<AnsweredQuestion> answers,
+            InquiryType type,
             SystemOption system,
+            FunctionOption function,
+            List<AnsweredQuestion> answers,
             List<String> corrections) {
-        StringBuilder summary = new StringBuilder(summarize(utterance, category, answers));
-        corrections.forEach(note -> summary.append(" 補足: ").append(note.strip()));
-        return new AiResult<>(
-                new StructuredInquiry(
-                        summary.toString(),
-                        category,
-                        system == null ? null : system.label(),
-                        utterance,
-                        null,
-                        null,
-                        StructuredInquiry.Urgency.NORMAL),
-                Usage.ofMock());
-    }
-
-    private static String summarize(String utterance, InquiryCategory category, List<AnsweredQuestion> answers) {
-        String text = MockScenario.stripTags(utterance);
-        if (text.isEmpty()) {
-            text = utterance.strip();
+        if (MockScenario.has(utterance, MockScenario.TAG_RESTATE_ERROR)) {
+            throw new AiUnavailableException("モックの言い直しエラー", null, Usage.ofMock());
         }
-        if (category == InquiryCategory.WORK_REQUEST) {
-            String what = answerOf(answers, "wr-what");
-            String when = answerOf(answers, "wr-when");
-            String target = answerOf(answers, "wr-target");
-            // 「何を」が分からないときは、書いてもらった内容を代わりに使う
-            StringBuilder sb = new StringBuilder(what != null ? what : text).append("を");
-            if (when != null) {
-                sb.append(when).append("までに");
-            }
-            sb.append("対応してほしい。");
-            if (target != null) {
-                sb.append("対象は").append(target).append("。");
-            }
-            return sb.toString();
-        }
-        StringBuilder sb = new StringBuilder();
-        if (category == InquiryCategory.SPEC_QUESTION) {
-            sb.append("「").append(text).append("」について、いまの仕組みがどうなっているかを知りたい。");
-        } else {
-            sb.append("「").append(text).append("」という状況が起きている。これが意図した動きかどうかを確認したい。");
+        String typeSentence = sentenceOf(type);
+        List<String> parts = new ArrayList<>();
+        parts.add(prefixOf(system, function) + typeSentence);
+        String text = utterance == null ? "" : MockScenario.stripTags(utterance);
+        if (!text.isEmpty()) {
+            parts.add("書かれた内容: " + text);
         }
         for (AnsweredQuestion a : answers) {
             if (!a.unknown()) {
-                sb.append("（").append(a.question().text()).append(": ").append(a.answer().strip()).append("）");
+                parts.add("（" + a.question().text() + ": " + a.answer().strip() + "）");
             }
         }
-        return sb.toString();
+        corrections.forEach(note -> parts.add("補足: " + note.strip()));
+        boolean written = utterance != null && !utterance.isBlank();
+        return new AiResult<>(
+                new StructuredInquiry(
+                        String.join(" ", parts),
+                        type,
+                        system == null ? null : system.label(),
+                        written ? utterance : typeSentence,
+                        null,
+                        null),
+                Usage.ofMock());
     }
 
-    private static String answerOf(List<AnsweredQuestion> answers, String questionId) {
-        return answers.stream()
-                .filter(a -> a.question().id().equals(questionId) && !a.unknown())
-                .map(a -> a.answer().strip())
-                .findFirst()
-                .orElse(null);
+    private static String prefixOf(SystemOption system, FunctionOption function) {
+        if (system == null) {
+            return "";
+        }
+        return function == null
+                ? system.label() + "について、"
+                : system.label() + "の" + function.label() + "について、";
+    }
+
+    private static String sentenceOf(InquiryType type) {
+        if (type == null) {
+            return "相談したいことがある。";
+        }
+        return switch (type) {
+            case HOW_TO -> "使い方を知りたい。";
+            case HOW_IT_WORKS -> "いまの仕組みがどうなっているかを知りたい。";
+            case LOOKS_WRONG -> "動きがおかしいかもしれない。意図した動きかどうかを確認したい。";
+            case DO_FOR_ME -> "作業をしてほしい。";
+            case CHANGE_REQUEST -> "変えてほしい点がある。";
+        };
     }
 }

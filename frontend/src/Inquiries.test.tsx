@@ -1,36 +1,41 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Question } from "./api/types.ts";
 import Root from "./Root.tsx";
 import {
   FakeOperatorStream,
   FakeStream,
   groundedAnswer,
   installFakeFetch,
+  makeConfig,
   makeFiledView,
   makeListItem,
   makeMessage,
+  makeQuestion,
   makeStructuredView,
   makeTraceEntry,
+  makeTypeEntry,
   makeView,
   type RecordedCall,
 } from "./test/fakes.ts";
 
 const INPUT_LABEL =
   "うまくまとまっていなくて大丈夫です。起きていること、知りたいことをそのまま書いてください。";
-const FORBIDDEN = /0次回答|種別|判定|整形|起票|出典|スキル|モデル/;
+const FORBIDDEN = /0次回答|種別|種類|判定|整形|起票|出典|スキル|モデル/;
 
-const Q_SCREEN: Question = {
-  id: "q1",
+/** 入口の質問（選択肢つき）。 */
+const Q_SCREEN = makeQuestion({
+  questionId: "screen",
+  kind: "DETAIL",
   text: "どの画面の話ですか",
-  options: ["一覧", "詳細"],
-};
-const Q_WHEN: Question = {
-  id: "q2",
-  text: "いつ頃から気になっていますか",
-  options: [],
-};
+  options: [
+    { id: "list", label: "一覧" },
+    { id: "detail", label: "詳細" },
+  ],
+});
+/** 1問目（種類の質問）が出ていることを確かめる。 */
+const findFirstQuestion = () =>
+  screen.findByRole("group", { name: "何をしたいですか" });
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -54,7 +59,7 @@ const callsTo = (calls: RecordedCall[], method: string, path: string) =>
 
 const config = {
   "GET /api/config": {
-    body: { mock: false, user: { id: "local-user", name: "開発用ユーザー" } },
+    body: makeConfig({ user: { id: "local-user", name: "開発用ユーザー" } }),
   },
 };
 
@@ -102,7 +107,7 @@ describe("ページの上部（本人向け）", () => {
     open("/");
 
     expect(
-      await screen.findByRole("button", { name: "送信する" }),
+      await screen.findByRole("button", { name: "文章で書く" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "送った問い合わせ" }),
@@ -131,15 +136,13 @@ describe("ページの上部（本人向け）", () => {
     ).toHaveAttribute("aria-current", "page");
 
     act(() => window.history.back());
-    expect(
-      await screen.findByRole("button", { name: "送信する" }),
-    ).toBeInTheDocument();
+    expect(await findFirstQuestion()).toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
   });
 });
 
 describe("送った問い合わせのボード", () => {
-  /** 6つの状態を1件ずつ含む一覧。 */
+  /** 状態ごとに1件ずつ含む一覧。 */
   const boardItems = [
     makeListItem({
       id: "a",
@@ -162,12 +165,6 @@ describe("送った問い合わせのボード", () => {
       id: "d",
       summary: "解決した件。",
       outcome: "SELF_RESOLVED",
-      handlingStatus: null,
-    }),
-    makeListItem({
-      id: "e",
-      summary: "障害の件。",
-      outcome: "INCIDENT_REDIRECTED",
       handlingStatus: null,
     }),
     makeListItem({
@@ -199,7 +196,7 @@ describe("送った問い合わせのボード", () => {
     const draft = column("入力の途中 1件");
     const waiting = column("担当者の確認待ち 1件");
     const working = column("担当者が対応中 1件");
-    const done = column("完了 4件");
+    const done = column("完了 3件");
     expect(
       screen
         .getAllByRole("heading", { level: 3 })
@@ -209,12 +206,7 @@ describe("送った問い合わせのボード", () => {
     expect(within(draft).getByText("途中の件。")).toBeInTheDocument();
     expect(within(waiting).getByText("確認待ちの件。")).toBeInTheDocument();
     expect(within(working).getByText("掲載期限を知りたい。")).toBeVisible();
-    for (const text of [
-      "請求書を直したい。",
-      "解決した件。",
-      "障害の件。",
-      "終了した件。",
-    ]) {
+    for (const text of ["請求書を直したい。", "解決した件。", "終了した件。"]) {
       expect(within(done).getByText(text)).toBeInTheDocument();
     }
 
@@ -243,7 +235,7 @@ describe("送った問い合わせのボード", () => {
     open("/inquiries");
     await screen.findAllByRole("link", { name: /。/ });
 
-    const done = screen.getByRole("region", { name: "完了 4件" });
+    const done = screen.getByRole("region", { name: "完了 3件" });
     const note = (text: string) => {
       const card = within(done)
         .getAllByRole("listitem")
@@ -252,7 +244,6 @@ describe("送った問い合わせのボード", () => {
     };
     expect(note("請求書")).toBe("対応完了");
     expect(note("解決した件")).toBe("解決済み");
-    expect(note("障害の件")).toBe("障害の窓口を案内");
     expect(note("終了した件")).toBe("終了");
 
     const working = screen.getByRole("region", { name: "担当者が対応中 1件" });
@@ -326,9 +317,7 @@ describe("送った問い合わせのボード", () => {
       screen.getByRole("button", { name: "新しい問い合わせを書く" }),
     );
     expect(window.location.pathname).toBe("/");
-    expect(
-      await screen.findByRole("button", { name: "送信する" }),
-    ).toBeInTheDocument();
+    expect(await findFirstQuestion()).toBeInTheDocument();
   });
 
   it("一覧を取得できなければ、その旨を示す", async () => {
@@ -363,34 +352,36 @@ describe("送った問い合わせのボード", () => {
 });
 
 describe("作成と URL", () => {
-  it("作成すると URL が /inquiries/{id} に変わり、取得し直さずにそのまま続く。「戻る」で入力に戻る", async () => {
+  it("1問目の選択肢を押すと問い合わせを作って URL が /inquiries/{id} に変わり、取得し直さずにそのまま続く。「戻る」で最初の画面に戻る", async () => {
     const user = userEvent.setup();
     const calls = installFakeFetch({
       ...config,
       "GET /api/inquiries": { body: { unreadReplyCount: 0, items: [] } },
-      "POST /api/inquiries": {
-        status: 201,
-        body: makeView({ questions: [Q_SCREEN] }),
+      "POST /api/inquiries": { status: 201, body: makeView() },
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: makeView({
+          intake: {
+            entries: [makeTypeEntry()],
+            next: Q_SCREEN,
+            complete: false,
+          },
+        }),
       },
     });
     open("/");
 
-    await user.type(await screen.findByLabelText(INPUT_LABEL), "掲載期限");
-    await user.click(screen.getByRole("button", { name: "送信する" }));
+    await user.click(
+      await screen.findByRole("button", { name: "仕組みを知りたい" }),
+    );
 
     expect(await screen.findByText("どの画面の話ですか")).toBeInTheDocument();
     await waitFor(() =>
       expect(window.location.pathname).toBe("/inquiries/inq-1"),
     );
     expect(callsTo(calls, "GET", "/api/inquiries/inq-1")).toHaveLength(0);
-    expect(
-      screen.getByRole("button", { name: "今すぐ担当者に送る" }),
-    ).toBeInTheDocument();
 
     act(() => window.history.back());
-    expect(
-      await screen.findByRole("button", { name: "送信する" }),
-    ).toBeInTheDocument();
+    expect(await findFirstQuestion()).toBeInTheDocument();
     expect(screen.queryByText("どの画面の話ですか")).not.toBeInTheDocument();
   });
 
@@ -412,9 +403,7 @@ describe("作成と URL", () => {
       await screen.findByRole("button", { name: "新しい問い合わせを書く" }),
     );
     expect(window.location.pathname).toBe("/");
-    expect(
-      await screen.findByRole("button", { name: "送信する" }),
-    ).toBeInTheDocument();
+    expect(await findFirstQuestion()).toBeInTheDocument();
   });
 
   it("やり取りがある終わりでは、別件の入口を終わりの文言の下に置かず、やり取りの最後に置く", async () => {
@@ -439,49 +428,86 @@ describe("作成と URL", () => {
 
     await user.click(other);
     expect(window.location.pathname).toBe("/");
-    expect(
-      await screen.findByRole("button", { name: "送信する" }),
-    ).toBeInTheDocument();
+    expect(await findFirstQuestion()).toBeInTheDocument();
   });
 });
 
 describe("開き直したときの再開", () => {
-  it("TRIAGED は受け取りの表示と、追加質問の1問目から始める", async () => {
+  it("INTAKE は、答え終えた質問の要約と、次の質問から続ける。入力欄は出さない", async () => {
     installFakeFetch({
       ...config,
       "GET /api/inquiries/inq-1": {
         body: makeView({
-          questions: [Q_SCREEN, Q_WHEN],
-          submittedAnswers: null,
+          utterance: "応募者一覧のことです",
+          intake: {
+            entries: [
+              makeTypeEntry("LOOKS_WRONG", "おかしいかもしれない"),
+              {
+                questionId: "system",
+                kind: "SYSTEM",
+                text: "どのシステムですか",
+                answer: {
+                  kind: "INFERRED",
+                  optionId: "system-a",
+                  label: "システムA",
+                },
+              },
+            ],
+            next: Q_SCREEN,
+            complete: false,
+          },
         }),
       },
     });
     open("/inquiries/inq-1");
 
     expect(
-      await screen.findByText("仕様の確認・相談として受け取りました"),
+      await screen.findByRole("group", { name: "どの画面の話ですか" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("2つだけ教えてください")).toBeInTheDocument();
-    expect(screen.getByText("どの画面の話ですか")).toBeInTheDocument();
+    expect(
+      screen.getByText("何をしたいですか").closest(".answered-row"),
+    ).toHaveTextContent("おかしいかもしれない");
+    expect(
+      screen.getByText("どのシステムですか").closest(".answered-row"),
+    ).toHaveTextContent("システムA（文章から読み取りました）");
+    expect(
+      screen.getByText("応募者一覧のことです", { selector: ".utterance p" }),
+    ).toBeInTheDocument();
+    // 続きの質問より後の質問は出ない
     expect(
       screen.queryByText("いつ頃から気になっていますか"),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "今すぐ担当者に送る" }),
-    ).toBeInTheDocument();
     expect(screen.queryByLabelText(INPUT_LABEL)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "答えを待たずに担当者に送る" }),
+    ).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(FORBIDDEN);
   });
 
-  it("STRUCTURED は submittedAnswers から「質問 → 回答」を再現し、言い直しの確認を出す", async () => {
+  it("STRUCTURED は intake.entries から「質問 → 答え」を再現し、言い直しの確認を出す", async () => {
     installFakeFetch({
       ...config,
       "GET /api/inquiries/inq-1": {
         body: makeStructuredView({
-          questions: [Q_SCREEN, Q_WHEN],
-          submittedAnswers: [
-            { questionId: "q1", answer: "詳細" },
-            { questionId: "q2", answer: null },
-          ],
+          intake: {
+            entries: [
+              makeTypeEntry(),
+              {
+                questionId: "screen",
+                kind: "DETAIL",
+                text: "どの画面の話ですか",
+                answer: { kind: "OPTION", optionId: "detail", label: "詳細" },
+              },
+              {
+                questionId: "when",
+                kind: "DETAIL",
+                text: "いつ頃から気になっていますか",
+                answer: { kind: "UNKNOWN" },
+              },
+            ],
+            next: null,
+            complete: true,
+          },
         }),
       },
     });
@@ -573,9 +599,9 @@ describe("開き直したときの再開", () => {
         "担当者に送りました。書いていただいた内容をそのまま添えています。",
       ),
     ).toBeInTheDocument();
-    // 「今すぐ担当者に送る」は終わると出さない
+    // 「答えを待たずに担当者に送る」は終わると出さない
     expect(
-      screen.queryByRole("button", { name: "今すぐ担当者に送る" }),
+      screen.queryByRole("button", { name: "答えを待たずに担当者に送る" }),
     ).not.toBeInTheDocument();
 
     const thread = screen.getByRole("list", { name: "やり取り" });
@@ -635,15 +661,9 @@ describe("開き直したときの再開", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("新しい項目（handlingStatus、messages、submittedAnswers、trace、createdAt）が欠けた古い応答でも表示できる", async () => {
+  it("任意の項目（handlingStatus、messages、trace、createdAt）が欠けた応答でも表示できる", async () => {
     const legacy = { ...makeFiledView() } as Record<string, unknown>;
-    for (const key of [
-      "handlingStatus",
-      "messages",
-      "submittedAnswers",
-      "trace",
-      "createdAt",
-    ]) {
+    for (const key of ["handlingStatus", "messages", "trace", "createdAt"]) {
       delete legacy[key];
     }
     installFakeFetch({
@@ -676,12 +696,14 @@ describe("開き直したときの再開", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "この問い合わせは見つかりませんでした",
     );
-    expect(screen.queryByLabelText(INPUT_LABEL)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "何をしたいですか" }),
+    ).not.toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: "新しい問い合わせを書く" }),
     );
     expect(window.location.pathname).toBe("/");
-    expect(await screen.findByLabelText(INPUT_LABEL)).toBeInTheDocument();
+    expect(await findFirstQuestion()).toBeInTheDocument();
   });
 
   it("形式の崩れた id は API を呼ばずに「見つかりませんでした」と示す。API が VALIDATION を返した場合も同じ", async () => {
@@ -943,7 +965,7 @@ describe("開発用の行き来", () => {
   it("mock が true なら、最下部に「開発用: 担当者の画面へ」を出し、押すと担当者の画面に移る", async () => {
     const user = userEvent.setup();
     installFakeFetch({
-      "GET /api/config": { body: { mock: true } },
+      "GET /api/config": { body: makeConfig({ mock: true }) },
       "GET /api/operator/inquiries": { body: { unreadCount: 0, items: [] } },
     });
     open("/");
@@ -960,9 +982,7 @@ describe("開発用の行き来", () => {
       await screen.findByRole("link", { name: "開発用: 本人の画面へ" }),
     );
     expect(window.location.pathname).toBe("/");
-    expect(
-      await screen.findByRole("button", { name: "送信する" }),
-    ).toBeInTheDocument();
+    expect(await findFirstQuestion()).toBeInTheDocument();
   });
 
   it("trace だけが true でも出る。どちらも false なら出ない", async () => {
@@ -977,11 +997,11 @@ describe("開発用の行き来", () => {
 
   it("mock も trace も false なら、どちらの画面にも出ない", async () => {
     installFakeFetch({
-      "GET /api/config": { body: { mock: false, trace: false } },
+      "GET /api/config": { body: makeConfig({ trace: false }) },
       "GET /api/operator/inquiries": { body: { unreadCount: 0, items: [] } },
     });
     open("/");
-    await screen.findByRole("button", { name: "送信する" });
+    await findFirstQuestion();
     expect(
       screen.queryByRole("link", { name: /開発用/ }),
     ).not.toBeInTheDocument();

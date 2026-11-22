@@ -18,9 +18,6 @@ interface InquiryRepository extends JpaRepository<InquiryEntity, UUID> {
     /** 担当者に送られた未読の件数を返す。 */
     long countByOutcomeAndReadAtIsNull(InquiryOutcome outcome);
 
-    /** 担当者に送られた問い合わせの、対応状況ごとの件数を返す。 */
-    long countByOutcomeAndHandlingStatus(InquiryOutcome outcome, HandlingStatus status);
-
     /** 本人が作った問い合わせを新しい順に、最大50件返す。 */
     List<InquiryEntity> findTop50ByAskerIdOrderByCreatedAtDesc(String askerId);
 

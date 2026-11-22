@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import dev.inquiryassist.core.AccessScope;
 import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.CitationVerifier;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.KnowledgeSearch;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.skill.Finding;
@@ -67,6 +67,10 @@ class LiveInvestigatorTest {
         Recording knowledge = new Recording();
         SkillSettings settings = new SkillSettings("ollama", MODEL, 0, false, Duration.ofSeconds(120), "v1");
         InquiryProperties properties = new InquiryProperties(
+                List.of("ja"),
+                List.of(),
+                List.of(),
+                List.of(),
                 List.of(),
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
                 null,
@@ -77,7 +81,7 @@ class LiveInvestigatorTest {
         OllamaInvestigatorSkill skill = new OllamaInvestigatorSkill(
                 new OllamaClient("http://localhost:11434", "30m", 42, JSON), JSON, properties, knowledge);
         StructuredInquiry inquiry =
-                new StructuredInquiry(question, InquiryCategory.SPEC_QUESTION, null, question, null, null, null);
+                new StructuredInquiry(question, InquiryType.HOW_IT_WORKS, null, question, null, null);
         List<String> progress = new ArrayList<>();
 
         long start = System.nanoTime();

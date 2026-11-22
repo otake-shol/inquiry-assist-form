@@ -6,10 +6,8 @@ public enum InquiryOutcome {
     IN_PROGRESS,
     /** 自己解決。 */
     SELF_RESOLVED,
-    /** 起票。 */
+    /** 担当者に送った。 */
     FILED,
-    /** 障害の案内。 */
-    INCIDENT_REDIRECTED,
     /** 離脱。初版では自動設定しない。 */
     ABANDONED
 }

@@ -1,4 +1,9 @@
-import type { HandlingStatus, OperatorDetail } from "../api/types.ts";
+import type {
+  HandlingStatus,
+  OperatorDetail,
+  Placement,
+  SystemOption,
+} from "../api/types.ts";
 import { MessageForm, MessageThread } from "../components/Exchange.tsx";
 import { TracePanel } from "../components/TracePanel.tsx";
 import { SOURCE_TYPE_LABELS } from "../text/labels.ts";
@@ -6,7 +11,8 @@ import {
   HANDLING_LABELS,
   OP_TEXT,
   formatFiledAt,
-  opCategoryLabel,
+  opAnswerLabel,
+  opUrgencyLabel,
 } from "./labels.ts";
 
 /** 対応状況の切り替えボタンの並び順。 */
@@ -15,6 +21,8 @@ const STATUS_ORDER: HandlingStatus[] = ["OPEN", "IN_PROGRESS", "DONE"];
 /** DetailView の props。 */
 interface DetailViewProps {
   detail: OperatorDetail;
+  /** 設定の緊急度の選択肢（緊急度の名前に使う。取得前は空） */
+  urgencies: SystemOption[];
   /** スキルの実行記録を最下部に出すか（`GET /api/config` の `trace`） */
   trace: boolean;
   /** 状況の切り替えや返信を送っている最中か */
@@ -46,12 +54,23 @@ function List({ title, items }: { title: string; items: string[] }) {
 }
 
 /**
+ * 置き場所（システム、機能）の名前。AI が文章から置いたものには、そのことを添える。
+ * @param placement 置き場所（決まっていなければ null）
+ * @param unknown 決まっていないときの文言
+ */
+function placementLabel(placement: Placement | null, unknown: string): string {
+  if (placement === null) return unknown;
+  return placement.label + (placement.by === "AI" ? OP_TEXT.placedByAi : "");
+}
+
+/**
  * 1件の問い合わせの全内容。元の発話から調べた結果、出典の照合結果まで。
  * 上部に対応状況の切り替え、下部にやり取りと返信の入力欄、最下部にスキルの実行記録を置く。
  * @param props 問い合わせの全内容と、操作の受け口
  */
 export function DetailView({
   detail,
+  urgencies,
   trace,
   busy,
   failed,
@@ -64,13 +83,22 @@ export function DetailView({
     <article className="op-article">
       <header className="op-article-head">
         <div className="op-badges">
-          <span className="op-badge">{opCategoryLabel(detail.category)}</span>
           <span className="op-badge">
-            {detail.system === null
-              ? OP_TEXT.systemUnknown
-              : detail.system.label +
-                (detail.systemGuessed ? OP_TEXT.systemGuessed : "")}
+            {placementLabel(detail.type, OP_TEXT.typeUnknown)}
           </span>
+          <span className="op-badge">
+            {placementLabel(detail.system, OP_TEXT.systemUnknown)}
+          </span>
+          {detail.function !== null && (
+            <span className="op-badge">
+              {placementLabel(detail.function, "")}
+            </span>
+          )}
+          {detail.urgency !== "NORMAL" && (
+            <span className="op-badge warn strong-warn">
+              {opUrgencyLabel(detail.urgency, urgencies)}
+            </span>
+          )}
           {detail.sentImmediately && (
             <span className="op-badge strong">{OP_TEXT.sentImmediately}</span>
           )}
@@ -109,10 +137,12 @@ export function DetailView({
         </div>
       </header>
 
-      <section>
-        <h3>{OP_TEXT.utterance}</h3>
-        <p className="op-pre">{detail.utterance}</p>
-      </section>
+      {detail.utterance !== null && (
+        <section>
+          <h3>{OP_TEXT.utterance}</h3>
+          <p className="op-pre">{detail.utterance}</p>
+        </section>
+      )}
 
       {structured !== null && (
         <section>
@@ -127,28 +157,18 @@ export function DetailView({
             <dd>{structured.whatHappened ?? "—"}</dd>
             <dt>期待した結果</dt>
             <dd>{structured.expectedResult ?? "—"}</dd>
-            <dt>緊急度</dt>
-            <dd>{structured.urgency}</dd>
           </dl>
         </section>
       )}
 
-      {detail.followUps.length > 0 && (
+      {detail.intake.length > 0 && (
         <section>
-          <h3>{OP_TEXT.followUps}</h3>
+          <h3>{OP_TEXT.intake}</h3>
           <ul className="op-qa">
-            {detail.followUps.map((f) => (
-              <li key={f.text}>
-                <span className="op-q">{f.text}</span>
-                {f.status === "NOT_ANSWERED" ? (
-                  <span className="op-a not-answered">
-                    {OP_TEXT.notAnswered}
-                  </span>
-                ) : (
-                  <span className="op-a">
-                    {f.answer ?? OP_TEXT.unknownAnswer}
-                  </span>
-                )}
+            {detail.intake.map((entry) => (
+              <li key={entry.questionId}>
+                <span className="op-q">{entry.text}</span>
+                <span className="op-a">{opAnswerLabel(entry.answer)}</span>
               </li>
             ))}
           </ul>

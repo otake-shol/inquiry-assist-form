@@ -6,7 +6,7 @@ describe("askerColumnOf", () => {
   it("docs/ux-principles.md の表どおりに列を決める", () => {
     const cases: [Parameters<typeof askerColumnOf>[0], AskerColumn][] = [
       [
-        { step: "TRIAGED", outcome: "IN_PROGRESS", handlingStatus: null },
+        { step: "INTAKE", outcome: "IN_PROGRESS", handlingStatus: null },
         "DRAFT",
       ],
       [
@@ -29,14 +29,6 @@ describe("askerColumnOf", () => {
       [{ step: "CLOSED", outcome: "FILED", handlingStatus: "DONE" }, "DONE"],
       [
         { step: "CLOSED", outcome: "SELF_RESOLVED", handlingStatus: null },
-        "DONE",
-      ],
-      [
-        {
-          step: "CLOSED",
-          outcome: "INCIDENT_REDIRECTED",
-          handlingStatus: null,
-        },
         "DONE",
       ],
       [{ step: "CLOSED", outcome: "ABANDONED", handlingStatus: null }, "DONE"],

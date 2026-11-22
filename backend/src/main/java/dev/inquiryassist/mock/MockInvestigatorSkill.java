@@ -48,15 +48,15 @@ public class MockInvestigatorSkill implements InvestigatorSkill {
      * @param scope 投稿者の閲覧範囲
      * @param progress 進捗の通知先
      * @return 調査の結果（出典は未照合）
-     * @throws IllegalArgumentException 0次回答を出さない種別を渡した場合
+     * @throws IllegalArgumentException 調べない種類を渡した場合
      * @throws AiRefusalException {@code [拒否]} の場合
      * @throws AiUnavailableException {@code [エラー]} の場合
      */
     @Override
     public AiResult<Investigation> investigate(
             StructuredInquiry inquiry, AccessScope scope, ProgressListener progress) {
-        if (!inquiry.category().receivesZeroAnswer()) {
-            throw new IllegalArgumentException("0次回答を出さない種別: " + inquiry.category());
+        if (inquiry.type() != null && !inquiry.type().investigates()) {
+            throw new IllegalArgumentException("調べない種類: " + inquiry.type());
         }
         String tags = inquiry.goal();
         boolean slow = MockScenario.has(tags, MockScenario.TAG_SLOW);

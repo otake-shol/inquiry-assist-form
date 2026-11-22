@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeView } from "../test/fakes.ts";
-import {
-  answersFromSubmitted,
-  createInitialState,
-  flowReducer,
-  type FlowState,
-} from "./reducer.ts";
+import { createInitialState, flowReducer, type FlowState } from "./reducer.ts";
 
 const initialState = createInitialState();
 
@@ -54,24 +49,6 @@ describe("flowReducer", () => {
     expect(retried.streamAttempt).toBe(failed.streamAttempt + 1);
   });
 
-  it("判定失敗で保存された id は送信失敗後も残り、view を受け取ると消える", () => {
-    const saved = flowReducer(initialState, {
-      type: "requestFailed",
-      error: { code: "AI_UNAVAILABLE", message: "m", inquiryId: "saved-1" },
-    });
-    expect(saved.savedInquiryId).toBe("saved-1");
-    const retryFailed = flowReducer(saved, {
-      type: "requestFailed",
-      error: { code: "INTERNAL", message: "m" },
-    });
-    expect(retryFailed.savedInquiryId).toBe("saved-1");
-    const closed = flowReducer(retryFailed, {
-      type: "viewReceived",
-      view: makeView({ step: "CLOSED", outcome: "FILED" }),
-    });
-    expect(closed.savedInquiryId).toBeNull();
-  });
-
   it("reset は問い合わせと入力を消すがモック設定は保つ", () => {
     const state: FlowState = {
       ...initialState,
@@ -85,99 +62,76 @@ describe("flowReducer", () => {
     });
   });
 
-  it("回答は順に積まれ、答え直すと以降が消える", () => {
-    let state = flowReducer(initialState, {
-      type: "answerGiven",
-      index: 0,
-      answer: "詳細",
+  it("文章で書く入力欄は、開く・例文や入力で開いたまま入る・送ると閉じて空になる", () => {
+    const opened = flowReducer(initialState, { type: "writingOpened" });
+    expect(opened.writing).toBe(true);
+    // 例文を選んだ場合など、入力欄が閉じていても開いて入れる
+    const drafted = flowReducer(initialState, {
+      type: "draftChanged",
+      draft: "掲載期限",
     });
-    state = flowReducer(state, { type: "answerGiven", index: 1, answer: null });
-    expect(state.answers).toEqual(["詳細", null]);
-    expect(
-      flowReducer(state, { type: "answersRewound", index: 1 }).answers,
-    ).toEqual(["詳細"]);
-    // 同じ位置に答え直すと、それより後ろは残らない
-    expect(
-      flowReducer(state, { type: "answerGiven", index: 0, answer: "一覧" })
-        .answers,
-    ).toEqual(["一覧"]);
+    expect(drafted).toMatchObject({ writing: true, draft: "掲載期限" });
+    expect(flowReducer(drafted, { type: "textSent" })).toMatchObject({
+      writing: false,
+      draft: "",
+    });
   });
 
-  it("追加質問の段階の view を受け取ると回答を最初から聞き直し、後の段階では保つ", () => {
-    const answered: FlowState = {
+  it("作成前に選んだ緊急度を持っておき、reset で通常に戻す", () => {
+    const chosen = flowReducer(initialState, {
+      type: "urgencyChosen",
+      urgency: "HURRY",
+    });
+    expect(chosen.urgencyChoice).toBe("HURRY");
+    expect(flowReducer(chosen, { type: "reset" }).urgencyChoice).toBe("NORMAL");
+  });
+
+  it("入力欄の初期値を渡せ、空でなければ入力欄を開いておく", () => {
+    expect(createInitialState("掲載期限")).toMatchObject({
+      draft: "掲載期限",
+      writing: true,
+    });
+    expect(createInitialState().writing).toBe(false);
+  });
+
+  it("失敗のあとに取り直した問い合わせは、エラーを残して置き換わる。作成の途中で失敗した件は入力欄を閉じる", () => {
+    const failed: FlowState = {
       ...initialState,
-      answers: ["詳細"],
-      categoryOpen: true,
+      draft: "書いた文章",
+      writing: true,
+      error: { code: "AI_UNAVAILABLE", message: "m", source: "action" },
     };
-    const reopened = flowReducer(answered, {
-      type: "viewReceived",
-      view: makeView({ step: "TRIAGED" }),
+    const refreshed = flowReducer(failed, {
+      type: "viewRefreshed",
+      view: makeView({ utterance: "書いた文章", canSendNow: true }),
     });
-    expect(reopened.answers).toEqual([]);
-    expect(reopened.categoryOpen).toBe(false);
-    const structured = flowReducer(answered, {
-      type: "viewReceived",
-      view: makeView({ step: "STRUCTURED" }),
-    });
-    expect(structured.answers).toEqual(["詳細"]);
+    expect(refreshed.view?.canSendNow).toBe(true);
+    expect(refreshed.error?.code).toBe("AI_UNAVAILABLE");
+    expect(refreshed).toMatchObject({ draft: "", writing: false });
+
+    // すでに問い合わせがある場合は、入力欄に触れない
+    const existing: FlowState = {
+      ...failed,
+      view: makeView({ utterance: "前の文章" }),
+    };
+    expect(
+      flowReducer(existing, {
+        type: "viewRefreshed",
+        view: makeView({ utterance: "前の文章" }),
+      }),
+    ).toMatchObject({ draft: "書いた文章", writing: true });
   });
 
-  it("入力欄の初期値を渡せる", () => {
-    expect(createInitialState("掲載期限").draft).toBe("掲載期限");
-  });
-
-  it("開き直した問い合わせは、送信済みの回答から答えた質問を再現し、追加質問の途中（TRIAGED）は最初から聞く", () => {
-    const questions = [
-      { id: "q1", text: "どの画面", options: ["一覧"] },
-      { id: "q2", text: "いつ", options: [] },
-    ];
+  it("開き直した問い合わせは、そのまま表示する状態になる", () => {
     const resumed = flowReducer(
       { ...initialState, resume: "loading" },
-      {
-        type: "inquiryResumed",
-        view: makeView({
-          step: "STRUCTURED",
-          questions,
-          submittedAnswers: [
-            { questionId: "q1", answer: "一覧" },
-            { questionId: "q2", answer: null },
-          ],
-        }),
-      },
+      { type: "inquiryResumed", view: makeView({ step: "STRUCTURED" }) },
     );
     expect(resumed).toMatchObject({
       resume: "idle",
-      answers: ["一覧", null],
       progress: [],
+      view: { step: "STRUCTURED" },
     });
-    const triaged = flowReducer(initialState, {
-      type: "inquiryResumed",
-      view: makeView({
-        step: "TRIAGED",
-        questions,
-        submittedAnswers: [{ questionId: "q1", answer: "一覧" }],
-      }),
-    });
-    expect(triaged.answers).toEqual([]);
-  });
-
-  it("answersFromSubmitted は記録が無い・欠けている場合に、答えがある先頭からの連続ぶんだけ返す", () => {
-    const questions = [
-      { id: "q1", text: "a", options: [] },
-      { id: "q2", text: "b", options: [] },
-    ];
-    expect(answersFromSubmitted(makeView({ questions }))).toEqual([]);
-    expect(
-      answersFromSubmitted(makeView({ questions, submittedAnswers: null })),
-    ).toEqual([]);
-    expect(
-      answersFromSubmitted(
-        makeView({
-          questions,
-          submittedAnswers: [{ questionId: "q2", answer: "x" }],
-        }),
-      ),
-    ).toEqual([]);
   });
 
   it("見つからない・取得に失敗した場合は問い合わせの状態を捨て、設定は残す", () => {
@@ -187,13 +141,11 @@ describe("flowReducer", () => {
       userName: "開発用ユーザー",
       trace: true,
       view: makeView(),
-      answers: ["a"],
     };
     const missing = flowReducer(configured, { type: "resumeNotFound" });
     expect(missing).toMatchObject({
       resume: "notFound",
       view: null,
-      answers: [],
       mock: true,
       userName: "開発用ユーザー",
       trace: true,
@@ -216,7 +168,8 @@ describe("flowReducer", () => {
       mock: false,
       skills: null,
       filedGuidance: null,
-      systems: [],
+      types: [],
+      urgencies: [],
     });
     expect(loaded).toMatchObject({ userName: null, trace: false });
   });

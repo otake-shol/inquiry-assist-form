@@ -4,7 +4,8 @@ import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.AnsweredQuestion;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.FunctionOption;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
 import java.util.List;
@@ -13,16 +14,17 @@ import java.util.List;
 public interface RestaterSkill {
 
     /**
-     * 発話と追加質問への回答から、整形後の問いを作る。作り直しも別のメソッドにせず、これで行う。
+     * 置き場所、詳しい質問への答え、本人が書いた文章から、整形後の問いを作る。作り直しも別のメソッドにせず、これで行う。
      *
      * <p>本人が違う点を伝えた場合は、その一言（{@code corrections}）を足して、最初から言い直す。
      * 前回の言い直しの文章は渡さない。前回の文章を渡すと、直すべき記述がそこに残っているため、
-     * 訂正と食い違う文になりやすい。
+     * 訂正と食い違う文になりやすい。緊急度は出力に含めない（本人の申告を、AI が書き換えないため）。
      *
-     * @param utterance 本人が書いた元の発話
-     * @param category 本人が確認した種別
-     * @param answers 追加質問と回答
-     * @param system 確定した対象システム。決まっていなければ {@code null}。{@code targetSystem} にはその名前を入れる
+     * @param utterance 本人が書いた文章。書いていなければ {@code null}
+     * @param type 種類。決まっていなければ {@code null}
+     * @param system システム。決まっていなければ {@code null}。{@code targetSystem} にはその名前を入れる
+     * @param function 機能。決まっていなければ {@code null}
+     * @param answers 詳しい質問と答え
      * @param corrections 本人が伝えた違う点の一言。伝えられた順。空なら最初の言い直し
      * @return 整形後の問い
      * @throws AiRefusalException モデルが回答を拒否した場合
@@ -30,8 +32,9 @@ public interface RestaterSkill {
      */
     AiResult<StructuredInquiry> restate(
             String utterance,
-            InquiryCategory category,
-            List<AnsweredQuestion> answers,
+            InquiryType type,
             SystemOption system,
+            FunctionOption function,
+            List<AnsweredQuestion> answers,
             List<String> corrections);
 }

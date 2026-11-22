@@ -44,8 +44,8 @@ public class OllamaExplainerSkill implements ExplainerSkill {
     public AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings) {
         StringBuilder user = new StringBuilder("## 本人の問い\n")
                 .append(inquiry.summary())
-                .append("\n\n## 種別\n")
-                .append(inquiry.category().name())
+                .append("\n\n## 種類\n")
+                .append(inquiry.type() == null ? "（未定）" : inquiry.type().name())
                 .append("\n\n## 確かめられた事実\n");
         confirmedFindings.forEach(f -> user.append("- ").append(f.statement()).append('\n'));
         return call.call(system, user.toString().stripTrailing(), OllamaExplainerSkill::toExplanation);

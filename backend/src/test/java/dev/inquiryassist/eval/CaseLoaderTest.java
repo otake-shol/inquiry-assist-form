@@ -21,7 +21,7 @@ class CaseLoaderTest {
     }
 
     private static final String RESTATER_OK =
-            "{\"id\":\"rs-x\",\"split\":\"dev\",\"utterance\":\"u\",\"category\":\"SPEC_QUESTION\",\"systemLabel\":null,"
+            "{\"id\":\"rs-x\",\"split\":\"dev\",\"utterance\":\"u\",\"type\":\"HOW_IT_WORKS\",\"systemLabel\":null,"
                     + "\"answers\":[],\"corrections\":[],\"expect\":%s}";
 
     private CaseLoader.Loaded loadRestater(String expect) throws IOException {
@@ -78,7 +78,7 @@ class CaseLoaderTest {
                 .isInstanceOf(EvalConfigException.class)
                 .satisfies(e -> {
                     String message = e.getMessage();
-                    assertThat(message).contains("category が不正").contains("systemLabel は必須").contains("answers").contains("corrections");
+                    assertThat(message).contains("type が不正").contains("systemLabel は必須").contains("answers").contains("corrections");
                 });
     }
 
@@ -108,7 +108,7 @@ class CaseLoaderTest {
     @Test
     void 受付の例はsystemsと必須の条件を要求しnullを含むsystemIdAnyOfを読める() throws IOException {
         write("reception", "{\"systems\":[{\"id\":\"a\",\"label\":\"A\"}],\"cases\":[{\"id\":\"rc-x\",\"split\":\"holdout\","
-                + "\"utterance\":\"u\",\"selectedSystemId\":null,\"expect\":{\"category\":\"SPEC_QUESTION\",\"systemIdAnyOf\":[\"a\",null]}}]}");
+                + "\"utterance\":\"u\",\"selectedSystemId\":null,\"expect\":{\"type\":\"HOW_IT_WORKS\",\"systemIdAnyOf\":[\"a\",null]}}]}");
 
         var loaded = CaseLoader.load(List.of(new CaseLoader.Source(dir, true)), List.of(EvalSkill.RECEPTION));
 
@@ -116,7 +116,7 @@ class CaseLoaderTest {
         assertThat(loaded.systems()).hasSize(1);
 
         write("reception", "{\"cases\":[{\"id\":\"rc-x\",\"split\":\"dev\",\"utterance\":\"u\",\"selectedSystemId\":null,"
-                + "\"expect\":{\"category\":\"SPEC_QUESTION\"}}]}");
+                + "\"expect\":{\"type\":\"HOW_IT_WORKS\"}}]}");
         assertThatThrownBy(() -> CaseLoader.load(List.of(new CaseLoader.Source(dir, true)), List.of(EvalSkill.RECEPTION)))
                 .hasMessageContaining("systems")
                 .hasMessageContaining("systemId か systemIdAnyOf が必要");

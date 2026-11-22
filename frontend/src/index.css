@@ -184,11 +184,6 @@ p {
   margin-bottom: 0;
 }
 
-.receipt {
-  color: var(--muted);
-  font-size: 0.95rem;
-}
-
 .question,
 .lead {
   font-weight: 600;
@@ -311,14 +306,116 @@ summary:focus-visible {
   margin-top: 12px;
 }
 
-.choice[aria-pressed="true"] {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+/* 入口の質問の選択肢。折り返し、狭い幅でも横にはみ出さない */
+.choice {
+  max-width: 100%;
+  border-radius: 16px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .choice.quiet {
   color: var(--muted);
   background: transparent;
+}
+
+/* 種類の選択肢。名前と短い説明を縦に並べ、ボタン自体も縦に積む */
+.choices.stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.choice.with-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  line-height: 1.5;
+}
+
+.choice-name {
+  font-weight: 600;
+}
+
+.choice-hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* 文章で答える欄（質問の文章を見出しにする場合と、選択肢の下の補助の場合がある） */
+.text-answer {
+  margin-top: 4px;
+}
+
+.text-answer-label {
+  font-weight: 400;
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-top: 12px;
+}
+
+/* 質問の下の、控えめな「文章で書く」と緊急度 */
+.write-link {
+  margin: 16px 0 0;
+  font-size: 0.95rem;
+}
+
+.input-box {
+  margin-top: 16px;
+}
+
+.urgency {
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.urgency legend {
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.urgency-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.urgency-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin: 0;
+  padding: 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 0.9rem;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.urgency-option:has(input:checked) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.urgency-option:has(input:focus-visible) {
+  outline: 3px solid #e6a700;
+  outline-offset: 2px;
+}
+
+.urgency-option input {
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 /* 答えた質問の1行 */
@@ -352,6 +449,11 @@ button.answered-row.interactive {
 .answered-a {
   color: var(--ink);
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.answered-note {
+  font-size: 0.85rem;
 }
 
 .notice-inline {
@@ -453,19 +555,6 @@ blockquote {
   overflow-wrap: anywhere;
   font-family: ui-monospace, Menlo, monospace;
   font-size: 0.85rem;
-}
-
-.incident {
-  background: var(--danger-bg);
-  border: 2px solid var(--danger-line);
-  border-radius: 10px;
-  padding: 12px 16px;
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-
-.incident p {
-  margin: 0;
 }
 
 .working {
@@ -629,21 +718,6 @@ blockquote {
   .board-columns {
     scroll-behavior: auto;
   }
-}
-
-/* 対象システムの選択 */
-.system-choices {
-  margin-top: 16px;
-}
-
-.system-legend {
-  margin: 0 0 4px;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.system-choices .choices {
-  margin-top: 6px;
 }
 
 /* オペレータ画面 */

@@ -1,10 +1,10 @@
 package dev.inquiryassist.core;
 
 /**
- * 追加質問と本人の回答の組。
+ * 詳しい質問と本人の答えの組。言い直しに渡す。
  *
- * @param question 出した質問
- * @param answer 本人の回答。「わからない」を選んだ場合は {@code null}
+ * @param question 聞いた質問
+ * @param answer 本人の答え。「わからない」を選んだ場合は {@code null}
  */
 public record AnsweredQuestion(FollowUpQuestion question, String answer) {
 

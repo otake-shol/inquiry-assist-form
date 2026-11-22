@@ -4,14 +4,13 @@ import {
   subscribeAnswerStream,
   type SubscribeAnswerStream,
 } from "./api/stream.ts";
-import type { AnswerInput, InquiryView, Question } from "./api/types.ts";
+import type { InquiryView, IntakeAnswerRequest, Urgency } from "./api/types.ts";
 import {
-  AnsweredRow,
-  InputBox,
+  EntryRow,
   QuestionPrompt,
-  QuestionsIntro,
-  Receipt,
+  UrgencyChoice,
   UtteranceRow,
+  WriteByText,
 } from "./components/Conversation.tsx";
 import { ErrorNotice } from "./components/ErrorNotice.tsx";
 import { FollowUp } from "./components/Exchange.tsx";
@@ -28,7 +27,7 @@ import {
   ConfirmedRestatement,
   Restatement,
 } from "./components/Restatement.tsx";
-import { createInitialState, flowReducer, systemIdOf } from "./flow/reducer.ts";
+import { createInitialState, flowReducer } from "./flow/reducer.ts";
 import { useInquiryList } from "./flow/useInquiryList.ts";
 import { navigateTo, usePathname } from "./location.ts";
 import {
@@ -38,10 +37,12 @@ import {
   type Route,
 } from "./path.ts";
 import {
-  canSendNow,
+  composeStalled,
+  firstQuestionOf,
   pageSections,
   readTextParam,
   sectionKey,
+  showSendNowFooter,
   type Section,
 } from "./flow/page.ts";
 import { TracePanel } from "./components/TracePanel.tsx";
@@ -52,18 +53,6 @@ import { TEXT } from "./text/labels.ts";
 interface AppProps {
   /** 0次回答ストリームの購読関数。テストでは偽物を渡す。 */
   subscribe?: SubscribeAnswerStream;
-}
-
-/**
- * 質問と回答を API の回答の形に並べる。
- * @param questions 追加質問
- * @param answers 回答（質問と同じ順）
- */
-function toAnswerInputs(
-  questions: Question[],
-  answers: (string | null)[],
-): AnswerInput[] {
-  return questions.map((q, i) => ({ questionId: q.id, answer: answers[i] }));
 }
 
 /** 動きを減らす設定か。 */
@@ -77,7 +66,8 @@ function prefersReducedMotion(): boolean {
  * 本人向けの画面全体。URL が `/` なら新しい問い合わせ、`/inquiries` なら送った問い合わせの一覧、
  * `/inquiries/{id}` ならその問い合わせを開く（途中なら続きから再開する）。
  * 問い合わせの画面は1枚のページが会話のように下へ伸び、済んだやり取りは要約として上に残る。
- * 何を並べるかは InquiryView と回答済みの数から `pageSections` が決める。
+ * 何を並べるかは InquiryView から `pageSections` が決める。入口の質問は API が返す `intake.next` を描くだけで、
+ * 問い合わせの作成は最初の答えを押した時点（または文章を送った時点）で行う。
  * @param props 購読関数の差し替え口
  */
 export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
@@ -89,16 +79,15 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
     busy,
     error,
     progress,
+    writing,
     draft,
+    urgencyChoice,
     mock,
     skills,
-    answers,
-    categoryOpen,
     streamAttempt,
     filedGuidance,
-    savedInquiryId,
-    systems,
-    systemChoice,
+    types,
+    urgencies,
     userName,
     trace,
     resume,
@@ -124,7 +113,8 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
           mock: config.mock,
           skills: config.skills ?? null,
           filedGuidance: config.filedGuidance ?? null,
-          systems: config.systems ?? [],
+          types: config.types ?? [],
+          urgencies: config.urgencies ?? [],
           userName: config.user?.name ?? null,
           trace: config.trace ?? false,
         }),
@@ -152,6 +142,8 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
 
   /**
    * API 呼び出しを実行し、結果の InquiryView かエラーを状態に反映する。通信中は busy にする。
+   * 問いの組み立てに失敗したときは、エラーに答えを保存した問い合わせの id が付く（応答に問い合わせの
+   * 表現は無い）。その id で問い合わせを取り直して、止まっている状態（`canSendNow` など）を画面に反映する。
    * @param operation 実行する API 呼び出し
    */
   const run = useCallback(async (operation: () => Promise<InquiryView>) => {
@@ -166,6 +158,15 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
           ? { code: e.code, message: e.message, inquiryId: e.inquiryId }
           : { code: "UNKNOWN", message: String(e) };
       dispatch({ type: "requestFailed", error: failure });
+      if (failure.inquiryId !== undefined) {
+        api
+          .getInquiry(failure.inquiryId)
+          .then((saved) => {
+            dispatch({ type: "viewRefreshed", view: saved });
+            navigateTo(inquiryPathOf(saved.id));
+          })
+          .catch(() => {});
+      }
       return null;
     }
   }, []);
@@ -219,29 +220,10 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
     // 開くページが変わったときだけ動かす（view と resume は ref から読む）
   }, [route]);
 
-  // 質問が0個なら何も出さずに先へ進む。失敗したときは自動で繰り返さない。
-  const autoSubmitted = useRef<string | null>(null);
-  useEffect(() => {
-    if (
-      view === null ||
-      view.step !== "TRIAGED" ||
-      view.category === null ||
-      view.questions.length > 0 ||
-      busy ||
-      error !== null
-    ) {
-      return;
-    }
-    const key = `${view.id}:${view.category}:${view.system?.id ?? ""}`;
-    if (autoSubmitted.current === key) return;
-    autoSubmitted.current = key;
-    void run(() => api.submitAnswers(view.id, []));
-  }, [view, busy, error, run]);
-
-  // 問い合わせを開いている間（読み込み中、見つからない）は、入力欄を出さない
+  // 問い合わせを開いている間（読み込み中、見つからない）は、最初の質問を出さない
   const sections =
     route.kind === "new" || route.kind === "operator" || view !== null
-      ? pageSections(view, answers.length)
+      ? pageSections(view)
       : [];
   const lastKey =
     sections.length === 0 ? "" : sectionKey(sections[sections.length - 1]);
@@ -270,31 +252,73 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
   }, [error]);
 
   const streamError = error?.source === "stream" ? error : null;
-  const sendNowId =
-    view !== null && canSendNow(view) ? view.id : savedInquiryId;
-  const allAnswered =
-    view !== null &&
-    view.step === "TRIAGED" &&
-    view.category !== null &&
-    answers.length === view.questions.length;
+  const typeHints = useMemo(
+    () => Object.fromEntries(types.map((type) => [type.id, type.hint])),
+    [types],
+  );
 
   /**
-   * 追加質問に答える。最後の質問に答えたら自動で送信する。
-   * @param current 質問の持ち主の問い合わせ
-   * @param index 答えた質問の位置
-   * @param answer 回答（「わからない」は null）
+   * 問い合わせを作り、続けて最初の答えを送る。作成は最初の答えを押した時点で行い、
+   * 返ってきた `intake.next`（最初の質問と同じ）の質問に答える。作成したら URL を
+   * `/inquiries/{id}` に変える（開き直しても続きから再開できる）。
+   * @param answer 1問目への答え
    */
-  const answerQuestion = (
-    current: InquiryView,
-    index: number,
-    answer: string | null,
-  ) => {
-    const next = [...answers.slice(0, index), answer];
-    dispatch({ type: "answerGiven", index, answer });
-    if (next.length === current.questions.length) {
-      void run(() =>
-        api.submitAnswers(current.id, toAnswerInputs(current.questions, next)),
-      );
+  const startWithAnswer = async (answer: IntakeAnswerRequest) => {
+    const created = await run(() =>
+      api.createInquiry(
+        urgencyChoice === "NORMAL" ? {} : { urgency: urgencyChoice },
+      ),
+    );
+    if (created === null) return;
+    navigateTo(inquiryPathOf(created.id));
+    const first = created.intake.next;
+    if (first === null) return;
+    await run(() => api.answerIntake(created.id, first.questionId, answer));
+  };
+
+  /**
+   * 入口の質問に答える。問い合わせの作成前（画面が描いた1問目）なら、作成してから答えを送る。
+   * @param questionId 答える質問の id
+   * @param answer 答え方
+   */
+  const answerQuestion = (questionId: string, answer: IntakeAnswerRequest) => {
+    if (view === null) {
+      void startWithAnswer(answer);
+    } else {
+      void run(() => api.answerIntake(view.id, questionId, answer));
+    }
+  };
+
+  /**
+   * 「文章で書く」の文章を送る。作成前は文章つきで作成し、作成後は文章で書く道に切り替える。
+   */
+  const submitText = async () => {
+    const text = draft.trim();
+    if (text === "") return;
+    const received =
+      view === null
+        ? await run(() =>
+            api.createInquiry(
+              urgencyChoice === "NORMAL"
+                ? { text }
+                : { text, urgency: urgencyChoice },
+            ),
+          )
+        : await run(() => api.submitIntakeText(view.id, text));
+    if (received === null) return;
+    dispatch({ type: "textSent" });
+    if (view === null) navigateTo(inquiryPathOf(received.id));
+  };
+
+  /**
+   * 緊急度を選ぶ。作成前は選んだ値を持っておき（作成のリクエストに付ける）、作成後は変更を送る。
+   * @param urgency 選んだ緊急度
+   */
+  const chooseUrgency = (urgency: Urgency) => {
+    if (view === null) {
+      dispatch({ type: "urgencyChosen", urgency });
+    } else {
+      void run(() => api.changeUrgency(view.id, urgency));
     }
   };
 
@@ -307,77 +331,56 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
    */
   const renderSection = (section: Section) => {
     switch (section.kind) {
-      case "input":
-        return (
-          <InputBox
-            draft={draft}
-            busy={busy}
-            systems={systems}
-            systemChoice={systemChoice}
-            onChange={(value) =>
-              dispatch({ type: "draftChanged", draft: value })
-            }
-            onChooseSystem={(choice) =>
-              dispatch({ type: "systemChosen", choice })
-            }
-            onSubmit={() =>
-              void run(() =>
-                api.createInquiry(draft.trim(), systemIdOf(systemChoice)),
-              ).then((created) => {
-                // 作成したら URL を `/inquiries/{id}` に変える（開き直しても続きから再開できる）
-                if (created !== null) navigateTo(inquiryPathOf(created.id));
-              })
-            }
-          />
-        );
       case "utterance":
-        return <UtteranceRow text={view!.utterance} />;
-      case "receipt":
+        return <UtteranceRow text={view!.utterance!} />;
+      case "entry":
         return (
-          <Receipt
-            category={view!.category}
-            system={view!.system}
-            systemGuessed={view!.systemGuessed}
-            systems={systems}
-            canChange={view!.step === "TRIAGED" && view!.category !== null}
-            open={categoryOpen}
-            busy={busy}
-            onToggle={() => dispatch({ type: "categoryToggled" })}
-            onSelect={(category) =>
-              category === view!.category
-                ? dispatch({ type: "categoryToggled" })
-                : void run(() => api.changeCategory(view!.id, category))
-            }
-            onSelectSystem={(systemId) =>
-              systemId === (view!.system?.id ?? null) &&
-              !(view!.systemGuessed && systemId !== null)
-                ? dispatch({ type: "categoryToggled" })
-                : void run(() => api.changeSystem(view!.id, systemId))
-            }
-          />
-        );
-      case "questionsIntro":
-        return <QuestionsIntro count={section.count} />;
-      case "answered":
-        return (
-          <AnsweredRow
-            question={view!.questions[section.index]}
-            answer={answers[section.index]}
+          <EntryRow
+            entry={view!.intake.entries[section.index]}
             interactive={section.interactive}
             busy={busy}
-            onRewind={() =>
-              dispatch({ type: "answersRewound", index: section.index })
+            onBack={(questionId) =>
+              void run(() => api.backIntake(view!.id, questionId))
             }
           />
         );
-      case "question":
+      case "question": {
+        // 作成前は、設定の種類から描いた1問目。作成後は API が返す次の質問
+        const question =
+          view === null ? firstQuestionOf(types) : view.intake.next!;
         return (
-          <QuestionPrompt
-            question={view!.questions[section.index]}
-            busy={busy}
-            onAnswer={(answer) => answerQuestion(view!, section.index, answer)}
-          />
+          <>
+            {question.options.length > 0 || view !== null ? (
+              <QuestionPrompt
+                question={question}
+                busy={busy}
+                typeHints={typeHints}
+                onAnswer={(answer) =>
+                  answerQuestion(question.questionId, answer)
+                }
+              />
+            ) : null}
+            <UrgencyChoice
+              options={urgencies}
+              value={view?.urgency ?? urgencyChoice}
+              busy={busy}
+              onChange={chooseUrgency}
+            />
+            {question.kind !== "NOTE" && (
+              <WriteByText
+                open={writing}
+                draft={draft}
+                busy={busy}
+                onOpen={() => dispatch({ type: "writingOpened" })}
+                onChange={(value) =>
+                  dispatch({ type: "draftChanged", draft: value })
+                }
+                onSubmit={() => void submitText()}
+              />
+            )}
+          </>
         );
+      }
       case "restatement":
         return section.confirmed ? (
           <ConfirmedRestatement summary={view!.structured!.summary} />
@@ -386,7 +389,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
             summary={view!.structured!.summary}
             revisionsLeft={view!.revisionsLeft}
             busy={busy}
-            canGoBack={view!.questions.length > 0}
+            canGoBack={view!.intake.entries.length > 0}
             onConfirm={() => void run(() => api.confirmStructured(view!.id))}
             onRevise={(note) =>
               void run(() => api.reviseStructured(view!.id, note))
@@ -403,12 +406,13 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
           <Researching progress={progress} stopped={streamError !== null} />
         );
       case "filedNotice":
-        return <FiledNotice />;
+        return <FiledNotice text={section.text} />;
       case "result":
         return (
           <Result
             answer={view!.answer!}
             awaitingResolution={view!.step === "ANSWERED"}
+            doForMe={view!.type?.id === "DO_FOR_ME"}
             busy={busy}
             onResolve={(resolved) =>
               void run(() => api.resolve(view!.id, resolved))
@@ -447,15 +451,22 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
 
   let retry: (() => void) | undefined;
   let retryLabel: string | undefined;
+  let sendNowInError: (() => void) | undefined;
   if (step === "ANSWERING" && streamError !== null) {
     retry = () => dispatch({ type: "streamRetried" });
     retryLabel = TEXT.retryResearch;
-  } else if (allAnswered && error !== null && error.source === "action") {
-    retry = () =>
-      void run(() =>
-        api.submitAnswers(view!.id, toAnswerInputs(view!.questions, answers)),
-      );
-    retryLabel = TEXT.resendAnswers;
+  } else if (
+    view !== null &&
+    composeStalled(view) &&
+    error !== null &&
+    error.source === "action"
+  ) {
+    // 入口の最後の答えのあとに問いを組み立てられなかった。答えは保存済みで、組み立てだけをやり直せる
+    retry = () => void run(() => api.composeIntake(view.id));
+    retryLabel = TEXT.retryCompose;
+    if (view.canSendNow) {
+      sendNowInError = () => void run(() => api.sendNow(view.id));
+    }
   }
 
   return (
@@ -517,21 +528,22 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
               <div ref={errorRef}>
                 <ErrorNotice
                   error={error}
-                  hasInquiry={sendNowId !== null}
+                  hasInquiry={showSendNowFooter(view)}
                   busy={busy}
                   onRetry={retry}
                   retryLabel={retryLabel}
+                  onSendNow={sendNowInError}
                 />
               </div>
             )}
           </main>
-          {sendNowId !== null && (
+          {view !== null && showSendNowFooter(view) && (
             <footer className="send-now">
               <p>{TEXT.sendNowHint}</p>
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => void run(() => api.sendNow(sendNowId))}
+                onClick={() => void run(() => api.sendNow(view.id))}
               >
                 {TEXT.sendNow}
               </button>

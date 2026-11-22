@@ -6,7 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.inquiryassist.core.CitationVerifier;
 import dev.inquiryassist.core.FollowUpQuestion;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
+import dev.inquiryassist.core.Placement;
+import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.TechnicalMemo;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -27,17 +29,42 @@ class SkillTypesTest {
     }
 
     @Test
-    void Interviewは質問を最大3個まで持てる() {
-        assertThat(new Interview(List.of(question(1), question(2), question(3))).questions()).hasSize(3);
-        assertThatThrownBy(() -> new Interview(List.of(question(1), question(2), question(3), question(4))))
+    void Interviewは質問を最大2個まで持てる() {
+        assertThat(new Interview(List.of(question(1), question(2))).questions()).hasSize(2);
+        assertThatThrownBy(() -> new Interview(List.of(question(1), question(2), question(3))))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(Interview.none().questions()).isEmpty();
     }
 
     @Test
-    void Receptionは種別が必須で対象システムの推測は任意() {
-        assertThatThrownBy(() -> new Reception(null, null)).isInstanceOf(IllegalArgumentException.class);
-        assertThat(new Reception(InquiryCategory.INCIDENT, null).guessedSystemId()).isNull();
+    void Receptionはどの項目も読み取れなければnullにできる() {
+        Reception none = new Reception(null, null, null);
+        assertThat(none.type()).isNull();
+        assertThat(none.systemId()).isNull();
+        assertThat(none.functionId()).isNull();
+    }
+
+    private static final List<SystemOption> CANDIDATES = List.of(
+            new SystemOption("a", "システムA", List.of(new dev.inquiryassist.core.FunctionOption("a-1", "機能A-1"))),
+            new SystemOption("b", "システムB"));
+
+    @Test
+    void Receptionの正規化は本人が選んだ項目を変えない() {
+        Placement decided = new Placement(InquiryType.HOW_TO, "a", null);
+
+        Reception result = Reception.normalize(new Reception(InquiryType.LOOKS_WRONG, "b", "a-1"), CANDIDATES, decided);
+
+        assertThat(result).isEqualTo(new Reception(InquiryType.HOW_TO, "a", "a-1"));
+    }
+
+    @Test
+    void Receptionの正規化は候補にないidと決まったシステムの機能でない機能をnullにする() {
+        assertThat(Reception.normalize(new Reception(null, "zzz", "a-1"), CANDIDATES, Placement.NONE))
+                .isEqualTo(new Reception(null, null, null));
+        assertThat(Reception.normalize(new Reception(null, "b", "a-1"), CANDIDATES, Placement.NONE))
+                .isEqualTo(new Reception(null, "b", null));
+        assertThat(Reception.normalize(new Reception(null, null, "a-1"), CANDIDATES, Placement.NONE).functionId())
+                .isNull();
     }
 
     @Test

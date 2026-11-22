@@ -7,7 +7,8 @@ import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.AnsweredQuestion;
 import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.FollowUpQuestion;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
+import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.Usage;
@@ -98,23 +99,21 @@ final class EvalExecutor {
         Map<String, Object> output = new LinkedHashMap<>();
         switch (c.skill()) {
             case RECEPTION -> {
-                SystemOption selected = body.path("selectedSystemId").isNull()
-                        ? null
-                        : systems.stream()
-                                .filter(s -> s.id().equals(body.path("selectedSystemId").asString()))
-                                .findFirst()
-                                .orElse(null);
-                var result = reception.receive(body.path("utterance").asString(), systems, selected);
-                output.put("category", result.value().category().name());
-                output.put("systemId", result.value().guessedSystemId());
+                // 評価の例の「本人が選んだシステム」を、本人が既に選んだ置き場所として渡す（種類と機能は決まっていない）
+                Placement decided = body.path("selectedSystemId").isNull()
+                        ? Placement.NONE
+                        : new Placement(null, body.path("selectedSystemId").asString(), null);
+                var result = reception.receive(body.path("utterance").asString(), systems, decided);
+                output.put("type", result.value().type() == null ? null : result.value().type().name());
+                output.put("systemId", result.value().systemId());
                 return new Outcome(
-                        Scorer.scoreReception(c.expect(), result.value().category(), result.value().guessedSystemId()),
+                        Scorer.scoreReception(c.expect(), result.value().type(), result.value().systemId()),
                         output,
                         result.usage());
             }
             case INTERVIEWER -> {
                 var result = interviewer.ask(
-                        body.path("utterance").asString(), category(body), systemOf(body), SCOPE);
+                        body.path("utterance").asString(), type(body), systemOf(body), null, SCOPE);
                 List<Scorer.Question> questions = result.value().questions().stream()
                         .map(q -> new Scorer.Question(q.text(), q.options()))
                         .toList();
@@ -134,14 +133,13 @@ final class EvalExecutor {
                 List<String> corrections = new ArrayList<>();
                 body.path("corrections").forEach(x -> corrections.add(x.asString()));
                 AiResult<StructuredInquiry> result = restater.restate(
-                        body.path("utterance").asString(), category(body), answers, systemOf(body), corrections);
+                        body.path("utterance").asString(), type(body), systemOf(body), null, answers, corrections);
                 StructuredInquiry value = result.value();
                 output.put("summary", value.summary());
                 output.put("targetSystem", value.targetSystem());
                 output.put("goal", value.goal());
                 output.put("whatHappened", value.whatHappened());
                 output.put("expectedResult", value.expectedResult());
-                output.put("urgency", value.urgency().name());
                 return new Outcome(Scorer.scoreRestater(c.expect(), value.summary(), value.goal(), value.whatHappened(), value.expectedResult()), output, result.usage());
             }
             case EXPLAINER -> {
@@ -150,7 +148,7 @@ final class EvalExecutor {
                 List<Finding> facts = new ArrayList<>();
                 body.path("facts").forEach(f -> facts.add(new Finding(f.asString(), List.of(evidence))));
                 String question = body.path("question").asString();
-                StructuredInquiry inquiry = new StructuredInquiry(question, category(body), null, question, null, null, null);
+                StructuredInquiry inquiry = new StructuredInquiry(question, type(body), null, question, null, null);
                 var result = explainer.explain(inquiry, facts);
                 output.put("text", result.value().text());
                 output.put("answersQuestion", result.value().answersQuestion());
@@ -163,11 +161,11 @@ final class EvalExecutor {
         }
     }
 
-    private static InquiryCategory category(JsonNode body) {
-        return InquiryCategory.valueOf(body.path("category").asString());
+    private static InquiryType type(JsonNode body) {
+        return InquiryType.valueOf(body.path("type").asString());
     }
 
-    /** 対象システムの名前だけが入力に使われる（スキルは名前を使う）。id には名前を入れる。 */
+    /** システムの名前だけが入力に使われる（スキルは名前を使う）。id には名前を入れる。 */
     private static SystemOption systemOf(JsonNode body) {
         JsonNode label = body.path("systemLabel");
         return label.isNull() ? null : new SystemOption(label.asString(), label.asString());
@@ -179,11 +177,11 @@ final class EvalExecutor {
         return switch (c.skill()) {
             case RECEPTION -> "発話: " + b.path("utterance").asString()
                     + (b.path("selectedSystemId").isNull() ? "" : "（本人が選んだシステム: " + b.path("selectedSystemId").asString() + "）");
-            case INTERVIEWER -> "発話: " + b.path("utterance").asString() + " / 種別: " + b.path("category").asString()
+            case INTERVIEWER -> "発話: " + b.path("utterance").asString() + " / 種類: " + b.path("type").asString()
                     + " / 対象のシステム: " + (b.path("systemLabel").isNull() ? "なし" : b.path("systemLabel").asString());
-            case RESTATER -> "発話: " + b.path("utterance").asString() + " / 種別: " + b.path("category").asString()
+            case RESTATER -> "発話: " + b.path("utterance").asString() + " / 種類: " + b.path("type").asString()
                     + " / 回答 " + b.path("answers").size() + " 件 / 訂正 " + b.path("corrections").toString();
-            case EXPLAINER -> "問い: " + b.path("question").asString() + " / 種別: " + b.path("category").asString()
+            case EXPLAINER -> "問い: " + b.path("question").asString() + " / 種類: " + b.path("type").asString()
                     + " / 事実: " + b.path("facts").toString();
         };
     }

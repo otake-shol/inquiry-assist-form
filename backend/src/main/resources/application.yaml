@@ -28,19 +28,65 @@ inquiry:
   mock:
     # モックの [遅延] タグで進捗の各段階が待つ時間
     slow-step-delay: 2s
-  # 対象システムの一覧。slack-webhook-url は Webhook の URL を含む秘密情報のため、
-  # ここには書かず、環境変数（例: INQUIRY_SYSTEMS_0_SLACK_WEBHOOK_URL）などで与える
-  # 既定は、骨組みであることが分かる仮の名前。実際のシステムの一覧は、環境ごとの設定で差し替える
+  # 名前を持つ言語。先頭が既定の言語で、API が返す名前はこの言語のもの（本人の言語に合わせて返すのは後の段階）
+  languages: [ja, en]
+  # 種類と緊急度の名前。種類は聞く順
+  types:
+    - id: HOW_TO
+      label: { ja: 使い方を知りたい, en: I want to know how to use it }
+      hint: { ja: 操作の手順, en: Steps for an operation }
+    - id: HOW_IT_WORKS
+      label: { ja: 仕組みを知りたい, en: I want to know how it works }
+      hint: { ja: 動きや決まりの理由, en: Why it behaves this way }
+    - id: LOOKS_WRONG
+      label: { ja: おかしいかもしれない, en: Something looks wrong }
+      hint: { ja: 思った動きと違う, en: Not what I expected }
+    - id: DO_FOR_ME
+      label: { ja: やってほしい, en: I want someone to do it }
+      hint: { ja: データの修正や設定の変更, en: Fixing data or changing settings }
+    - id: CHANGE_REQUEST
+      label: { ja: 変えてほしい, en: I want it changed }
+      hint: { ja: 機能の追加や改善, en: Adding or improving a feature }
+  urgencies:
+    - id: NORMAL
+      label: { ja: 通常, en: Normal }
+    - id: HURRY
+      label: { ja: 急ぎ, en: Urgent }
+    - id: BLOCKED
+      label: { ja: 業務が止まっている, en: Work is blocked }
+  # システムと、その機能の一覧。functions を省いたシステムは、機能を聞かない。
+  # slack-webhook-url は Webhook の URL を含む秘密情報のため、ここには書かず、環境変数
+  # （例: INQUIRY_SYSTEMS_0_SLACK_WEBHOOK_URL）などで与える。
+  # 既定は、骨組みであることが分かる仮の名前。実際の一覧は、環境ごとの設定で差し替える
   systems:
     - id: system-a
-      label: システムA
+      label: { ja: システムA, en: System A }
+      functions:
+        - id: a-1
+          label: { ja: 機能A-1, en: Function A-1 }
+        - id: a-2
+          label: { ja: 機能A-2, en: Function A-2 }
     - id: system-b
-      label: システムB
-    - id: feature-c
-      label: 機能C
+      label: { ja: システムB, en: System B }
+      functions:
+        - id: b-1
+          label: { ja: 機能B-1, en: Function B-1 }
+    - id: system-c
+      label: { ja: システムC, en: System C }
+  # マスの設定。置き場所ごとの詳しい質問。system / function / type は、省くと「すべて」。
+  # 当てはまる設定のうち、指定した項目が最も多いものを1つ使う（同数なら、書かれた順で先のもの）。
+  # 質問は3問まで。当てはまる設定に質問がなければ、聞き手のスキルが質問を作る
+  cells:
+    - system: system-a
+      type: LOOKS_WRONG
+      questions:
+        - id: since
+          text: { ja: いつから起きていますか, en: "Since when has this been happening?" }
+          options:
+            - { id: today, label: { ja: 今日から, en: Since today } }
+            - { id: this-week, label: { ja: 今週から, en: Since this week } }
+            - { id: earlier, label: { ja: もっと前から, en: Earlier } }
   # Slack の既定の投稿先は INQUIRY_SLACK_DEFAULT_WEBHOOK_URL で、リンクの基点は INQUIRY_PUBLIC_BASE_URL で与える
-  # 障害の案内文。案内先が決まったら差し替える
-  incident-guidance: 障害の連絡先は、社内の案内をご確認ください。
   # 担当者に送った後に画面が見せる案内文。連絡方法が決まったら差し替える
   filed-guidance: 担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。
   # スキルの実行記録（trace）を画面に見せるか。本番では false にする（内部の言葉とモデルの名前を本人に見せないため）

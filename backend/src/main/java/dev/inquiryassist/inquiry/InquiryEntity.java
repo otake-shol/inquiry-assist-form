@@ -1,10 +1,17 @@
 package dev.inquiryassist.inquiry;
 
 import dev.inquiryassist.core.Citation;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
+import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.TechnicalMemo;
+import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.Usage;
+import dev.inquiryassist.core.intake.IntakeEntries;
+import dev.inquiryassist.core.intake.IntakeEntry;
+import dev.inquiryassist.core.intake.IntakeNext;
+import dev.inquiryassist.core.intake.IntakeQuestion;
+import dev.inquiryassist.core.intake.IntakeSnapshot;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.core.skill.SkillUsage;
 import jakarta.persistence.Column;
@@ -29,9 +36,6 @@ import org.hibernate.type.SqlTypes;
 @Entity
 @Table(name = "inquiries")
 class InquiryEntity {
-
-    /** 保存する追加質問。回答つき。 */
-    record StoredQuestion(String id, String text, List<String> options, String answer) {}
 
     /** 保存する出典。照合結果つき。 */
     record StoredCitation(
@@ -81,24 +85,31 @@ class InquiryEntity {
     @Column(nullable = false)
     InquiryStep step;
 
+    /** 緊急度。本人が申告する。種類とは別に持つ。 */
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    String utterance;
+    Urgency urgency = Urgency.NORMAL;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "category_by_ai")
-    InquiryCategory categoryByAi;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "category_confirmed")
-    InquiryCategory categoryConfirmed;
-
+    /** 本人が文章で書いたもの（最初の文章、切り替えたときの文章）。書いた順。補足は入口の答えとして別に持つ。 */
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "follow_ups", nullable = false)
-    List<StoredQuestion> followUps = new ArrayList<>();
+    @Column(nullable = false)
+    List<String> texts = new ArrayList<>();
 
+    /**
+     * 答え終えた入口の質問（聞いた順）。置き場所（種類、システム、機能）はここから導く。
+     * 別に持つと、戻ったときに答えと置き場所がずれる。
+     */
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "ai_questions", nullable = false)
-    List<StoredQuestion> aiQuestions = new ArrayList<>();
+    @Column(nullable = false)
+    List<IntakeEntry> intake = new ArrayList<>();
+
+    /**
+     * 聞き手が作った詳しい質問。聞き手をまだ呼んでいなければ null、呼んで質問がなければ空。
+     * 次の質問を、答えるたびに作り直さないために保存する。
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "detail_questions")
+    List<IntakeQuestion> detailQuestions;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "structured_by_ai")
@@ -149,9 +160,6 @@ class InquiryEntity {
     @Column(name = "sent_immediately", nullable = false)
     boolean sentImmediately;
 
-    @Column(name = "answers_submitted", nullable = false)
-    boolean answersSubmitted;
-
     @Column(name = "revisions_left", nullable = false)
     int revisionsLeft = INITIAL_REVISIONS;
 
@@ -161,15 +169,6 @@ class InquiryEntity {
 
     @Column(name = "filed_at")
     Instant filedAt;
-
-    @Column(name = "system_id")
-    String systemId;
-
-    @Column(name = "system_label")
-    String systemLabel;
-
-    @Column(name = "system_guessed", nullable = false)
-    boolean systemGuessed;
 
     @Column(name = "read_at")
     Instant readAt;
@@ -205,14 +204,14 @@ class InquiryEntity {
      * 新しい問い合わせを作る。
      *
      * @param askerId 投稿者の識別子
-     * @param utterance 本人が書いた元の発話
+     * @param urgency 緊急度
      * @param now 作成時刻
      */
-    InquiryEntity(String askerId, String utterance, Instant now) {
+    InquiryEntity(String askerId, Urgency urgency, Instant now) {
         this.id = UUID.randomUUID();
         this.askerId = askerId;
-        this.utterance = utterance;
-        this.step = InquiryStep.TRIAGED;
+        this.urgency = urgency;
+        this.step = InquiryStep.INTAKE;
         this.createdAt = now;
         this.updatedAt = now;
     }
@@ -271,31 +270,70 @@ class InquiryEntity {
     }
 
     /**
-     * 本人が送信した追加質問への回答を返す。
+     * 本人が書いた文章を、書いた順に空行でつないで返す。補足は含めない。
      *
-     * <p>送信した回答は追加質問の {@code answer} にそのまま入っているため、別に持たず、そこから作る。
-     * 追加質問へ戻る（5b）と {@code answersSubmitted} が false に戻るので、その後は null になる。
-     * 「わからない」は、回答が null または空白のみで、どちらも null にそろえる（担当者向けの判定と同じ）。
-     *
-     * @return 回答の一覧。まだ送信していなければ null
+     * @return 文章。書いていなければ null
      */
-    List<InquiryView.SubmittedAnswer> submittedAnswers() {
-        if (!answersSubmitted) {
-            return null;
-        }
-        return followUps.stream()
-                .map(q -> new InquiryView.SubmittedAnswer(
-                        q.id(), q.answer() == null || q.answer().isBlank() ? null : q.answer()))
-                .toList();
+    String writtenText() {
+        return texts.isEmpty() ? null : String.join("\n\n", texts);
     }
 
     /**
-     * 本人が確認した後の種別を返す。
+     * 本人が書いた文章（最初の文章、切り替えたときの文章、補足）を、書いた順に空行でつないで返す。
      *
-     * @return 確認後の種別
+     * @return 文章。何も書いていなければ null
      */
-    InquiryCategory category() {
-        return categoryConfirmed;
+    String utterance() {
+        List<String> parts = new ArrayList<>(texts);
+        String note = IntakeEntries.noteText(intake);
+        if (note != null) {
+            parts.add(note);
+        }
+        return parts.isEmpty() ? null : String.join("\n\n", parts);
+    }
+
+    /**
+     * 置き場所（種類、システム、機能）を返す。本人が選んだものと、受付が置いたものの両方を含む。
+     *
+     * @return 置き場所。決まっていない項目は null
+     */
+    Placement placement() {
+        return IntakeEntries.placement(intake);
+    }
+
+    /**
+     * @return 種類。決まっていなければ null
+     */
+    InquiryType type() {
+        return placement().type();
+    }
+
+    /**
+     * 次の質問を決める入力にする。
+     *
+     * @return 入口の状態
+     */
+    IntakeSnapshot snapshot() {
+        return new IntakeSnapshot(intake, detailQuestions, !texts.isEmpty(), urgency);
+    }
+
+    /**
+     * いま「答えを待たずに担当者へ送る」を実行できるかを返す。
+     *
+     * <p>問いを確かめた後に限る（入力が足りないまま担当者に渡すと、聞き返しが増えるだけになるため）。
+     * ただし、AI の失敗で先へ進めない場合（入口を終えたのに組み立てられない）と、言い直しを作り直せる回数を
+     * 使い切った場合は、こちらの側の事情なので、本人を止めない。
+     *
+     * @param next 入口で次にすること。{@code INTAKE} のときだけ見る
+     * @return 実行できる場合は true
+     */
+    boolean canSendNow(IntakeNext next) {
+        return switch (step) {
+            case ANSWERING, ANSWERED -> true;
+            case INTAKE -> next instanceof IntakeNext.Complete;
+            case STRUCTURED -> revisionsLeft == 0;
+            case CLOSED -> false;
+        };
     }
 
     /**

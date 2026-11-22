@@ -2,14 +2,14 @@ package dev.inquiryassist.ollama;
 
 import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.AnsweredQuestion;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.FunctionOption;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.skill.RestaterSkill;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.inquiry.InquiryProperties;
 import java.util.List;
-import java.util.Locale;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -35,28 +35,31 @@ public class OllamaRestaterSkill implements RestaterSkill {
     }
 
     /**
-     * 言い直しを作る。出力は信用せず、言い直しの文章が空でないこと、緊急度が3つのどれか（なければ NORMAL）を確かめ、
-     * 対象システムが決まっていればその名前を使う。前回の言い直しは渡さず、訂正を足して最初から言い直す。
+     * 言い直しを作る。出力は信用せず、言い直しの文章が空でないことを確かめ、システムが決まっていればその名前を使う。
+     * 緊急度は読まない（本人の申告を、AI が書き換えないため）。前回の言い直しは渡さず、訂正を足して最初から言い直す。
      *
-     * @param utterance 本人が書いた元の発話
-     * @param category 本人が確認した種別
-     * @param answers 追加質問と回答
-     * @param system 確定した対象システム
+     * @param utterance 本人が書いた文章。書いていなければ null
+     * @param type 種類。決まっていなければ null
+     * @param system 決まっているシステム
+     * @param function 決まっている機能
+     * @param answers 詳しい質問と答え
      * @param corrections 本人が伝えた違う点の一言（伝えられた順）
      * @return 整形後の問い
      */
     @Override
     public AiResult<StructuredInquiry> restate(
             String utterance,
-            InquiryCategory category,
-            List<AnsweredQuestion> answers,
+            InquiryType type,
             SystemOption system,
+            FunctionOption function,
+            List<AnsweredQuestion> answers,
             List<String> corrections) {
-        StringBuilder user = new StringBuilder("## 問い合わせ\n").append(utterance).append("\n\n## 種別\n").append(category.name());
-        user.append("\n\n## 対象のシステム\n").append(system == null ? "なし" : system.label());
-        user.append("\n\n## 追加の質問と回答\n");
+        StringBuilder user = new StringBuilder("## 種類\n").append(type == null ? "（未定）" : type.name());
+        user.append("\n\n## システム\n").append(system == null ? "なし" : system.label());
+        user.append("\n\n## 機能\n").append(function == null ? "なし" : function.label());
+        user.append("\n\n## 質問と答え\n");
         if (answers.isEmpty()) {
-            user.append("（追加の質問なし）\n");
+            user.append("（なし）\n");
         }
         for (AnsweredQuestion a : answers) {
             user.append("- ")
@@ -65,14 +68,17 @@ public class OllamaRestaterSkill implements RestaterSkill {
                     .append(a.unknown() ? "（わからない）" : a.answer().strip())
                     .append('\n');
         }
+        user.append("\n## 本人が書いた文章\n")
+                .append(utterance == null || utterance.isBlank() ? "（なし）" : utterance)
+                .append('\n');
         if (!corrections.isEmpty()) {
             user.append("\n## 本人が後から直したこと\n");
             corrections.forEach(c -> user.append("- ").append(c.strip()).append('\n'));
         }
-        return call.call(this.system, user.toString().stripTrailing(), node -> toStructured(node, category, system));
+        return call.call(this.system, user.toString().stripTrailing(), node -> toStructured(node, type, system));
     }
 
-    private static StructuredInquiry toStructured(JsonNode node, InquiryCategory category, SystemOption system) {
+    private static StructuredInquiry toStructured(JsonNode node, InquiryType type, SystemOption system) {
         String summary = text(node, "summary");
         if (summary == null) {
             throw new IllegalArgumentException("summary が空");
@@ -80,25 +86,12 @@ public class OllamaRestaterSkill implements RestaterSkill {
         String goal = text(node, "goal");
         return new StructuredInquiry(
                 summary,
-                category,
+                type,
                 system != null ? system.label() : text(node, "targetSystem"),
                 // goal が書かれていない場合は、言い直しの文章で代える
                 goal != null ? goal : summary,
                 text(node, "whatHappened"),
-                text(node, "expectedResult"),
-                urgency(node));
-    }
-
-    private static StructuredInquiry.Urgency urgency(JsonNode node) {
-        String value = text(node, "urgency");
-        if (value != null) {
-            try {
-                return StructuredInquiry.Urgency.valueOf(value.toUpperCase(Locale.ROOT));
-            } catch (IllegalArgumentException ignored) {
-                // 3つのどれでもなければ既定値
-            }
-        }
-        return StructuredInquiry.Urgency.NORMAL;
+                text(node, "expectedResult"));
     }
 
     /** 文字列で空でなければその値、そうでなければ null。 */

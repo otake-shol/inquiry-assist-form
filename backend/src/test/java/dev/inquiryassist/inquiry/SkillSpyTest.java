@@ -7,20 +7,23 @@ import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mockingDetails;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.skill.ExplainerSkill;
 import dev.inquiryassist.core.skill.InterviewerSkill;
+import dev.inquiryassist.core.skill.ReceptionSkill;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
-/** 聞き手を呼ぶ・呼ばないと、説明の失敗後の再試行を、スパイで呼び出しを確かめながら確認する。 */
+/** 受付と聞き手を呼ぶ・呼ばないと、説明の失敗後の再試行を、スパイで呼び出しを確かめながら確認する。 */
 class SkillSpyTest extends ApiSupport {
+
+    @MockitoSpyBean
+    ReceptionSkill reception;
 
     @MockitoSpyBean
     InterviewerSkill interviewer;
@@ -30,7 +33,13 @@ class SkillSpyTest extends ApiSupport {
 
     @BeforeEach
     void reset() {
-        clearInvocations(interviewer, explainer);
+        clearInvocations(reception, interviewer, explainer);
+    }
+
+    private long receptionCalls() {
+        return mockingDetails(reception).getInvocations().stream()
+                .filter(i -> i.getMethod().getName().equals("receive"))
+                .count();
     }
 
     private long interviewerCalls() {
@@ -40,44 +49,85 @@ class SkillSpyTest extends ApiSupport {
     }
 
     @Test
-    void 作業依頼と障害では聞き手を呼ばない() throws Exception {
-        String work = idOf(create("延長をお願いします", null));
-        String incident = idOf(create("サイトが止まっていて障害になっている", null));
-        answers(work, EMPTY_ANSWERS);
-        answers(incident, "{\"answers\":[{\"questionId\":\"incident-check\",\"answer\":\"いいえ\"}]}");
+    void 押して答えるだけなら受付を呼ばず_利用量にも受付は現れない() throws Exception {
+        String id = idOf(start());
+        pick(id, "type", "HOW_TO").andExpect(status().isOk());
+        pick(id, "system", "reports").andExpect(status().isOk());
+        pick(id, "q1", "o1").andExpect(status().isOk());
+        skip(id, "note").andExpect(status().isOk());
 
-        assertThat(interviewerCalls()).isZero();
+        assertThat(receptionCalls()).isZero();
+        assertThat(usageSteps(id)).doesNotContain("reception").containsExactly("interviewer", "restater");
     }
 
     @Test
-    void 仕様確認と不具合の疑いでは聞き手を1回ずつ呼ぶ() throws Exception {
-        create("期限の仕様", null);
-        create("表示がおかしい", null);
+    void 文章を書いたときだけ受付を呼ぶ() throws Exception {
+        String id = idOf(create("期限の仕様"));
+        assertThat(receptionCalls()).isEqualTo(1);
 
-        assertThat(interviewerCalls()).isEqualTo(2);
+        // 決まっていない置き場所が残っていれば、途中で文章を足したときにも呼ぶ
+        intakeText(id, "もう少し詳しく").andExpect(status().isOk());
+        assertThat(receptionCalls()).isEqualTo(2);
+        assertThat(usageSteps(id)).startsWith("reception", "reception");
     }
 
     @Test
-    void 種別を仕様確認へ変えると聞き手が1回呼ばれ質問がある状態でさらに変えても呼ばれない() throws Exception {
-        String id = idOf(create("延長をお願いします", null));
-        assertThat(interviewerCalls()).isZero();
+    void 置き場所がそろっていれば文章を足しても受付を呼ばない() throws Exception {
+        String id = idOf(start());
+        pick(id, "type", "HOW_TO");
+        pick(id, "system", "reports").andExpect(status().isOk());
+        long before = receptionCalls();
 
-        changeCategory(id, "SPEC_QUESTION");
-        changeCategory(id, "SUSPECTED_BUG");
+        intakeText(id, "補足です").andExpect(status().isOk());
 
+        assertThat(receptionCalls()).isEqualTo(before);
+    }
+
+    @Test
+    void 設定に質問がなければ聞き手を1回だけ呼び_設定に質問があれば呼ばない() throws Exception {
+        String viaInterviewer = idOf(start());
+        pick(viaInterviewer, "type", "HOW_TO");
+        pick(viaInterviewer, "system", "reports");
         assertThat(interviewerCalls()).isEqualTo(1);
+        // 回答のたびに呼び直さない
+        pick(viaInterviewer, "q1", "o1");
+        assertThat(interviewerCalls()).isEqualTo(1);
+
+        clearInvocations(interviewer);
+        String configured = idOf(start());
+        pick(configured, "type", "LOOKS_WRONG");
+        pick(configured, "system", "job-admin");
+        unknown(configured, "function");
+        assertThat(view(configured)).contains("\"questionId\":\"since\"");
+        assertThat(interviewerCalls()).isZero();
     }
 
     @Test
-    void 対象システムを変更しただけでは聞き手を呼び直さない() throws Exception {
-        String id = idOf(create("期限の仕様", null));
-        long before = interviewerCalls();
+    void 業務が止まっているときは聞き手を呼ばない() throws Exception {
+        String id = idOf(create(null, "BLOCKED"));
+        pick(id, "type", "HOW_TO");
+        pick(id, "system", "reports");
 
-        mvc.perform(put("/api/inquiries/" + id + "/system")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"systemId\":\"billing\"}"));
+        assertThat(interviewerCalls()).isZero();
+    }
 
-        assertThat(interviewerCalls()).isEqualTo(before);
+    @Test
+    void 戻って置き場所を選び直すと_前の置き場所のために作った質問は捨てて聞き手を呼び直す() throws Exception {
+        String id = idOf(start());
+        pick(id, "type", "HOW_TO");
+        pick(id, "system", "reports");
+        assertThat(interviewerCalls()).isEqualTo(1);
+
+        // 詳しい質問へ戻っただけなら、作った質問は残る
+        pick(id, "q1", "o1");
+        back(id, "q1").andExpect(status().isOk());
+        assertThat(interviewerCalls()).isEqualTo(1);
+
+        // 置き場所へ戻って選び直すと、別の置き場所の質問になりうるので呼び直す
+        back(id, "system").andExpect(status().isOk());
+        pick(id, "system", "billing");
+        unknown(id, "function");
+        assertThat(interviewerCalls()).isEqualTo(2);
     }
 
     @Test
@@ -115,11 +165,5 @@ class SkillSpyTest extends ApiSupport {
                         id))
                 .containsExactlyInAnyOrder(true, false);
         mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.answer.grounded").value(true));
-    }
-
-    private void changeCategory(String id, String category) throws Exception {
-        mvc.perform(put("/api/inquiries/" + id + "/category")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"category\":\"" + category + "\"}"));
     }
 }

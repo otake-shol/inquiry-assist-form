@@ -131,6 +131,10 @@ final class EvalRunner {
                             config.promptVersion()));
         }
         InquiryProperties properties = new InquiryProperties(
+                List.of("ja"),
+                List.of(),
+                List.of(),
+                List.of(),
                 List.of(),
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
                 null,

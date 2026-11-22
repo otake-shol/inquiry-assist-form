@@ -105,7 +105,7 @@ describe("担当者のボード: 列とカード", () => {
     expect(within(board).getAllByRole("button")).toHaveLength(2);
   });
 
-  it("カードに種別・対象システム・今すぐ送る・日時・やり取りの件数を出す", async () => {
+  it("カードに種類・対象システム・今すぐ送る・日時・やり取りの件数を出す", async () => {
     installFakeFetch(
       routes({
         "GET /api/operator/inquiries": {
@@ -129,7 +129,7 @@ describe("担当者のボード: 列とカード", () => {
     const card = await screen.findByRole("button", {
       name: /求人が一覧に出なくなった/,
     });
-    expect(card).toHaveTextContent("不具合の疑い");
+    expect(card).toHaveTextContent("おかしいかもしれない");
     expect(card).toHaveTextContent("求人管理画面");
     expect(card).toHaveTextContent("今すぐ送る");
     expect(card).toHaveTextContent("やり取り 3件");

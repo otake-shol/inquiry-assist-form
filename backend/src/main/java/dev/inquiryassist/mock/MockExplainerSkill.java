@@ -2,7 +2,7 @@ package dev.inquiryassist.mock;
 
 import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.AiUnavailableException;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.Usage;
 import dev.inquiryassist.core.skill.ExplainerSkill;
@@ -23,7 +23,7 @@ public class MockExplainerSkill implements ExplainerSkill {
     /**
      * @param inquiry 本人が確認した整形後の問い
      * @param confirmedFindings 根拠を確かめられた事実
-     * @return 本人向けの説明。不具合の疑いでは仕様の正否を断定せず、現在の動作として書く
+     * @return 本人向けの説明。おかしいかもしれない（{@code LOOKS_WRONG}）では仕様の正否を断定せず、現在の動作として書く
      * @throws AiUnavailableException {@code [説明エラー]} の場合
      */
     @Override
@@ -32,7 +32,7 @@ public class MockExplainerSkill implements ExplainerSkill {
             throw new AiUnavailableException("モックの説明エラー", null, Usage.ofMock());
         }
         StringBuilder text = new StringBuilder();
-        boolean bug = inquiry.category() == InquiryCategory.SUSPECTED_BUG;
+        boolean bug = inquiry.type() == InquiryType.LOOKS_WRONG;
         if (bug) {
             text.append("現在の実装では、");
         }

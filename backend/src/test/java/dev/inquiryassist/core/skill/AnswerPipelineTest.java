@@ -11,7 +11,7 @@ import dev.inquiryassist.core.AccessScope;
 import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.AiUnavailableException;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.Usage;
 import java.util.ArrayList;
@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 class AnswerPipelineTest {
 
     private static final StructuredInquiry INQUIRY =
-            new StructuredInquiry("要約", InquiryCategory.SPEC_QUESTION, null, "目的", null, null, null);
+            new StructuredInquiry("要約", InquiryType.HOW_IT_WORKS, null, "目的", null, null);
     private static final Map<String, String> FILES = Map.of("real", "return a;");
 
     /** 決まった調査結果を返し、進捗を通知する偽の調査。 */

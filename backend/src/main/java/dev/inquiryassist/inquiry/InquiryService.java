@@ -8,12 +8,25 @@ import dev.inquiryassist.core.AnsweredQuestion;
 import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.CitationVerifier;
 import dev.inquiryassist.core.FollowUpQuestion;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.FunctionOption;
+import dev.inquiryassist.core.InquiryType;
+import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
 import dev.inquiryassist.core.TechnicalMemo;
+import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.Usage;
 import dev.inquiryassist.core.ZeroAnswer;
+import dev.inquiryassist.core.intake.AnswerKind;
+import dev.inquiryassist.core.intake.IntakeCatalog;
+import dev.inquiryassist.core.intake.IntakeEntries;
+import dev.inquiryassist.core.intake.IntakeEntry;
+import dev.inquiryassist.core.intake.IntakeNext;
+import dev.inquiryassist.core.intake.IntakePlanner;
+import dev.inquiryassist.core.intake.IntakeQuestion;
+import dev.inquiryassist.core.intake.IntakeReply;
+import dev.inquiryassist.core.intake.QuestionKind;
+import dev.inquiryassist.core.intake.QuestionMismatchException;
 import dev.inquiryassist.core.skill.AnswerPipeline;
 import dev.inquiryassist.core.skill.ExplanationFailedException;
 import dev.inquiryassist.core.skill.Interview;
@@ -25,60 +38,36 @@ import dev.inquiryassist.core.skill.RestaterSkill;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.core.skill.SkillUsage;
 import dev.inquiryassist.inquiry.InquiryEntity.StoredCitation;
-import dev.inquiryassist.inquiry.InquiryEntity.StoredQuestion;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 問い合わせの段階遷移と、種別ごとの経路を実装するアプリケーション層（契約書「段階の遷移」）。
+ * 問い合わせの段階遷移と、種類ごとの経路を実装するアプリケーション層（契約書「段階の遷移」「入口の質問」）。
+ *
+ * <p>入口の質問を決める規則（次に何を聞くか、マスの設定のどれを使うか、戻ったときに何を捨てるか）は、
+ * Spring に依存しない {@link IntakePlanner} に置いている。ここは、その結果に従ってスキルを呼び、保存する。
  *
  * <p>AI の呼び出しの間は DB トランザクションを持たない。保存時の競合は楽観ロックで検出し、
- * {@link InvalidStateException} として返す。
+ * 他の操作と競合した場合は {@link InvalidStateException} にする。
  */
 @Service
 public class InquiryService {
 
     private static final Logger log = LoggerFactory.getLogger(InquiryService.class);
 
-    /** 作業依頼の固定質問の識別子。 */
-    public static final String WR_WHAT = "wr-what";
-
-    public static final String WR_WHEN = "wr-when";
-    public static final String WR_TARGET = "wr-target";
-    /** 障害の固定質問の識別子。 */
-    public static final String INCIDENT_CHECK = "incident-check";
-
+    private static final int MAX_TEXT_LENGTH = 4000;
     private static final int MAX_SUMMARY_LENGTH = 2000;
     private static final int MAX_NOTE_LENGTH = 1000;
-    private static final String INCIDENT_NOT_STOPPED = "いいえ";
-
-    private static final List<StoredQuestion> WORK_REQUEST_QUESTIONS = List.of(
-            new StoredQuestion(WR_WHAT, "何をしてほしいですか", List.of(), null),
-            new StoredQuestion(WR_WHEN, "いつまでに必要ですか", List.of(), null),
-            new StoredQuestion(WR_TARGET, "対象は何ですか", List.of(), null));
-    private static final List<StoredQuestion> INCIDENT_QUESTIONS =
-            List.of(new StoredQuestion(INCIDENT_CHECK, "いま業務やサービスが止まっていますか", List.of("はい", "いいえ"), null));
-
-    /**
-     * 追加質問への回答1件。
-     *
-     * @param questionId 質問の識別子
-     * @param answer 回答。「わからない」は null
-     */
-    public record AnswerInput(String questionId, String answer) {}
 
     private final ReceptionSkill reception;
     private final InterviewerSkill interviewer;
@@ -88,9 +77,11 @@ public class InquiryService {
     private final CurrentUserProvider users;
     private final FilingNotifier notifier;
     private final TransactionTemplate transaction;
-    private final String incidentGuidance;
     private final SkillImplementations implementations;
     private final InquiryProperties properties;
+    private final IntakeCatalog catalog;
+    private final IntakePlanner planner;
+    private final InquiryPresenter presenter;
     private final ApplicationEventPublisher events;
     private final Set<UUID> generating = ConcurrentHashMap.newKeySet();
 
@@ -101,12 +92,14 @@ public class InquiryService {
      * @param pipeline 調査、照合、説明の流れ
      * @param repository 問い合わせ記録の保存先
      * @param users 現在の投稿者
-     * @param notifier 起票の通知先
+     * @param notifier 担当者への通知先
      * @param transaction 保存時のトランザクション
-     * @param incidentGuidance 障害の案内文
      * @param implementations スキルごとの実装（失敗した呼び出しの利用量の補完に使う）
-     * @param properties 対象システムの一覧など
-     * @param events 起票の確定後にイベントを発行する
+     * @param properties 担当者の表示名など
+     * @param catalog 種類、システム、機能の名前とマスの設定
+     * @param planner 入口の質問を決める処理
+     * @param presenter 本人向けの表現を作る
+     * @param events 担当者へ送った確定後にイベントを発行する
      */
     public InquiryService(
             ReceptionSkill reception,
@@ -117,9 +110,11 @@ public class InquiryService {
             CurrentUserProvider users,
             FilingNotifier notifier,
             TransactionTemplate transaction,
-            @Value("${inquiry.incident-guidance}") String incidentGuidance,
             SkillImplementations implementations,
             InquiryProperties properties,
+            IntakeCatalog catalog,
+            IntakePlanner planner,
+            InquiryPresenter presenter,
             ApplicationEventPublisher events) {
         this.reception = reception;
         this.interviewer = interviewer;
@@ -129,145 +124,146 @@ public class InquiryService {
         this.users = users;
         this.notifier = notifier;
         this.transaction = transaction;
-        this.incidentGuidance = incidentGuidance;
         this.implementations = implementations;
         this.properties = properties;
+        this.catalog = catalog;
+        this.planner = planner;
+        this.presenter = presenter;
         this.events = events;
     }
 
     /**
-     * 種別を判定して追加質問を作り、問い合わせを新規に保存する。
+     * 問い合わせを新規に作り、入口の最初の質問を出す。文章があれば、受付が置き場所を置く。
      *
-     * @param utterance 本人が書いた元の発話
-     * @param systemId 本人が選んだ対象システムの識別子。選ばなければ null（AI が推測する）
-     * @return {@code TRIAGED} の問い合わせ
-     * @throws IllegalArgumentException 一覧にない systemId の場合
-     * @throws TriageFailedException 種別の判定でAIが失敗した場合。元の発話は種別なしで保存済み
+     * @param text 本人が書いた文章。書かなければ null（このとき AI は呼ばない）
+     * @param urgency 緊急度。省くと {@code NORMAL}
+     * @return {@code INTAKE} の問い合わせ。残りの質問がなければ、問いを組み立てて {@code STRUCTURED}
+     * @throws IllegalArgumentException 文章が空白のみ、または4000文字を超える場合
+     * @throws ComposeFailedException 質問がなくなり、問いの組み立てで AI が失敗した場合。答えは保存済み
      */
-    public InquiryView create(String utterance, String systemId) {
+    public InquiryView create(String text, Urgency urgency) {
+        String written = validatedText(text, true);
         AccessScope scope = users.currentScope();
-        InquiryProperties.SystemEntry selected = systemId == null ? null : findSystem(systemId);
-        InquiryEntity inquiry = new InquiryEntity(scope.userId(), utterance, Instant.now());
-        if (selected != null) {
-            inquiry.systemId = selected.id();
-            inquiry.systemLabel = selected.label();
+        InquiryEntity inquiry =
+                new InquiryEntity(scope.userId(), urgency == null ? Urgency.NORMAL : urgency, Instant.now());
+        if (written != null) {
+            inquiry.texts.add(written);
+            place(inquiry);
         }
-        AiResult<Reception> received;
-        long receptionStart = System.nanoTime();
+        return settleAndCompose(inquiry, scope);
+    }
+
+    /**
+     * 次の質問に答える。答えが最後の質問なら、問いを組み立てる。
+     *
+     * @param id 問い合わせの識別子
+     * @param reply 本人の答え
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code INTAKE} でない、または答えた質問がいま聞いている質問と違う場合
+     * @throws IllegalArgumentException 選択肢にない値、答え方が不正、書けない質問への「書かずに進む」の場合
+     * @throws ComposeFailedException 問いの組み立てで AI が失敗した場合（緊急度が {@code BLOCKED} の場合を除く）。答えは保存済み
+     */
+    public InquiryView answerIntake(UUID id, IntakeReply reply) {
+        InquiryEntity inquiry = load(id);
+        requireStep(inquiry, InquiryStep.INTAKE);
+        IntakeEntry entry;
         try {
-            received = reception.receive(utterance, candidates(), selected == null ? null : option(selected));
-        } catch (AiRefusalException | AiUnavailableException e) {
-            // 失敗しても発話は失わない。種別なし・質問なしで保存し、「今すぐ送る」だけを可能にする
-            // 失敗した呼び出しの利用量も記録する。分からなければ、受付がモックかどうかだけを記録に残す
-            inquiry.mock = implementations.isMock(Skill.RECEPTION);
-            inquiry.addUsage(new SkillUsage(Skill.RECEPTION, failedUsageOf(e, Skill.RECEPTION), true, millisSince(receptionStart)));
-            commit(inquiry, null);
-            throw new TriageFailedException(inquiry.id, e);
+            entry = planner.accept(inquiry.snapshot(), reply);
+        } catch (QuestionMismatchException e) {
+            throw new InvalidStateException(e.getMessage());
         }
-        InquiryCategory category = received.value().category();
-        if (selected == null && received.value().guessedSystemId() != null) {
-            // 一覧にない id を返された場合は推測なしとして扱う
-            properties.systems().stream()
-                    .filter(s -> s.id().equals(received.value().guessedSystemId()))
-                    .findFirst()
-                    .ifPresent(s -> {
-                        inquiry.systemId = s.id();
-                        inquiry.systemLabel = s.label();
-                        inquiry.systemGuessed = true;
-                    });
-        }
-        inquiry.categoryByAi = category;
-        inquiry.categoryConfirmed = category;
-        inquiry.addUsage(Skill.RECEPTION, received.usage(), millisSince(receptionStart));
-        if (category.receivesZeroAnswer()) {
-            inquiry.aiQuestions = askInterviewer(inquiry, category, scope);
-        }
-        inquiry.followUps = questionsFor(inquiry, category);
-        return toView(commit(inquiry, null));
+        inquiry.intake.add(entry);
+        return settleAndCompose(inquiry, users.currentScope());
     }
 
     /**
-     * 本人が対象システムを直す。AI の推測は上書きされ、推測ではなくなる。追加質問は作り直さない。
+     * 答え終えた質問に戻る。指定した質問と、それより後の答えを捨て、それらで決まっていた置き場所も決まっていない状態に戻す。
+     * 本人が書いた文章は消さない。
      *
      * @param id 問い合わせの識別子
-     * @param systemId 対象システムの識別子。null で「わからない」に戻す
+     * @param questionId 戻る質問の識別子
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code TRIAGED} でない、または種別の判定に失敗した問い合わせの場合
-     * @throws IllegalArgumentException 一覧にない systemId の場合
+     * @throws InvalidStateException {@code INTAKE} でない場合
+     * @throws IllegalArgumentException 答え終えた質問にない識別子の場合
      */
-    public InquiryView changeSystem(UUID id, String systemId) {
-        InquiryProperties.SystemEntry system = systemId == null ? null : findSystem(systemId);
+    public InquiryView back(UUID id, String questionId) {
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.TRIAGED);
-        requireTriaged(inquiry);
-        inquiry.systemId = system == null ? null : system.id();
-        inquiry.systemLabel = system == null ? null : system.label();
-        inquiry.systemGuessed = false;
-        return toView(commit(inquiry, null));
+        requireStep(inquiry, InquiryStep.INTAKE);
+        applyBack(inquiry, questionId);
+        settle(inquiry, users.currentScope());
+        return presenter.toView(commit(inquiry, null));
     }
 
     /**
-     * 本人が種別を変更する。追加質問は変更後の種別に合わせて差し替える。
-     * 仕様確認・不具合の疑いに変更し、聞き手の質問がまだなければ、この時点で聞き手を呼ぶ。
+     * 文章で書く道に切り替える。まだ答えていない置き場所を、受付が文章から置く。
      *
      * @param id 問い合わせの識別子
-     * @param category 変更後の種別
-     * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code TRIAGED} でない場合
+     * @param text 本人が書いた文章
+     * @return 更新後の問い合わせ。残りの質問がなければ、問いを組み立てて {@code STRUCTURED}
+     * @throws InvalidStateException {@code INTAKE} でない場合
+     * @throws IllegalArgumentException 文章が空白のみ、または4000文字を超える場合
+     * @throws ComposeFailedException 質問がなくなり、問いの組み立てで AI が失敗した場合
      */
-    public InquiryView changeCategory(UUID id, InquiryCategory category) {
+    public InquiryView writeText(UUID id, String text) {
+        String written = validatedText(text, false);
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.TRIAGED);
-        requireTriaged(inquiry);
-        inquiry.categoryConfirmed = category;
-        // 作業依頼や障害と判定されて聞き手が呼ばれていない（または失敗した）場合は、この時点で呼ぶ
-        if (category.receivesZeroAnswer() && !interviewerAsked(inquiry)) {
-            inquiry.aiQuestions = askInterviewer(inquiry, category, users.currentScope());
-        }
-        inquiry.followUps = questionsFor(inquiry, category);
-        return toView(commit(inquiry, null));
+        requireStep(inquiry, InquiryStep.INTAKE);
+        inquiry.texts.add(written);
+        place(inquiry);
+        return settleAndCompose(inquiry, users.currentScope());
     }
 
     /**
-     * 追加質問への回答を受け取り、整形する。障害は固定質問の回答で案内か続行かが決まる。
+     * 本人が緊急度を変える。入口の途中で {@code BLOCKED} にすると、まだ答えていない詳しい質問は聞かない。
+     * 言い直しの確認中に {@code BLOCKED} にすると、その時点の言い直しで担当者に送る。
      *
      * @param id 問い合わせの識別子
-     * @param answers 回答。回答のない質問は「わからない」として扱う
+     * @param urgency 変更後の緊急度
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code TRIAGED} でない場合
-     * @throws IllegalArgumentException 存在しない質問への回答を含む場合
+     * @throws InvalidStateException {@code INTAKE} か {@code STRUCTURED} でない場合
+     * @throws ComposeFailedException 入口を終えて問いを組み立てる場合に AI が失敗したとき
      */
-    public InquiryView answerQuestions(UUID id, List<AnswerInput> answers) {
+    public InquiryView changeUrgency(UUID id, Urgency urgency) {
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.TRIAGED);
-        requireTriaged(inquiry);
-        Map<String, String> byId = new HashMap<>();
-        for (AnswerInput input : answers) {
-            if (inquiry.followUps.stream().noneMatch(q -> q.id().equals(input.questionId()))) {
-                throw new IllegalArgumentException("存在しない質問です: " + input.questionId());
+        AccessScope scope = users.currentScope();
+        if (inquiry.step == InquiryStep.STRUCTURED) {
+            inquiry.urgency = urgency;
+            if (urgency == Urgency.BLOCKED) {
+                return presenter.toView(commit(inquiry, file(inquiry, true)));
             }
-            byId.put(input.questionId(), input.answer());
+            return presenter.toView(commit(inquiry, null));
         }
-        inquiry.followUps = new ArrayList<>(inquiry.followUps.stream()
-                .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), byId.get(q.id())))
-                .toList());
-        inquiry.answersSubmitted = true;
-
-        if (inquiry.category() == InquiryCategory.INCIDENT) {
-            String check = byId.get(INCIDENT_CHECK);
-            if (check == null || !INCIDENT_NOT_STOPPED.equals(check.trim())) {
-                inquiry.step = InquiryStep.CLOSED;
-                inquiry.outcome = InquiryOutcome.INCIDENT_REDIRECTED;
-                return toView(commit(inquiry, null));
-            }
-            inquiry.categoryConfirmed = InquiryCategory.SUSPECTED_BUG;
+        requireStep(inquiry, InquiryStep.INTAKE);
+        // 組み立てに失敗して止まっている問い合わせは、緊急度を変えただけで組み立て直さない（compose で明示的にやり直す）。
+        // ただし BLOCKED なら、言い直しを待たずに担当者へ送る
+        boolean wasComplete = planner.next(inquiry.snapshot()) instanceof IntakeNext.Complete;
+        inquiry.urgency = urgency;
+        IntakeNext next = settle(inquiry, scope);
+        if (next instanceof IntakeNext.Complete && (!wasComplete || urgency == Urgency.BLOCKED)) {
+            return compose(inquiry);
         }
-        structure(inquiry);
-        return toView(commit(inquiry, null));
+        return presenter.toView(commit(inquiry, null));
     }
 
     /**
-     * 言い直しを確定する。作業依頼はここで起票し、それ以外は0次回答の生成待ちになる。
+     * 入口を終えたのに組み立てに失敗した問い合わせで、問いの組み立てだけをやり直す。
+     *
+     * @param id 問い合わせの識別子
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException {@code INTAKE} でない、または入口が終わっていない場合
+     * @throws ComposeFailedException 組み立てで AI が再び失敗した場合
+     */
+    public InquiryView compose(UUID id) {
+        InquiryEntity inquiry = load(id);
+        requireStep(inquiry, InquiryStep.INTAKE);
+        if (!(planner.next(inquiry.snapshot()) instanceof IntakeNext.Complete)) {
+            throw new InvalidStateException("入口の質問がまだ残っています");
+        }
+        return compose(inquiry);
+    }
+
+    /**
+     * 言い直しを確定する。「変えてほしい」（{@code CHANGE_REQUEST}）はここで担当者に送り、それ以外は0次回答の生成待ちになる。
      *
      * @param id 問い合わせの識別子
      * @param summary 本人が書き直した文章。AI の言い直しをそのまま確定する場合は null
@@ -283,11 +279,12 @@ public class InquiryService {
         requireStep(inquiry, InquiryStep.STRUCTURED);
         inquiry.structuredConfirmed =
                 summary == null ? inquiry.structuredByAi : inquiry.structuredByAi.withSummary(summary);
-        if (inquiry.category() == InquiryCategory.WORK_REQUEST) {
-            return toView(commit(inquiry, file(inquiry, false)));
+        InquiryType type = inquiry.type();
+        if (type != null && type.filesOnConfirm()) {
+            return presenter.toView(commit(inquiry, file(inquiry, false)));
         }
         inquiry.step = InquiryStep.ANSWERING;
-        return toView(commit(inquiry, null));
+        return presenter.toView(commit(inquiry, null));
     }
 
     /**
@@ -312,17 +309,17 @@ public class InquiryService {
         List<String> corrections = new ArrayList<>(inquiry.revisionNotes);
         corrections.add(note);
         long start = System.nanoTime();
-        AiResult<StructuredInquiry> result = restater.restate(
-                inquiry.utterance, inquiry.category(), answeredQuestions(inquiry), systemOf(inquiry), corrections);
+        AiResult<StructuredInquiry> result = restate(inquiry, corrections);
         inquiry.structuredByAi = result.value();
         inquiry.revisionNotes.add(note);
         inquiry.revisionsLeft--;
         inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start));
-        return toView(commit(inquiry, null));
+        return presenter.toView(commit(inquiry, null));
     }
 
     /**
-     * 追加質問へ戻る。整形結果は破棄し、質問は同じものを返す。作り直しの残り回数は戻さない。
+     * 入口の質問へ戻る。整形結果は破棄し、最後に答えた質問を次の質問に戻してその答えを捨てる（{@link #back} で最後の質問を
+     * 指定したのと同じ）。作り直しの残り回数は戻さない。
      *
      * @param id 問い合わせの識別子
      * @return 更新後の問い合わせ
@@ -333,18 +330,18 @@ public class InquiryService {
         requireStep(inquiry, InquiryStep.STRUCTURED);
         inquiry.structuredByAi = null;
         inquiry.structuredConfirmed = null;
-        // 戻った後に答えずに送られた場合、未回答として区別できるようにする
-        inquiry.answersSubmitted = false;
-        inquiry.followUps = new ArrayList<>(inquiry.followUps.stream()
-                .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), null))
-                .toList());
-        inquiry.step = InquiryStep.TRIAGED;
-        return toView(commit(inquiry, null));
+        inquiry.step = InquiryStep.INTAKE;
+        if (!inquiry.intake.isEmpty()) {
+            applyBack(inquiry, inquiry.intake.get(inquiry.intake.size() - 1).questionId());
+        }
+        settle(inquiry, users.currentScope());
+        return presenter.toView(commit(inquiry, null));
     }
 
     /**
      * 0次回答を生成する。調査、照合、説明の順に進め、照合できた事実だけから本人向けの説明を作る。
-     * 不具合の疑いは完了と同時に起票する。同じ問い合わせの生成は同時に1つだけ走らせる。
+     * 種類ごとの経路（{@link InquiryType#filesAfterAnswer}）に従い、担当者へ送るか、本人が結果を確かめる段階に進める。
+     * 同じ問い合わせの生成は同時に1つだけ走らせる。
      *
      * <p>説明だけが失敗した場合は、調査と照合の結果（技術メモ、出典と照合結果、利用量）を保存したうえで
      * 失敗を投げる。段階は {@code ANSWERING} のままで、本人向けの回答は返さない。
@@ -393,11 +390,12 @@ public class InquiryService {
             inquiry.citations = storedCitations(result.investigation().citationResults());
             result.usages().forEach(inquiry::addUsage);
 
-            if (inquiry.category().alwaysFiled()) {
-                return toView(commit(inquiry, file(inquiry, false)));
+            // 種類が決まっていない場合は HOW_IT_WORKS と同じ経路
+            if (InquiryType.routeOf(inquiry.type()).filesAfterAnswer(answer.grounded(), answer.answered())) {
+                return presenter.toView(commit(inquiry, file(inquiry, false)));
             }
             inquiry.step = InquiryStep.ANSWERED;
-            return toView(commit(inquiry, null));
+            return presenter.toView(commit(inquiry, null));
         } finally {
             generating.remove(id);
         }
@@ -417,24 +415,25 @@ public class InquiryService {
         if (resolved) {
             inquiry.step = InquiryStep.CLOSED;
             inquiry.outcome = InquiryOutcome.SELF_RESOLVED;
-            return toView(commit(inquiry, null));
+            return presenter.toView(commit(inquiry, null));
         }
-        return toView(commit(inquiry, file(inquiry, false)));
+        return presenter.toView(commit(inquiry, file(inquiry, false)));
     }
 
     /**
-     * その時点の内容で、今すぐ担当者に送る。
+     * 答えを待たずに担当者に送る。問いを確かめた後に限る（{@link InquiryEntity#canSendNow}）。
      *
      * @param id 問い合わせの識別子
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code CLOSED} の場合
+     * @throws InvalidStateException いま送れない場合（問いの確認前、または終了済み）
      */
     public InquiryView sendNow(UUID id) {
         InquiryEntity inquiry = load(id);
-        if (inquiry.step == InquiryStep.CLOSED) {
-            throw new InvalidStateException("終了した問い合わせは送れません");
+        IntakeNext next = inquiry.step == InquiryStep.INTAKE ? planner.next(inquiry.snapshot()) : null;
+        if (!inquiry.canSendNow(next)) {
+            throw new InvalidStateException("いまは担当者に送れません（現在: " + inquiry.step + "）");
         }
-        return toView(commit(inquiry, file(inquiry, true)));
+        return presenter.toView(commit(inquiry, file(inquiry, true)));
     }
 
     /**
@@ -449,7 +448,7 @@ public class InquiryService {
         if (inquiry.askerUnreadReply) {
             repository.clearUnreadReply(id);
         }
-        return toView(inquiry);
+        return presenter.toView(inquiry);
     }
 
     /**
@@ -465,7 +464,7 @@ public class InquiryService {
                         .map(e -> new InquiryList.Item(
                                 e.id,
                                 e.createdAt,
-                                OperatorService.summaryOf(e),
+                                presenter.summaryOf(e),
                                 e.step,
                                 e.outcome,
                                 e.handlingStatus,
@@ -498,52 +497,150 @@ public class InquiryService {
         }
         InquiryEntity saved = commit(inquiry, null);
         publishUpdated(saved);
-        return toView(saved);
-    }
-
-    private InquiryProperties.SystemEntry findSystem(String systemId) {
-        return properties.systems().stream()
-                .filter(s -> s.id().equals(systemId))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("一覧にない対象システムです: " + systemId));
-    }
-
-    private List<SystemOption> candidates() {
-        return properties.systems().stream().map(InquiryService::option).toList();
-    }
-
-    private static SystemOption option(InquiryProperties.SystemEntry entry) {
-        return new SystemOption(entry.id(), entry.label());
-    }
-
-    private SystemOption systemOf(InquiryEntity inquiry) {
-        return inquiry.systemId == null ? null : new SystemOption(inquiry.systemId, inquiry.systemLabel);
-    }
-
-    /** 聞き手を呼んだことがあり、成功しているか。 */
-    private static boolean interviewerAsked(InquiryEntity inquiry) {
-        return inquiry.usages.stream()
-                .anyMatch(u -> u.step().equals(Skill.INTERVIEWER.id()) && !u.failed());
+        return presenter.toView(saved);
     }
 
     /**
-     * 聞き手に追加質問を作らせる。失敗しても本人を止めず、質問なしで続行する。
-     * 失敗はログと利用量（失敗した呼び出しとして）に残す。
+     * 入口の質問を進める。聞き手が必要なら呼び、次にすることを返す。聞き手は、質問を作ったら（0問でも、失敗でも）
+     * 結果を保存するので、同じ質問のために何度も呼ばない。
      */
-    private List<StoredQuestion> askInterviewer(InquiryEntity inquiry, InquiryCategory category, AccessScope scope) {
+    private IntakeNext settle(InquiryEntity inquiry, AccessScope scope) {
+        IntakeNext next = planner.next(inquiry.snapshot());
+        if (next instanceof IntakeNext.NeedsInterviewer) {
+            inquiry.detailQuestions = askInterviewer(inquiry, scope);
+            next = planner.next(inquiry.snapshot());
+        }
+        return next;
+    }
+
+    /** 入口を進め、終わっていれば問いを組み立てる。終わっていなければ、次の質問を保存して返す。 */
+    private InquiryView settleAndCompose(InquiryEntity inquiry, AccessScope scope) {
+        if (settle(inquiry, scope) instanceof IntakeNext.Complete) {
+            return compose(inquiry);
+        }
+        return presenter.toView(commit(inquiry, null));
+    }
+
+    /**
+     * 入口の答えから、言い直しのスキルで問いを組み立てる。
+     *
+     * <p>緊急度が {@code BLOCKED} なら、組み立てた問いで（組み立てに失敗しても組み立てなしで）担当者へ送る。
+     * 業務が止まっている本人を、AI の失敗で止めないため。それ以外で失敗した場合は、答えを保存したうえで
+     * {@link ComposeFailedException} を投げる。
+     */
+    private InquiryView compose(InquiryEntity inquiry) {
+        long start = System.nanoTime();
+        AiResult<StructuredInquiry> result;
+        try {
+            result = restate(inquiry, List.copyOf(inquiry.revisionNotes));
+        } catch (AiRefusalException | AiUnavailableException e) {
+            log.warn("言い直しが失敗しました id={}", inquiry.id, e);
+            inquiry.addUsage(new SkillUsage(Skill.RESTATER, failedUsageOf(e, Skill.RESTATER), true, millisSince(start)));
+            if (inquiry.urgency == Urgency.BLOCKED) {
+                return presenter.toView(commit(inquiry, file(inquiry, true)));
+            }
+            commit(inquiry, null);
+            throw new ComposeFailedException(inquiry.id, e);
+        }
+        inquiry.structuredByAi = result.value();
+        inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start));
+        if (inquiry.urgency == Urgency.BLOCKED) {
+            return presenter.toView(commit(inquiry, file(inquiry, true)));
+        }
+        inquiry.step = InquiryStep.STRUCTURED;
+        return presenter.toView(commit(inquiry, null));
+    }
+
+    private AiResult<StructuredInquiry> restate(InquiryEntity inquiry, List<String> corrections) {
+        Placement placement = inquiry.placement();
+        return restater.restate(
+                inquiry.utterance(),
+                placement.type(),
+                systemOf(placement),
+                functionOf(placement),
+                answeredQuestions(inquiry),
+                corrections);
+    }
+
+    /**
+     * 本人が書いた文章から、受付に置き場所を置かせる。決まっていない項目が残っているときだけ呼ぶ。
+     * 受付が失敗しても、エラーにしない（何も置かず、質問として聞く）。失敗はログと利用量に残す。
+     */
+    private void place(InquiryEntity inquiry) {
+        if (!planner.needsPlacement(inquiry.intake)) {
+            return;
+        }
         long start = System.nanoTime();
         try {
-            AiResult<Interview> result =
-                    interviewer.ask(inquiry.utterance, category, systemOf(inquiry), scope);
-            inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start));
-            return new ArrayList<>(result.value().questions().stream()
-                    .map(q -> new StoredQuestion(q.id(), q.text(), q.options(), null))
-                    .toList());
+            AiResult<Reception> result = reception.receive(
+                    inquiry.writtenText(), catalog.candidates(), IntakeEntries.chosen(inquiry.intake));
+            inquiry.addUsage(Skill.RECEPTION, result.usage(), millisSince(start));
+            IntakePlanner.Placed placed = planner.place(inquiry.intake, result.value());
+            inquiry.intake = new ArrayList<>(placed.entries());
+            if (placed.detailsReset()) {
+                inquiry.detailQuestions = null;
+            }
         } catch (AiRefusalException | AiUnavailableException e) {
-            log.warn("聞き手が失敗したため、質問なしで続行します id={}", inquiry.id, e);
+            log.warn("受付が失敗したため、置き場所を質問として聞きます id={}", inquiry.id, e);
+            inquiry.addUsage(new SkillUsage(Skill.RECEPTION, failedUsageOf(e, Skill.RECEPTION), true, millisSince(start)));
+        }
+    }
+
+    private void applyBack(InquiryEntity inquiry, String questionId) {
+        IntakePlanner.Back back = planner.back(inquiry.intake, questionId);
+        inquiry.intake = new ArrayList<>(back.entries());
+        if (back.detailsReset()) {
+            // 置き場所が変わりうるので、前の置き場所のために作った質問を残さない
+            inquiry.detailQuestions = null;
+        }
+    }
+
+    /**
+     * 聞き手に詳しい質問を作らせる。失敗しても本人を止めず、質問なしで続行する。
+     * 失敗はログと利用量（失敗した呼び出しとして）に残す。
+     */
+    private List<IntakeQuestion> askInterviewer(InquiryEntity inquiry, AccessScope scope) {
+        long start = System.nanoTime();
+        Placement placement = inquiry.placement();
+        try {
+            AiResult<Interview> result = interviewer.ask(
+                    inquiry.writtenText(), placement.type(), systemOf(placement), functionOf(placement), scope);
+            inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start));
+            return new ArrayList<>(
+                    result.value().questions().stream().map(IntakeQuestion::detailOf).toList());
+        } catch (AiRefusalException | AiUnavailableException e) {
+            log.warn("聞き手が失敗したため、詳しい質問なしで続行します id={}", inquiry.id, e);
             inquiry.addUsage(new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true, millisSince(start)));
             return new ArrayList<>();
         }
+    }
+
+    private SystemOption systemOf(Placement placement) {
+        return placement.systemId() == null
+                ? null
+                : new SystemOption(placement.systemId(), catalog.systemLabel(placement.systemId()));
+    }
+
+    private FunctionOption functionOf(Placement placement) {
+        return placement.functionId() == null
+                ? null
+                : new FunctionOption(
+                        placement.functionId(), catalog.functionLabel(placement.systemId(), placement.functionId()));
+    }
+
+    /**
+     * 文章を検証して、前後の空白を除いて返す。
+     *
+     * @param optional true なら、文章がないこと（null）を許す
+     */
+    private static String validatedText(String text, boolean optional) {
+        if (text == null && optional) {
+            return null;
+        }
+        if (text == null || text.isBlank() || text.strip().length() > MAX_TEXT_LENGTH) {
+            throw new IllegalArgumentException("文章は1〜" + MAX_TEXT_LENGTH + "文字");
+        }
+        return text.strip();
     }
 
     /** 単調増加の時計で、開始からの経過をミリ秒で返す。壁時計は調整で戻ることがあり、負の時間を記録しないため。 */
@@ -563,23 +660,21 @@ public class InquiryService {
         return new ArrayList<>(results.stream().map(InquiryService::toStored).toList());
     }
 
+    /** 詳しい質問と答えを、言い直しに渡す形にする。「わからない」は答えを null にする。 */
     private static List<AnsweredQuestion> answeredQuestions(InquiryEntity inquiry) {
-        return inquiry.followUps.stream()
-                .map(q -> new AnsweredQuestion(new FollowUpQuestion(q.id(), q.text(), q.options()), q.answer()))
+        return inquiry.intake.stream()
+                .filter(e -> e.kind() == QuestionKind.DETAIL)
+                .map(e -> new AnsweredQuestion(
+                        new FollowUpQuestion(e.questionId(), e.text(), List.of()), answerText(e)))
                 .toList();
     }
 
-    private void structure(InquiryEntity inquiry) {
-        long start = System.nanoTime();
-        AiResult<StructuredInquiry> result = restater.restate(
-                inquiry.utterance,
-                inquiry.category(),
-                answeredQuestions(inquiry),
-                systemOf(inquiry),
-                List.copyOf(inquiry.revisionNotes));
-        inquiry.structuredByAi = result.value();
-        inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start));
-        inquiry.step = InquiryStep.STRUCTURED;
+    private static String answerText(IntakeEntry entry) {
+        return switch (entry.answer().kind()) {
+            case OPTION, INFERRED -> entry.answer().label();
+            case TEXT -> entry.answer().text();
+            case UNKNOWN, SKIPPED -> null;
+        };
     }
 
     /** 起票の状態にし、通知の内容を返す。通知は保存と同じトランザクションで {@link #commit} が出す。 */
@@ -589,11 +684,16 @@ public class InquiryService {
         inquiry.sentImmediately = immediately;
         inquiry.filedAt = Instant.now();
         inquiry.handlingStatus = HandlingStatus.OPEN;
+        Placement placement = inquiry.placement();
         return new FilingNotifier.FilingNotice(
                 inquiry.id,
-                inquiry.category(),
-                inquiry.utterance,
-                inquiry.systemLabel,
+                placement.type(),
+                inquiry.urgency,
+                inquiry.utterance(),
+                placement.systemId() == null ? null : catalog.systemLabel(placement.systemId()),
+                placement.functionId() == null
+                        ? null
+                        : catalog.functionLabel(placement.systemId(), placement.functionId()),
                 inquiry.structured(),
                 inquiry.technicalMemo,
                 immediately);
@@ -620,7 +720,7 @@ public class InquiryService {
         if (notice != null) {
             // 保存の確定後に配る。配信側の失敗で、確定済みの起票を失敗にしない
             try {
-                events.publishEvent(new InquiryFiledEvent(OperatorService.toItem(saved)));
+                events.publishEvent(new InquiryFiledEvent(presenter.toItem(saved)));
             } catch (RuntimeException e) {
                 log.error("起票の通知イベントの配信に失敗 id={}", saved.id, e);
             }
@@ -631,7 +731,7 @@ public class InquiryService {
     /** 保存の確定後に、オペレータの画面へ更新を知らせる。配信側の失敗で、確定済みの更新を失敗にしない。 */
     private void publishUpdated(InquiryEntity saved) {
         try {
-            events.publishEvent(new InquiryUpdatedEvent(OperatorService.toItem(saved)));
+            events.publishEvent(new InquiryUpdatedEvent(presenter.toItem(saved)));
         } catch (RuntimeException e) {
             log.error("更新の通知イベントの配信に失敗 id={}", saved.id, e);
         }
@@ -652,22 +752,6 @@ public class InquiryService {
         }
     }
 
-    /** 種別の判定に失敗した問い合わせ（種別なし）は、種別の変更も回答も受け付けない。 */
-    private static void requireTriaged(InquiryEntity inquiry) {
-        if (inquiry.categoryConfirmed == null) {
-            throw new InvalidStateException("種別の判定に失敗した問い合わせです。今すぐ担当者に送ってください");
-        }
-    }
-
-    private static List<StoredQuestion> questionsFor(InquiryEntity inquiry, InquiryCategory category) {
-        return new ArrayList<>(switch (category) {
-            case WORK_REQUEST -> WORK_REQUEST_QUESTIONS;
-            case INCIDENT -> INCIDENT_QUESTIONS;
-            // AI の質問は AI の判定が仕様確認か不具合のときだけ保存している。それ以外は空になる
-            case SPEC_QUESTION, SUSPECTED_BUG -> inquiry.aiQuestions;
-        });
-    }
-
     private static StoredCitation toStored(CitationVerifier.Result result) {
         Citation c = result.citation();
         return new StoredCitation(
@@ -679,67 +763,5 @@ public class InquiryService {
                 c.quote(),
                 c.revision(),
                 result.verified());
-    }
-
-    /**
-     * 本人向けの技術メモから、根拠を確かめられなかったこと（unconfirmed）を落とす。これは担当者にだけ見せる内容で、
-     * 画面で隠すのではなく、本人向けの応答に API が含めない。保存は変えず、オペレータ向けの詳細には残る。
-     * 本人向けの応答（InquiryView と進捗ストリームの done）はすべてこの view から作るため、ここ1か所で落とす。
-     */
-    private static TechnicalMemo forAsker(TechnicalMemo memo) {
-        return memo == null ? null : new TechnicalMemo(memo.findings(), List.of(), memo.notFound(), memo.nextChecks());
-    }
-
-    private InquiryView toView(InquiryEntity e) {
-        StructuredInquiry structured = e.structured();
-        InquiryView.AnswerView answer = e.answerGrounded == null
-                ? null
-                : new InquiryView.AnswerView(
-                        e.answerGrounded,
-                        e.answered(),
-                        e.askerExplanation,
-                        forAsker(e.technicalMemo),
-                        e.citations.stream()
-                                .filter(StoredCitation::verified)
-                                .map(c -> new Citation(
-                                        c.sourceType(),
-                                        c.repository(),
-                                        c.path(),
-                                        c.startLine(),
-                                        c.endLine(),
-                                        c.quote(),
-                                        c.revision()))
-                                .toList());
-        return new InquiryView(
-                e.id,
-                e.step,
-                e.outcome,
-                e.utterance,
-                e.categoryByAi,
-                e.categoryConfirmed,
-                e.followUps.stream()
-                        .map(q -> new InquiryView.QuestionView(q.id(), q.text(), q.options()))
-                        .toList(),
-                e.revisionsLeft,
-                e.systemId == null ? null : new InquiryView.SystemView(e.systemId, e.systemLabel),
-                e.systemGuessed,
-                structured == null
-                        ? null
-                        : new InquiryView.StructuredView(
-                                structured.summary(),
-                                structured.targetSystem(),
-                                structured.goal(),
-                                structured.whatHappened(),
-                                structured.expectedResult(),
-                                structured.urgency()),
-                answer,
-                e.outcome == InquiryOutcome.INCIDENT_REDIRECTED ? incidentGuidance : null,
-                e.sentImmediately,
-                e.mock,
-                e.createdAt,
-                e.handlingStatus,
-                MessageBodies.viewsOf(e),
-                e.submittedAnswers(),
-                TraceViews.of(e, properties, implementations));
     }
 }

@@ -1,8 +1,8 @@
 package dev.inquiryassist.inquiry;
 
 import dev.inquiryassist.core.Citation;
-import dev.inquiryassist.core.InquiryCategory;
 import dev.inquiryassist.core.TechnicalMemo;
+import dev.inquiryassist.core.Urgency;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -14,16 +14,16 @@ import java.util.UUID;
  * @param filedAt 担当者に送られた時刻
  * @param askerId 投稿者
  * @param askerName 投稿者の表示用の名前。認証を加えるまでは設定の固定値
- * @param utterance 元の発話
- * @param categoryByAi AI が判定した種別
- * @param category 確認済みの種別
- * @param system 対象システム
- * @param systemGuessed 対象システムを AI が推測したか
- * @param followUps 追加質問と回答
+ * @param utterance 本人が書いた文章（最初の文章、切り替えたときの文章、補足を、書いた順に空行でつないだもの）
+ * @param urgency 緊急度
+ * @param type 種類
+ * @param system システム
+ * @param function 機能
+ * @param intake 入口の答え（聞いた順）。本人が何を選び、何に「わからない」と答えたかを示す
  * @param structured 整形後の問い
  * @param revisionNotes 本人が「少し違います」で伝えた一言
  * @param answer 0次回答。出典は照合に落ちたものも含む
- * @param sentImmediately 「今すぐ送る」による送付か
+ * @param sentImmediately 答えを待たずに担当者へ送られたか
  * @param read 既読か
  * @param slackStatus Slack への投稿の状態
  * @param handlingStatus 対応状況
@@ -36,11 +36,11 @@ public record OperatorDetail(
         String askerId,
         String askerName,
         String utterance,
-        InquiryCategory categoryByAi,
-        InquiryCategory category,
-        InquiryView.SystemView system,
-        boolean systemGuessed,
-        List<FollowUpDetail> followUps,
+        Urgency urgency,
+        InquiryView.PlacedView type,
+        InquiryView.PlacedView system,
+        InquiryView.PlacedView function,
+        List<InquiryView.EntryView> intake,
         InquiryView.StructuredView structured,
         List<String> revisionNotes,
         AnswerDetail answer,
@@ -50,25 +50,6 @@ public record OperatorDetail(
         HandlingStatus handlingStatus,
         List<MessageView> messages,
         List<TraceEntry> trace) {
-
-    /**
-     * 追加質問と回答。
-     *
-     * @param text 質問文
-     * @param answer 回答。「わからない」と未回答は null
-     * @param status 本人の対応（回答あり、わからない、答える前に送られた）
-     */
-    public record FollowUpDetail(String text, String answer, FollowUpStatus status) {}
-
-    /** 追加質問への本人の対応。 */
-    public enum FollowUpStatus {
-        /** 本人が答えた。 */
-        ANSWERED,
-        /** 本人が「わからない」を選んだ。 */
-        UNKNOWN,
-        /** 本人が答える前に担当者へ送られた。 */
-        NOT_ANSWERED
-    }
 
     /**
      * 0次回答。

@@ -13,12 +13,13 @@ class SlackSystemOnlyTest extends ApiSupport {
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
+        // リストは丸ごと置き換わるため、2つのシステムを与える。job-admin だけに投稿先がある
         registry.add("inquiry.systems[0].id", () -> "job-admin");
-        registry.add("inquiry.systems[0].label", () -> "求人管理画面");
+        registry.add("inquiry.systems[0].label.ja", () -> "求人管理画面");
         // 接続できないローカルのポート。このテストでは投稿の成否を見ない
         registry.add("inquiry.systems[0].slack-webhook-url", () -> "http://127.0.0.1:1/unused");
         registry.add("inquiry.systems[1].id", () -> "billing");
-        registry.add("inquiry.systems[1].label", () -> "請求管理");
+        registry.add("inquiry.systems[1].label.ja", () -> "請求管理");
         registry.add("inquiry.slack.timeout", () -> "1s");
     }
 
@@ -28,11 +29,8 @@ class SlackSystemOnlyTest extends ApiSupport {
 
     @Test
     void 投稿先のない別システムの問い合わせはSKIPPEDで対象未定もSKIPPEDになる() throws Exception {
-        String other = idOf(create("期限の仕様", "billing"));
-        String unknown = idOf(create("期限の仕様", null));
-
-        sendNow(other);
-        sendNow(unknown);
+        String other = filedNow("期限の仕様", "billing");
+        String unknown = filedNow("期限の仕様", null);
 
         assertThat(slackStatusOf(other)).isEqualTo("SKIPPED");
         assertThat(slackStatusOf(unknown)).isEqualTo("SKIPPED");
@@ -40,9 +38,7 @@ class SlackSystemOnlyTest extends ApiSupport {
 
     @Test
     void 投稿先のあるシステムの問い合わせはSKIPPEDにならない() throws Exception {
-        String id = idOf(create("期限の仕様", "job-admin"));
-
-        sendNow(id);
+        String id = filedNow("期限の仕様", "job-admin");
 
         assertThat(waitFor(
                         () -> {

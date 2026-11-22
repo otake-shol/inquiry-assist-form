@@ -2,7 +2,7 @@ package dev.inquiryassist.notification;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.inquiry.HandlingStatus;
 import dev.inquiryassist.inquiry.InquiryFiledEvent;
 import dev.inquiryassist.inquiry.OperatorItem;
@@ -35,7 +35,7 @@ class OperatorStreamHubTest {
 
     private static InquiryFiledEvent event() {
         return new InquiryFiledEvent(
-                new OperatorItem(UUID.randomUUID(), Instant.now(), InquiryCategory.SPEC_QUESTION, null, "要約", false, false, HandlingStatus.OPEN, 0));
+                new OperatorItem(UUID.randomUUID(), Instant.now(), null, null, null, Urgency.NORMAL, "要約", false, false, HandlingStatus.OPEN, 0));
     }
 
     @Test

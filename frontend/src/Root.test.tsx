@@ -71,7 +71,7 @@ describe("パスによる画面の切り替え", () => {
       />,
     );
     expect(
-      await screen.findByRole("button", { name: "送信する" }),
+      await screen.findByRole("group", { name: "何をしたいですか" }),
     ).toBeInTheDocument();
   });
 
@@ -93,7 +93,7 @@ describe("パスによる画面の切り替え", () => {
     // 1件もなくても3つの列を出し、どれも「ありません」と示す
     expect(await screen.findAllByText("ありません")).toHaveLength(3);
     expect(
-      screen.queryByRole("button", { name: "送信する" }),
+      screen.queryByRole("group", { name: "何をしたいですか" }),
     ).not.toBeInTheDocument();
   });
 
@@ -107,7 +107,7 @@ describe("パスによる画面の切り替え", () => {
     );
 
     expect(
-      await screen.findByRole("button", { name: "送信する" }),
+      await screen.findByRole("group", { name: "何をしたいですか" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "問い合わせ受付" }),

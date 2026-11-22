@@ -38,28 +38,23 @@ class OperatorApiTest extends ApiSupport {
         String resolved = toAnswering("期限の仕様", null);
         stream(resolved);
         resolve(resolved, true);
-        // 障害の案内
-        String incident = idOf(create("サイトが止まっていて障害になっている", null));
-        answers(incident, "{\"answers\":[{\"questionId\":\"incident-check\",\"answer\":\"はい\"}]}");
         // 進行中
-        String inProgress = idOf(create("期限の仕様", null));
-        // 起票: 未解決、今すぐ送る、不具合の疑い、作業依頼
+        String inProgress = idOf(create("期限の仕様"));
+        // 担当者に送った: 未解決、答えを待たずに送る、おかしいかもしれない、変えてほしい
         String unresolved = toAnswering("期限の仕様", null);
         stream(unresolved);
         resolve(unresolved, false);
-        String immediate = idOf(create("期限の仕様", null));
-        sendNow(immediate);
+        String immediate = filedNow("期限の仕様", null);
         String bug = toAnswering("表示がおかしい", null);
         stream(bug);
-        String work = idOf(create("延長をお願いします", null));
-        answers(work, EMPTY_ANSWERS);
-        confirm(work);
+        String change = toStructured("画面を変えてほしい", null);
+        confirm(change);
 
         List<String> ids = listedIds(false);
 
-        assertThat(ids).contains(unresolved, immediate, bug, work);
-        assertThat(ids).doesNotContain(resolved, incident, inProgress);
-        for (String notFiled : List.of(resolved, incident, inProgress)) {
+        assertThat(ids).contains(unresolved, immediate, bug, change);
+        assertThat(ids).doesNotContain(resolved, inProgress);
+        for (String notFiled : List.of(resolved, inProgress)) {
             mvc.perform(get("/api/operator/inquiries/" + notFiled))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value("NOT_FOUND"));
@@ -67,31 +62,75 @@ class OperatorApiTest extends ApiSupport {
     }
 
     @Test
-    void 一覧は新しい順で要約は言い直しの文章_整形前は発話の先頭80文字() throws Exception {
-        String first = idOf(create("最初に送る", null));
-        sendNow(first);
-        String longUtterance = "あ".repeat(120);
-        String second = idOf(create(longUtterance, null));
-        sendNow(second);
-        String third = toAnswering("三番目の仕様", "billing");
+    void 一覧は新しい順で要約は言い直しの文章_言い直しがなければ本人が書いた文章の先頭80文字() throws Exception {
+        String first = filedNow("最初に送る", null);
+        // 業務が止まっているときは、言い直しに失敗しても組み立てなしで担当者に送られる
+        String longText = "[言い直しエラー]" + "あ".repeat(120);
+        String second = idOf(create(longText, "BLOCKED"));
+        finishIntake(second, null);
+        String third = filedNow("三番目の仕様", "billing");
+        // 時刻が同じになって順序が揺れないようにする
         stream(third);
-        resolve(third, false);
 
         String body = text(mvc.perform(get("/api/operator/inquiries")));
         List<String> ids = JsonPath.read(body, "$.items[*].id");
 
-        assertThat(ids.indexOf(third)).isLessThan(ids.indexOf(second));
-        assertThat(ids.indexOf(second)).isLessThan(ids.indexOf(first));
-        assertThat(field(body, second, "summary")).isEqualTo("あ".repeat(80));
-        assertThat(field(body, third, "summary")).isEqualTo("「三番目の仕様」について、いまの仕組みがどうなっているかを知りたい。");
+        // 第二の問い合わせは緊急度が BLOCKED のため、先頭に寄る
+        assertThat(ids.indexOf(second)).isLessThan(ids.indexOf(third));
+        assertThat(ids.indexOf(third)).isLessThan(ids.indexOf(first));
+        assertThat(field(body, second, "summary")).isEqualTo(longText.substring(0, 80));
+        assertThat(field(body, third, "summary"))
+                .isEqualTo("請求管理について、いまの仕組みがどうなっているかを知りたい。 書かれた内容: 三番目の仕様");
         assertThat(field(body, third, "system.label")).isEqualTo("請求管理");
         assertThat(field(body, second, "sentImmediately")).isEqualTo(true);
-        assertThat(field(body, third, "sentImmediately")).isEqualTo(false);
+        assertThat(field(body, third, "sentImmediately")).isEqualTo(true);
+    }
+
+    @Test
+    void 一覧の項目は種類_システム_機能_緊急度を持ち_決まっていなければnull() throws Exception {
+        String full = idOf(create("求人管理画面の求人の掲載がおかしい", "HURRY"));
+        finishIntake(full, null);
+        confirm(full);
+        stream(full);
+        String bare = filedNow("期限の仕様", null);
+
+        String body = text(mvc.perform(get("/api/operator/inquiries")));
+
+        assertThat(field(body, full, "type.id")).isEqualTo("LOOKS_WRONG");
+        assertThat(field(body, full, "type.label")).isEqualTo("おかしいかもしれない");
+        assertThat(field(body, full, "system.id")).isEqualTo("job-admin");
+        assertThat(field(body, full, "function.id")).isEqualTo("posting");
+        assertThat(field(body, full, "function.label")).isEqualTo("求人の掲載");
+        assertThat(field(body, full, "urgency")).isEqualTo("HURRY");
+        assertThat(field(body, bare, "urgency")).isEqualTo("NORMAL");
+        assertThat(field(body, bare, "system")).isNull();
+        assertThat(field(body, bare, "function")).isNull();
+        // 廃止した項目
+        assertThat(body).doesNotContain("\"counts\"").doesNotContain("\"category\"");
+    }
+
+    @Test
+    void 業務が止まっている件が先頭に寄り_それぞれの中は新しい順() throws Exception {
+        String oldNormal = filedNow("古い通常", null);
+        String blockedOld = idOf(create("止まっている1", "BLOCKED"));
+        finishIntake(blockedOld, null);
+        String newNormal = filedNow("新しい通常", null);
+        String blockedNew = idOf(create("止まっている2", "BLOCKED"));
+        finishIntake(blockedNew, null);
+
+        List<String> ids = JsonPath.read(text(mvc.perform(get("/api/operator/inquiries"))), "$.items[*].id");
+
+        assertThat(ids.indexOf(blockedNew)).isLessThan(ids.indexOf(blockedOld));
+        assertThat(ids.indexOf(blockedOld)).isLessThan(ids.indexOf(newNormal));
+        assertThat(ids.indexOf(newNormal)).isLessThan(ids.indexOf(oldNormal));
+        // 対応状況の絞り込みと件数は廃止した。status を付けても絞らない
+        String filtered = text(mvc.perform(get("/api/operator/inquiries?status=DONE")));
+        assertThat((List<String>) JsonPath.read(filtered, "$.items[*].id")).contains(oldNormal, newNormal);
     }
 
     @Test
     void 未読数と既読化とunreadOnly() throws Exception {
-        String id = idOf(create("既読の確認", null));
+        String id = toAnswering("既読の確認", null);
         int before = unreadCount();
         sendNow(id);
 
@@ -132,11 +171,21 @@ class OperatorApiTest extends ApiSupport {
                 .andExpect(jsonPath("$.askerId").value("local-user"))
                 .andExpect(jsonPath("$.askerName").value("開発用ユーザー"))
                 .andExpect(jsonPath("$.utterance").value("[幽霊出典] 期限の仕様"))
+                .andExpect(jsonPath("$.urgency").value("NORMAL"))
+                .andExpect(jsonPath("$.type.id").value("HOW_IT_WORKS"))
+                .andExpect(jsonPath("$.type.label").value("仕組みを知りたい"))
+                .andExpect(jsonPath("$.type.by").value("AI"))
                 .andExpect(jsonPath("$.system.id").value("job-admin"))
-                .andExpect(jsonPath("$.systemGuessed").value(false))
+                .andExpect(jsonPath("$.system.by").value("ASKER"))
+                .andExpect(jsonPath("$.function").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.filedAt").isNotEmpty())
-                .andExpect(jsonPath("$.followUps[0].text").value("求人の状態はどれですか"))
+                .andExpect(jsonPath("$.intake[0].questionId").value("type"))
+                .andExpect(jsonPath("$.intake[0].answer.kind").value("INFERRED"))
+                .andExpect(jsonPath("$.intake[1].answer.kind").value("OPTION"))
+                .andExpect(jsonPath("$.followUps").doesNotExist())
+                .andExpect(jsonPath("$.systemGuessed").doesNotExist())
                 .andExpect(jsonPath("$.structured.summary").isNotEmpty())
+                .andExpect(jsonPath("$.structured.urgency").doesNotExist())
                 .andExpect(jsonPath("$.revisionNotes").isEmpty())
                 .andExpect(jsonPath("$.answer.grounded").value(false))
                 .andExpect(jsonPath("$.answer.memo.findings").isEmpty())
@@ -149,8 +198,7 @@ class OperatorApiTest extends ApiSupport {
 
     @Test
     void 詳細には照合できた出典がverifiedつきで残り一言も見える() throws Exception {
-        String id = idOf(create("期限の仕様", null));
-        answers(id, EMPTY_ANSWERS);
+        String id = toStructured("期限の仕様", null);
         mvc.perform(post("/api/inquiries/" + id + "/revision")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"note\":\"消えたのは一昨日から\"}"));
@@ -170,9 +218,7 @@ class OperatorApiTest extends ApiSupport {
         MvcResult started = mvc.perform(get("/api/operator/stream").accept(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(request().asyncStarted())
                 .andReturn();
-        String id = idOf(create("ストリームの確認", "billing"));
-
-        sendNow(id);
+        String id = filedNow("ストリームの確認", "billing");
 
         assertThat(waitFor(() -> content(started).contains("event:filed"), 5000)).isTrue();
         String content = content(started);
@@ -191,27 +237,22 @@ class OperatorApiTest extends ApiSupport {
     }
 
     @Test
-    void 自己解決や障害の案内ではストリームに流れない() throws Exception {
+    void 自己解決ではストリームに流れない() throws Exception {
         MvcResult started = mvc.perform(get("/api/operator/stream").accept(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(request().asyncStarted())
                 .andReturn();
-        String incident = idOf(create("サイトが止まっていて障害になっている", null));
-        answers(incident, "{\"answers\":[{\"questionId\":\"incident-check\",\"answer\":\"はい\"}]}");
         String resolved = toAnswering("流れない確認", null);
         stream(resolved);
         resolve(resolved, true);
-        String filed = idOf(create("流れる確認", null));
-        sendNow(filed);
+        String filed = filedNow("流れる確認", null);
 
         assertThat(waitFor(() -> content(started).contains(filed), 5000)).isTrue();
-        assertThat(content(started)).doesNotContain(incident).doesNotContain(resolved);
+        assertThat(content(started)).doesNotContain(resolved);
     }
 
     @Test
     void Slackが未設定なら投稿せず失敗でもなく記録だけが残る() throws Exception {
-        String id = idOf(create("Slack未設定", "job-admin"));
-
-        sendNow(id).andExpect(jsonPath("$.outcome").value("FILED"));
+        String id = filedNow("Slack未設定", "job-admin");
 
         var row = jdbc.queryForMap("select slack_notified, slack_error from inquiries where id = ?::uuid", id);
         assertThat(row.get("slack_notified")).isEqualTo(false);

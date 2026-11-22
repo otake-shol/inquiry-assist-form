@@ -3,39 +3,100 @@
  * 契約が変わったらここと backend を同時に直す。
  */
 
-/** 問い合わせの種別。 */
-export type InquiryCategory =
-  "SPEC_QUESTION" | "SUSPECTED_BUG" | "WORK_REQUEST" | "INCIDENT";
+/** 問い合わせの種類。 */
+export type InquiryTypeId =
+  "HOW_TO" | "HOW_IT_WORKS" | "LOOKS_WRONG" | "DO_FOR_ME" | "CHANGE_REQUEST";
 
 /** 問い合わせ1件の進行位置。 */
 export type InquiryStep =
-  "TRIAGED" | "STRUCTURED" | "ANSWERING" | "ANSWERED" | "CLOSED";
+  "INTAKE" | "STRUCTURED" | "ANSWERING" | "ANSWERED" | "CLOSED";
 
 /** 問い合わせの結果。 */
 export type InquiryOutcome =
-  | "IN_PROGRESS"
-  | "SELF_RESOLVED"
-  | "FILED"
-  | "INCIDENT_REDIRECTED"
-  | "ABANDONED";
+  "IN_PROGRESS" | "SELF_RESOLVED" | "FILED" | "ABANDONED";
 
-/** 緊急度。 */
-export type Urgency = "LOW" | "NORMAL" | "HIGH";
+/** 緊急度。通常、急ぎ、業務が止まっている。種類とは別に持つ。 */
+export type Urgency = "NORMAL" | "HURRY" | "BLOCKED";
+
+/** 置き場所（種類、システム、機能）を決めた人。本人が選んだか、AI が文章から置いたか。 */
+export type PlacedBy = "ASKER" | "AI";
+
+/** 決まった置き場所の1つ。`label` は API が返す表示名。 */
+export interface Placement<Id extends string = string> {
+  id: Id;
+  label: string;
+  by: PlacedBy;
+}
 
 /** 出典の種類。 */
 export type SourceType = "CODE" | "FAQ" | "DOCUMENT" | "GLOSSARY";
 
-/** 対象システムの選択肢。 */
+/** 名前だけを持つ選択肢（一覧の1件の種類、システム、機能など）。 */
 export interface SystemOption {
   id: string;
   label: string;
 }
 
-/** 追加質問。`options` が空なら自由記述。 */
-export interface Question {
+/** 設定のシステム。機能の設定がなければ `functions` は空。 */
+export interface ConfigSystem extends SystemOption {
+  functions: SystemOption[];
+}
+
+/** 設定の種類。`hint` は選択肢に添える短い説明。 */
+export interface TypeOption extends SystemOption {
+  hint: string;
+}
+
+/** 入口の質問の種類。 */
+export type IntakeQuestionKind =
+  "TYPE" | "SYSTEM" | "FUNCTION" | "DETAIL" | "NOTE";
+
+/** 入口の質問の選択肢。`hint` は種類の選択肢に添える短い説明（あれば）。 */
+export interface IntakeOption {
   id: string;
+  label: string;
+  hint?: string;
+}
+
+/**
+ * 次に答える入口の質問。`options` が空なら文章で答える。
+ * `allowsText` が true なら選択肢のほかに文章でも答えられ、`canSkip` は補足だけが true になりうる。
+ */
+export interface IntakeQuestion {
+  questionId: string;
+  kind: IntakeQuestionKind;
   text: string;
-  options: string[];
+  options: IntakeOption[];
+  allowsText: boolean;
+  canSkip: boolean;
+}
+
+/**
+ * 入口の質問への答え。選んだ（`OPTION`）、文章で答えた（`TEXT`）、わからない（`UNKNOWN`）、
+ * 補足を書かずに進んだ（`SKIPPED`）、文章から AI が置いた（`INFERRED`）のいずれか。
+ */
+export type IntakeAnswer =
+  | { kind: "OPTION"; optionId: string; label: string }
+  | { kind: "TEXT"; text: string }
+  | { kind: "UNKNOWN" }
+  | { kind: "SKIPPED" }
+  | { kind: "INFERRED"; optionId: string; label: string };
+
+/** 答え終えた入口の質問1件。 */
+export interface IntakeEntry {
+  questionId: string;
+  kind: IntakeQuestionKind;
+  text: string;
+  answer: IntakeAnswer;
+}
+
+/** 入口の質問の進み具合。入口が終わっていれば `next` は null で `complete` が true。 */
+export interface Intake {
+  /** 答え終えた質問（聞いた順） */
+  entries: IntakeEntry[];
+  /** 次に答える質問 */
+  next: IntakeQuestion | null;
+  complete: boolean;
 }
 
 /** 整形後の問い。 */
@@ -46,7 +107,6 @@ export interface StructuredInquiry {
   goal: string;
   whatHappened: string | null;
   expectedResult: string | null;
-  urgency: Urgency;
 }
 
 /** 0次回答の出典。 */
@@ -98,12 +158,6 @@ export interface InquiryMessage {
   createdAt: string;
 }
 
-/** 本人が送信した追加質問への回答。「わからない」は `answer` が null。 */
-export interface SubmittedAnswer {
-  questionId: string;
-  answer: string | null;
-}
-
 /** スキルの実行記録の1件（呼び出し1回分）。開発者向け。 */
 export interface TraceEntry {
   /** スキルの識別子（`reception` など） */
@@ -124,47 +178,54 @@ export interface InquiryView {
   id: string;
   step: InquiryStep;
   outcome: InquiryOutcome;
-  utterance: string;
-  /** 種別の判定でAIが失敗して保存された問い合わせでは null */
-  categoryByAi: InquiryCategory | null;
-  category: InquiryCategory | null;
-  questions: Question[];
+  urgency: Urgency;
+  /** 種類。決まっていなければ null */
+  type: Placement<InquiryTypeId> | null;
+  /** 対象システム。決まっていなければ null */
+  system: Placement | null;
+  /** 機能。決まっていなければ null */
+  function: Placement | null;
+  /** 本人が書いた文章（複数ある場合は書いた順に空行でつないだもの）。書いていなければ null */
+  utterance: string | null;
+  intake: Intake;
   /** 言い直しを作り直せる残り回数 */
-  /** 対象システム（選択または推測。決まっていなければ null） */
-  system: SystemOption | null;
-  /** system がAIの推測なら true */
-  systemGuessed: boolean;
   revisionsLeft: number;
   structured: StructuredInquiry | null;
   answer: ZeroAnswer | null;
-  incidentGuidance: string | null;
+  /** いま「答えを待たずに担当者へ送る」を実行できるか */
+  canSendNow: boolean;
   sentImmediately: boolean;
   mock: boolean;
-  /** 作成日時。無い古い応答では欠ける */
+  /** 作成日時 */
   createdAt?: string;
-  /** 対応状況。担当者に送られていなければ null。無い古い応答では欠ける */
+  /** 対応状況。担当者に送られていなければ null */
   handlingStatus?: HandlingStatus | null;
-  /** やり取り（古い順）。無い古い応答では欠け、なしとして扱う */
+  /** やり取り（古い順） */
   messages?: InquiryMessage[];
-  /** 送信した回答。まだ送信していなければ null。無い古い応答では欠ける */
-  submittedAnswers?: SubmittedAnswer[] | null;
-  /** スキルの実行記録。無効なら null。無い古い応答では欠ける */
+  /** スキルの実行記録。無効なら null */
   trace?: TraceEntry[] | null;
 }
 
-/** 追加質問への回答。「わからない」は null。 */
-export interface AnswerInput {
-  questionId: string;
-  answer: string | null;
-}
+/** 入口の質問への答えのリクエスト（`questionId` は別に渡す）。 */
+export type IntakeAnswerRequest =
+  | { optionId: string }
+  | { text: string }
+  | { unknown: true }
+  | { skipped: true };
 
 /** `GET /api/config` の応答。 */
 export interface AppConfig {
   mock: boolean;
   /** 担当者に送った後の案内文 */
   filedGuidance?: string;
-  /** 対象システムの選択肢（空または省略なら選択を出さない） */
-  systems?: SystemOption[];
+  /** 種類の選択肢（聞く順。1問目の質問を作る前に画面が描く） */
+  types?: TypeOption[];
+  /** 緊急度の選択肢（通常、急ぎ、業務が止まっている） */
+  urgencies?: SystemOption[];
+  /** システムの一覧 */
+  systems?: ConfigSystem[];
+  /** 画面に出せる言語 */
+  languages?: string[];
   /** スキルの識別子から、動いている実装（`mock` / `ollama`）への対応。古い API では無い */
   skills?: Record<string, string>;
   /** 利用者。認証を加えるまでは設定の固定値。古い API では無い */
@@ -179,7 +240,7 @@ export interface AppConfig {
 export interface ErrorBody {
   code: string;
   message: string;
-  /** 種別の判定でAIが失敗したとき、保存された問い合わせの id */
+  /** 問いの組み立てに失敗したとき、答えを保存した問い合わせの id */
   inquiryId?: string;
 }
 
@@ -187,8 +248,10 @@ export interface ErrorBody {
 export interface OperatorItem {
   id: string;
   filedAt: string;
-  category: InquiryCategory | null;
+  type: SystemOption | null;
   system: SystemOption | null;
+  function: SystemOption | null;
+  urgency: Urgency;
   summary: string;
   sentImmediately: boolean;
   read: boolean;
@@ -222,16 +285,6 @@ export interface InquiryList {
   items: InquiryListItem[];
 }
 
-/** 追加質問への本人の対応。 */
-export type FollowUpStatus = "ANSWERED" | "UNKNOWN" | "NOT_ANSWERED";
-
-/** 追加質問と回答（オペレータ向け）。`status` が無い古い応答では従来の表示にする。 */
-export interface FollowUp {
-  text: string;
-  answer: string | null;
-  status?: FollowUpStatus;
-}
-
 /** 照合の結果つきの出典。 */
 export interface OperatorCitation extends Citation {
   verified: boolean;
@@ -257,12 +310,14 @@ export interface OperatorDetail {
   askerId: string;
   /** 投稿者の表示用の名前（古い応答では欠ける） */
   askerName?: string;
-  utterance: string;
-  categoryByAi: InquiryCategory | null;
-  category: InquiryCategory | null;
-  system: SystemOption | null;
-  systemGuessed: boolean;
-  followUps: FollowUp[];
+  /** 本人が書いた文章。書いていなければ null */
+  utterance: string | null;
+  urgency: Urgency;
+  type: Placement<InquiryTypeId> | null;
+  system: Placement | null;
+  function: Placement | null;
+  /** 本人が何を選び、何に「わからない」と答えたか（聞いた順） */
+  intake: IntakeEntry[];
   structured: StructuredInquiry | null;
   revisionNotes: string[];
   answer: OperatorAnswer | null;

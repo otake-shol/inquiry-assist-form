@@ -1,6 +1,6 @@
 import {
-  CATEGORY_EXAMPLE_LIST,
   TAG_EXAMPLE_LIST,
+  TYPE_EXAMPLE_LIST,
   type MockExample,
 } from "../text/mockExamples.ts";
 import { skillMixOf, skillMixText } from "../text/skills.ts";
@@ -11,7 +11,7 @@ interface MockBarProps {
   skills: Record<string, string> | null;
   /** 例文が選ばれたときに呼ぶ */
   onPick: (text: string) => void;
-  /** 例文ボタンを使えるか（入力画面でのみ true） */
+  /** 例文ボタンを使えるか（問い合わせの作成前だけ true） */
   canPick: boolean;
 }
 
@@ -51,9 +51,9 @@ export function MockBar({ skills, onPick, canPick }: MockBarProps) {
           <p className="mock-note mock-help">{skillMixText(mix)}</p>
         )}
         <p className="mock-note mock-help">
-          例文を押すと入力欄に入ります（入力画面で使えます）
+          例文を押すと「文章で書く」の入力欄に入ります（最初の画面で使えます）
         </p>
-        {renderGroup("状況の例", CATEGORY_EXAMPLE_LIST)}
+        {renderGroup("状況の例", TYPE_EXAMPLE_LIST)}
         {renderGroup("動きの例", TAG_EXAMPLE_LIST)}
         {mix.partial && (
           <div className="mock-note mock-help">

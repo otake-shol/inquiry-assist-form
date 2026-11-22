@@ -20,7 +20,7 @@ export function Researching({
       <ol
         className="progress-list"
         aria-live="polite"
-        aria-label="調べている内容"
+        aria-label={TEXT.researchingLabel}
       >
         {progress.map((message, index) => {
           const latest = index === progress.length - 1 && !stopped;
@@ -63,18 +63,22 @@ interface ResultProps {
   /** 本人の解決判定を待っているか（待っていれば操作ボタンを出す） */
   awaitingResolution: boolean;
   busy: boolean;
+  /** 「やってほしい」か（解決の判定を「自分でできました」「担当者に頼む」で聞く） */
+  doForMe?: boolean;
   onResolve: (resolved: boolean) => void;
 }
 
 /**
  * 調べた結果。根拠があれば本人向けの説明を主に示し、資料と詳しい内容は折りたたむ。
  * 根拠がなければ見つからなかったと伝え、担当者に送ることを主のボタンにする。
+ * 「やってほしい」で自分でできる手順が見つかったときは、「自分でできました」「担当者に頼む」を出す。
  * @param props 結果と操作の受け口
  */
 export function Result({
   answer,
   awaitingResolution,
   busy,
+  doForMe = false,
   onResolve,
 }: ResultProps) {
   // 古い応答（answered が無い）では grounded と同じ値として扱う
@@ -127,14 +131,14 @@ export function Result({
                 disabled={busy}
                 onClick={() => onResolve(true)}
               >
-                {TEXT.resolved}
+                {doForMe ? TEXT.doneByMyself : TEXT.resolved}
               </button>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => onResolve(false)}
               >
-                {TEXT.notResolved}
+                {doForMe ? TEXT.askStaff : TEXT.notResolved}
               </button>
             </>
           ) : (
@@ -145,14 +149,14 @@ export function Result({
                 disabled={busy}
                 onClick={() => onResolve(false)}
               >
-                {TEXT.sendToStaff}
+                {doForMe ? TEXT.askStaff : TEXT.sendToStaff}
               </button>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => onResolve(true)}
               >
-                {TEXT.resolved}
+                {doForMe ? TEXT.doneByMyself : TEXT.resolved}
               </button>
             </>
           )}
@@ -163,10 +167,16 @@ export function Result({
 }
 
 /**
- * 不具合かもしれない件で、調べた結果を添えて担当者に送ったことを伝える。
+ * 調べた内容を添えて担当者に送ったことを、結果の上で伝える。
+ * 「おかしいかもしれない」は必ず送る。「やってほしい」は自分でできる手順が見つからなかったとき。
+ * @param props 案内の種類
  */
-export function FiledNotice() {
-  return <p className="system notice-inline">{TEXT.bugFiled}</p>;
+export function FiledNotice({ text }: { text: "lookWrong" | "doForMe" }) {
+  return (
+    <p className="system notice-inline">
+      {text === "lookWrong" ? TEXT.bugFiled : TEXT.doForMeFiled}
+    </p>
+  );
 }
 
 /** 終わりの props。 */
@@ -193,11 +203,6 @@ export function Closing({
     <div className="system closing">
       <div tabIndex={-1} data-autofocus className="focus-target">
         <p className="lead">{text.lead}</p>
-        {text.incident !== null && (
-          <div className="incident" role="region" aria-label="障害の案内">
-            <p>{text.incident}</p>
-          </div>
-        )}
         {text.guidance !== null && <p>{text.guidance}</p>}
       </div>
       {showRestart && (

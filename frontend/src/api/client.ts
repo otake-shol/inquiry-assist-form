@@ -1,25 +1,25 @@
 import type {
-  AnswerInput,
   AppConfig,
   ErrorBody,
   HandlingStatus,
-  InquiryCategory,
   InquiryList,
   InquiryView,
+  IntakeAnswerRequest,
   OperatorDetail,
   OperatorList,
+  Urgency,
 } from "./types.ts";
 
 /** API が返したエラー（`{code, message}`）を持つ例外。 */
 export class ApiError extends Error {
   readonly code: string;
-  /** 保存済みの問い合わせの id（種別の判定でAIが失敗した場合のみ） */
+  /** 答えを保存した問い合わせの id（問いの組み立てに失敗した場合のみ） */
   readonly inquiryId?: string;
 
   /**
    * @param code エラーコード（`AI_REFUSED` など。通信失敗は `NETWORK`）
    * @param message サーバーまたはクライアントが付けた説明
-   * @param inquiryId 保存済みの問い合わせの id（あれば）
+   * @param inquiryId 答えを保存した問い合わせの id（あれば）
    */
   constructor(code: string, message: string, inquiryId?: string) {
     super(message);
@@ -72,48 +72,88 @@ export function getConfig(): Promise<AppConfig> {
   return request<AppConfig>("GET", "/api/config");
 }
 
-/** `POST /api/inquiries`。種別を判定し追加質問を作る。 */
+/** 問い合わせの作成の入力。どちらも省ける。 */
+export interface CreateInquiryInput {
+  /** 文章で始める場合の本文（1〜4000文字） */
+  text?: string;
+  /** 作成前に選んだ緊急度（省くと通常） */
+  urgency?: Urgency;
+}
+
+/**
+ * `POST /api/inquiries`。問い合わせを作る。文章がなければ最初の質問が `intake.next` に入る。
+ * @param input 文章で始める場合の本文と、作成前に選んだ緊急度
+ */
 export function createInquiry(
-  utterance: string,
-  systemId: string | null = null,
+  input: CreateInquiryInput = {},
 ): Promise<InquiryView> {
-  return request<InquiryView>("POST", "/api/inquiries", {
-    utterance,
-    systemId,
+  return request<InquiryView>("POST", "/api/inquiries", input);
+}
+
+/**
+ * `POST /api/inquiries/{id}/intake/answers`。`intake.next` の質問に答える。
+ * @param id 問い合わせ ID
+ * @param questionId 答える質問の id
+ * @param answer 答え方（選ぶ、文章、わからない、書かずに進む）
+ */
+export function answerIntake(
+  id: string,
+  questionId: string,
+  answer: IntakeAnswerRequest,
+): Promise<InquiryView> {
+  return request<InquiryView>("POST", `/api/inquiries/${id}/intake/answers`, {
+    questionId,
+    ...answer,
   });
 }
 
 /**
- * `PUT /api/inquiries/{id}/system`。対象システムを直す。
+ * `POST /api/inquiries/{id}/intake/back`。答え終えた質問に戻る（それより後の答えは消える）。
  * @param id 問い合わせ ID
- * @param systemId 選んだシステムの id（「わからない」は null）
+ * @param questionId 戻る先の質問の id
  */
-export function changeSystem(
+export function backIntake(
   id: string,
-  systemId: string | null,
+  questionId: string,
 ): Promise<InquiryView> {
-  return request<InquiryView>("PUT", `/api/inquiries/${id}/system`, {
-    systemId,
+  return request<InquiryView>("POST", `/api/inquiries/${id}/intake/back`, {
+    questionId,
   });
 }
 
-/** `PUT /api/inquiries/{id}/category`。種別を変更する。 */
-export function changeCategory(
+/**
+ * `POST /api/inquiries/{id}/intake/text`。文章で書く道に切り替える。
+ * @param id 問い合わせ ID
+ * @param text 本文（1〜4000文字）
+ */
+export function submitIntakeText(
   id: string,
-  category: InquiryCategory,
+  text: string,
 ): Promise<InquiryView> {
-  return request<InquiryView>("PUT", `/api/inquiries/${id}/category`, {
-    category,
+  return request<InquiryView>("POST", `/api/inquiries/${id}/intake/text`, {
+    text,
   });
 }
 
-/** `POST /api/inquiries/{id}/answers`。追加質問に回答する。 */
-export function submitAnswers(
+/**
+ * `POST /api/inquiries/{id}/intake/compose`。問いの組み立てだけをやり直す。
+ * @param id 問い合わせ ID
+ */
+export function composeIntake(id: string): Promise<InquiryView> {
+  return request<InquiryView>("POST", `/api/inquiries/${id}/intake/compose`);
+}
+
+/**
+ * `PUT /api/inquiries/{id}/urgency`。緊急度を変える。
+ * @param id 問い合わせ ID
+ * @param urgency 新しい緊急度
+ */
+export function changeUrgency(
   id: string,
-  answers: AnswerInput[],
+  urgency: Urgency,
 ): Promise<InquiryView> {
-  return request<InquiryView>("POST", `/api/inquiries/${id}/answers`, {
-    answers,
+  return request<InquiryView>("PUT", `/api/inquiries/${id}/urgency`, {
+    urgency,
   });
 }
 
@@ -147,7 +187,7 @@ export function reviseStructured(
   });
 }
 
-/** `POST /api/inquiries/{id}/reopen`。追加質問へ戻る。 */
+/** `POST /api/inquiries/{id}/reopen`。入口の質問へ戻る。 */
 export function reopenQuestions(id: string): Promise<InquiryView> {
   return request<InquiryView>("POST", `/api/inquiries/${id}/reopen`);
 }
@@ -159,7 +199,7 @@ export function resolve(id: string, resolved: boolean): Promise<InquiryView> {
   });
 }
 
-/** `POST /api/inquiries/{id}/send-now`。今すぐ担当者に送る。 */
+/** `POST /api/inquiries/{id}/send-now`。答えを待たずに担当者に送る。 */
 export function sendNow(id: string): Promise<InquiryView> {
   return request<InquiryView>("POST", `/api/inquiries/${id}/send-now`);
 }

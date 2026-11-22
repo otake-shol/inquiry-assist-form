@@ -1,11 +1,35 @@
 # テスト用の設定。本体の application.yaml に重ねて読まれる（一覧は丸ごと置き換わる）。
 # 本体の既定は仮の名前（システムA など）だが、テストでは業務らしい名前の一覧を使う。
-# 発話に含まれる名前から対象システムを推測する動きを、意味のある名前で確かめるため。
+# 文章に含まれる名前から置き場所を置く動きを、意味のある名前で確かめるため。
 inquiry:
   systems:
     - id: job-admin
-      label: 求人管理画面
-    - id: applicant-list
-      label: 応募者向けの一覧
+      label: { ja: 求人管理画面, en: Job admin }
+      functions:
+        - id: posting
+          label: { ja: 求人の掲載, en: Posting }
+        - id: applicants
+          label: { ja: 応募者の一覧, en: Applicants }
     - id: billing
-      label: 請求管理
+      label: { ja: 請求管理, en: Billing }
+      functions:
+        - id: invoice
+          label: { ja: 請求書, en: Invoices }
+    - id: reports
+      label: { ja: レポート, en: Reports }
+  cells:
+    - system: job-admin
+      type: LOOKS_WRONG
+      questions:
+        - id: since
+          text: { ja: いつから起きていますか, en: "Since when has this been happening?" }
+          options:
+            - { id: today, label: { ja: 今日から, en: Since today } }
+            - { id: this-week, label: { ja: 今週から, en: Since this week } }
+            - { id: earlier, label: { ja: もっと前から, en: Earlier } }
+    - system: billing
+      function: invoice
+      type: DO_FOR_ME
+      questions:
+        - id: partner
+          text: { ja: 対象の取引先はどこですか, en: "Which business partner is it for?" }

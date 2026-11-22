@@ -10,7 +10,6 @@ import dev.inquiryassist.TestcontainersConfiguration;
 import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.skill.RestaterSkill;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -34,12 +33,11 @@ class RevisionFailureTest {
 
     @Test
     void AIが失敗した作り直しは残り回数を減らさず一言も残さない() {
-        var id = service.create("期限の仕様", null).id();
-        service.answerQuestions(id, List.of());
+        var id = IntakeSteps.toStructured(service, "期限の仕様").id();
 
-        doThrow(new AiUnavailableException("失敗", null)).when(assistant).restate(any(), any(), any(), any(), any());
+        doThrow(new AiUnavailableException("失敗", null)).when(assistant).restate(any(), any(), any(), any(), any(), any());
         assertThatThrownBy(() -> service.revise(id, "違う")).isInstanceOf(AiUnavailableException.class);
-        doThrow(new AiRefusalException("拒否")).when(assistant).restate(any(), any(), any(), any(), any());
+        doThrow(new AiRefusalException("拒否")).when(assistant).restate(any(), any(), any(), any(), any(), any());
         assertThatThrownBy(() -> service.revise(id, "違う")).isInstanceOf(AiRefusalException.class);
 
         assertThat(service.get(id).revisionsLeft()).isEqualTo(2);
@@ -49,7 +47,7 @@ class RevisionFailureTest {
                         id.toString()))
                 .isZero();
 
-        doCallRealMethod().when(assistant).restate(any(), any(), any(), any(), any());
+        doCallRealMethod().when(assistant).restate(any(), any(), any(), any(), any(), any());
         assertThat(service.revise(id, "違う").revisionsLeft()).isEqualTo(1);
     }
 }

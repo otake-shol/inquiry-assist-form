@@ -124,8 +124,8 @@ public class OllamaInvestigatorSkill implements InvestigatorSkill {
     @Override
     public AiResult<Investigation> investigate(
             StructuredInquiry inquiry, AccessScope scope, ProgressListener progress) {
-        if (!inquiry.category().receivesZeroAnswer()) {
-            throw new IllegalArgumentException("0次回答を出さない種別: " + inquiry.category());
+        if (inquiry.type() != null && !inquiry.type().investigates()) {
+            throw new IllegalArgumentException("調べない種類: " + inquiry.type());
         }
         Session session = new Session(scope, progress);
         session.messages.add(message("system", system));
@@ -375,8 +375,8 @@ public class OllamaInvestigatorSkill implements InvestigatorSkill {
     private static String userMessage(StructuredInquiry inquiry) {
         StringBuilder user = new StringBuilder("## 本人の問い\n")
                 .append(inquiry.summary())
-                .append("\n\n## 種別\n")
-                .append(inquiry.category().name())
+                .append("\n\n## 種類\n")
+                .append(inquiry.type() == null ? "（未定）" : inquiry.type().name())
                 .append("\n\n## 対象のシステム\n")
                 .append(inquiry.targetSystem() == null ? "なし" : inquiry.targetSystem());
         if (inquiry.whatHappened() != null && !inquiry.whatHappened().isBlank()) {

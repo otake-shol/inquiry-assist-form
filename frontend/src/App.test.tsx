@@ -2,54 +2,81 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App.tsx";
-import type { Question } from "./api/types.ts";
+import type { InquiryView, IntakeEntry } from "./api/types.ts";
 import {
   FakeStream,
+  TYPE_OPTIONS,
   groundedAnswer,
   installFakeFetch,
+  makeConfig,
+  makeFiledView,
+  makeQuestion,
   makeStructuredView,
+  makeTypeEntry,
   makeView,
   ungroundedAnswer,
   type RecordedCall,
+  type RouteResult,
 } from "./test/fakes.ts";
 
 type User = ReturnType<typeof userEvent.setup>;
 
 const INPUT_LABEL =
   "うまくまとまっていなくて大丈夫です。起きていること、知りたいことをそのまま書いてください。";
-const FORBIDDEN = /0次回答|種別|判定|整形|起票|出典/;
+const FORBIDDEN = /0次回答|種別|種類|判定|整形|起票|出典|スキル|モデル/;
 const SUMMARY = "求人の掲載期限を、何日まで延ばせるかを知りたい。";
+const SEND_NOW = "答えを待たずに担当者に送る";
 
-const Q_SCREEN: Question = {
-  id: "q1",
-  text: "どの画面の話ですか",
-  options: ["一覧", "詳細"],
-};
-const Q_WHEN: Question = {
-  id: "q2",
-  text: "いつ頃から気になっていますか",
+/** 詳しい質問（選択肢つき）。 */
+const Q_SINCE = makeQuestion({
+  questionId: "since",
+  kind: "DETAIL",
+  text: "いつから起きていますか",
+  options: [
+    { id: "today", label: "今日から" },
+    { id: "this-week", label: "今週から" },
+  ],
+});
+/** 詳しい質問（文章で答える）。 */
+const Q_TARGET = makeQuestion({
+  questionId: "target",
+  kind: "DETAIL",
+  text: "対象の取引先はどこですか",
   options: [],
-};
-const Q_KIND: Question = {
-  id: "q3",
-  text: "困っているのはどちらですか",
-  options: ["表示", "操作"],
-};
+});
+/** 補足（書かずに進める）。 */
+const Q_NOTE = makeQuestion({
+  questionId: "note",
+  kind: "NOTE",
+  text: "補足があれば書いてください",
+  options: [],
+  canSkip: true,
+});
+
+const LOOKS_WRONG = {
+  id: "LOOKS_WRONG",
+  label: "おかしいかもしれない",
+  by: "ASKER",
+} as const;
+const DO_FOR_ME = {
+  id: "DO_FOR_ME",
+  label: "やってほしい",
+  by: "ASKER",
+} as const;
 
 afterEach(() => {
   vi.unstubAllGlobals();
   window.history.replaceState({}, "", "/");
 });
 
-/** 入力して送信する。 */
-async function send(user: User, text = "求人の掲載期限を知りたいです") {
-  await user.type(await screen.findByLabelText(INPUT_LABEL), text);
-  await user.click(screen.getByRole("button", { name: "送信する" }));
-}
-
 /** 指定の呼び出しを探す。 */
 function findCall(calls: RecordedCall[], method: string, path: string) {
   return calls.find((c) => c.method === method && c.path === path);
+}
+
+/** 指定のパスへの呼び出しを数える。 */
+function countCalls(calls: RecordedCall[], method: string, path: string) {
+  return calls.filter((c) => c.method === method && c.path === path).length;
 }
 
 /** 画面に内部用語が出ていないことを確かめる。 */
@@ -57,34 +84,872 @@ function expectNoInternalWords() {
   expect(document.body.textContent).not.toMatch(FORBIDDEN);
 }
 
-/** 質問なしで言い直しまで進む API の組み合わせ。 */
-function restatementRoutes(structured = makeStructuredView()) {
-  return {
-    "POST /api/inquiries": { status: 201, body: makeView() },
-    "POST /api/inquiries/inq-1/answers": { body: structured },
-  };
+/** 答え終えた質問の1行を取り出す。 */
+function entryRow(question: string) {
+  return screen.getByText(question).closest(".answered-row")!;
 }
 
-describe("会話の流れ", () => {
-  it("(a)(n) 1問ずつ答えて言い直しに「合っています」から「解決しました」まで通せ、内部用語が出ない", async () => {
+/**
+ * `/inquiries/inq-1` を開き、指定の問い合わせから再開した状態で描く。
+ * @param view 再開する問い合わせ
+ * @param routes ほかの API の応答
+ * @param stream 進捗ストリームの偽物
+ */
+function openInquiry(
+  view: InquiryView,
+  routes: Record<string, RouteResult | ((body: unknown) => RouteResult)> = {},
+  stream = new FakeStream(),
+) {
+  window.history.replaceState({}, "", `/inquiries/${view.id}`);
+  const calls = installFakeFetch({
+    [`GET /api/inquiries/${view.id}`]: { body: view },
+    ...routes,
+  });
+  render(<App subscribe={stream.subscribe} />);
+  return { calls, stream };
+}
+
+/** 入口の質問に答えた後の問い合わせ。 */
+function intakeView(
+  next: InquiryView["intake"]["next"],
+  entries: IntakeEntry[] = [makeTypeEntry()],
+  overrides: Partial<InquiryView> = {},
+) {
+  return makeView({
+    intake: { entries, next, complete: next === null },
+    ...overrides,
+  });
+}
+
+/** 1問目で種類の選択肢を押す。 */
+async function pickType(user: User, name = "仕組みを知りたい") {
+  await user.click(await screen.findByRole("button", { name }));
+}
+
+/** 入口を終えて言い直しが出ている問い合わせから再開する。 */
+function openRestatement(
+  overrides: Partial<InquiryView> = {},
+  routes: Record<string, RouteResult | ((body: unknown) => RouteResult)> = {},
+  stream = new FakeStream(),
+) {
+  return openInquiry(makeStructuredView(overrides), routes, stream);
+}
+
+describe("最初の画面（入口の1問目）", () => {
+  it("自由記述の欄ではなく、1問目と5つの種類の選択肢（名前と説明）、緊急度、「わからない」、「文章で書く」を出す。この時点では問い合わせを作らない", async () => {
+    const calls = installFakeFetch({});
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    const group = await screen.findByRole("group", {
+      name: "何をしたいですか",
+    });
+    expect(screen.queryByLabelText(INPUT_LABEL)).not.toBeInTheDocument();
+    const buttons = within(group).getAllByRole("button");
+    expect(
+      buttons.map((b) => b.getAttribute("aria-labelledby") !== null),
+    ).toEqual([true, true, true, true, true, false]);
+    // 名前は選択肢の名前だけ。短い説明は説明として結びつく（名前と説明を縦に並べる）
+    for (const type of TYPE_OPTIONS) {
+      const button = within(group).getByRole("button", { name: type.label });
+      expect(button).toHaveAccessibleDescription(type.hint);
+      expect(button).toHaveTextContent(type.hint);
+      expect(button.querySelector(".choice-name")).toHaveTextContent(
+        type.label,
+      );
+    }
+    // 「わからない」は選択肢の並びの最後。種類の選択肢は聞く順のまま
+    expect(buttons.at(-1)).toHaveTextContent("わからない");
+    expect(
+      buttons
+        .slice(0, 5)
+        .map((b) => b.querySelector(".choice-name")?.textContent),
+    ).toEqual(TYPE_OPTIONS.map((t) => t.label));
+    expect(
+      screen.getByRole("button", { name: "文章で書く" }),
+    ).toBeInTheDocument();
+    const urgency = screen.getByRole("group", { name: "急ぎですか" });
+    expect(within(urgency).getAllByRole("radio")).toHaveLength(3);
+    expect(within(urgency).getByRole("radio", { name: "通常" })).toBeChecked();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    expect(
+      screen.queryByRole("button", { name: SEND_NOW }),
+    ).not.toBeInTheDocument();
+    expectNoInternalWords();
+  });
+
+  it("押した時点で問い合わせを作り、その答えを送って次の質問を出す。URL は /inquiries/{id} に変わる", async () => {
     const user = userEvent.setup();
-    const stream = new FakeStream();
+    const calls = installFakeFetch({
+      "POST /api/inquiries": { status: 201, body: makeView() },
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: intakeView(
+          makeQuestion(),
+          [makeTypeEntry("LOOKS_WRONG", "おかしいかもしれない")],
+          { type: LOOKS_WRONG },
+        ),
+      },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await pickType(user, "おかしいかもしれない");
+
+    expect(await screen.findByText("どのシステムですか")).toBeInTheDocument();
+    expect(findCall(calls, "POST", "/api/inquiries")?.body).toEqual({});
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+    ).toEqual({ questionId: "type", optionId: "LOOKS_WRONG" });
+    // 作成してから答えを送る
+    expect(
+      calls.findIndex(
+        (c) => c.path === "/api/inquiries" && c.method === "POST",
+      ),
+    ).toBeLessThan(
+      calls.findIndex((c) => c.path === "/api/inquiries/inq-1/intake/answers"),
+    );
+    await waitFor(() =>
+      expect(window.location.pathname).toBe("/inquiries/inq-1"),
+    );
+    // 取り直さずに、そのまま続く
+    expect(countCalls(calls, "GET", "/api/inquiries/inq-1")).toBe(0);
+    // 答えた質問は「質問 → 答え」の1行になり、1問目は消える
+    expect(entryRow("何をしたいですか")).toHaveTextContent(
+      "何をしたいですか→おかしいかもしれない",
+    );
+    expect(
+      screen.queryByRole("group", { name: "何をしたいですか" }),
+    ).not.toBeInTheDocument();
+    // 新しい質問にフォーカスが移る
+    await waitFor(() =>
+      expect(screen.getByText("どのシステムですか")).toHaveFocus(),
+    );
+    expectNoInternalWords();
+  });
+
+  it("1問目の「わからない」も、作成してから unknown を送る", async () => {
+    const user = userEvent.setup();
+    const calls = installFakeFetch({
+      "POST /api/inquiries": { status: 201, body: makeView() },
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: intakeView(makeQuestion(), [
+          {
+            ...makeTypeEntry(),
+            answer: { kind: "UNKNOWN" },
+          },
+        ]),
+      },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await user.click(await screen.findByRole("button", { name: "わからない" }));
+
+    expect(await screen.findByText("どのシステムですか")).toBeInTheDocument();
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+    ).toEqual({ questionId: "type", unknown: true });
+    expect(entryRow("何をしたいですか")).toHaveTextContent("わからない");
+  });
+
+  it("作成の応答が1問目でなくても、返った intake.next の質問 id で答えを送る", async () => {
+    const user = userEvent.setup();
     const calls = installFakeFetch({
       "POST /api/inquiries": {
         status: 201,
         body: makeView({
-          utterance: "求人の掲載期限を知りたいです",
-          questions: [Q_SCREEN, Q_WHEN],
+          intake: {
+            entries: [],
+            next: makeQuestion({
+              questionId: "type",
+              kind: "TYPE",
+              text: "何をしたいですか",
+              options: TYPE_OPTIONS.map(({ id, label }) => ({ id, label })),
+            }),
+            complete: false,
+          },
         }),
       },
-      "POST /api/inquiries/inq-1/answers": {
-        body: makeStructuredView({ questions: [Q_SCREEN, Q_WHEN] }),
+      "POST /api/inquiries/inq-1/intake/answers": { body: makeView() },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await pickType(user, "使い方を知りたい");
+
+    await waitFor(() =>
+      expect(
+        findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+      ).toEqual({ questionId: "type", optionId: "HOW_TO" }),
+    );
+  });
+
+  it("作成の途中で通信中は、選択肢と緊急度を押せず二重に送れない", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    installFakeFetch({});
+    const fake = vi.mocked(fetch);
+    const base = fake.getMockImplementation()!;
+    fake.mockImplementation(async (input, init) => {
+      if (String(input) === "/api/inquiries" && init?.method === "POST") {
+        await gate;
+        return new Response(JSON.stringify(makeView({ id: "inq-1" })), {
+          status: 201,
+        });
+      }
+      return base(input, init);
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await pickType(user);
+
+    const group = screen.getByRole("group", { name: "何をしたいですか" });
+    for (const button of within(group).getAllByRole("button")) {
+      expect(button).toBeDisabled();
+    }
+    expect(screen.getByRole("radio", { name: "急ぎ" })).toBeDisabled();
+    expect(screen.getByText("少しお待ちください。")).toBeInTheDocument();
+    release();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("group", { name: "何をしたいですか" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("設定を取得できなくても壊れず、選択肢は出さずに「文章で書く」を出す", async () => {
+    installFakeFetch({
+      "GET /api/config": { status: 500, body: { code: "X", message: "x" } },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    expect(
+      await screen.findByRole("button", { name: "文章で書く" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "何をしたいですか" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("モック")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "急ぎですか" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("質問の描き方", () => {
+  it("選択肢つきの質問は、質問文とひも付いたボタンの並びで、最後に「わからない」がある。押すと optionId が送られる", async () => {
+    const user = userEvent.setup();
+    const next = intakeView(null, [makeTypeEntry()], {
+      step: "STRUCTURED",
+    });
+    const { calls } = openInquiry(intakeView(Q_SINCE), {
+      "POST /api/inquiries/inq-1/intake/answers": { body: next },
+    });
+
+    const group = await screen.findByRole("group", {
+      name: "いつから起きていますか",
+    });
+    const buttons = within(group).getAllByRole("button");
+    expect(buttons.map((b) => b.textContent)).toEqual([
+      "今日から",
+      "今週から",
+      "わからない",
+    ]);
+    // 説明の無い選択肢は、ボタンを縦に積まない
+    expect(group).not.toHaveClass("stacked");
+    expect(screen.getByRole("button", { name: "わからない" })).toHaveClass(
+      "quiet",
+    );
+
+    await user.click(within(group).getByRole("button", { name: "今週から" }));
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+    ).toEqual({ questionId: "since", optionId: "this-week" });
+  });
+
+  it("補足以外の「わからない」は unknown を送る", async () => {
+    const user = userEvent.setup();
+    const { calls } = openInquiry(intakeView(Q_SINCE), {
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: intakeView(Q_TARGET, [makeTypeEntry()]),
       },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "わからない" }));
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+    ).toEqual({ questionId: "since", unknown: true });
+    // 次の文章で答える質問にも「わからない」がある
+    expect(
+      await screen.findByRole("button", { name: "わからない" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("対象の取引先はどこですか"),
+    ).toBeInTheDocument();
+  });
+
+  it("文章で答える質問は、入力欄と「次へ」「わからない」。空では送れず、前後の空白を除いて text を送る", async () => {
+    const user = userEvent.setup();
+    const { calls } = openInquiry(intakeView(Q_TARGET), {
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: intakeView(Q_NOTE, [makeTypeEntry()]),
+      },
+    });
+
+    const box = await screen.findByLabelText("対象の取引先はどこですか");
+    expect(box.tagName).toBe("TEXTAREA");
+    expect(screen.getByRole("button", { name: "次へ" })).toBeDisabled();
+    await user.type(box, "   ");
+    expect(screen.getByRole("button", { name: "次へ" })).toBeDisabled();
+    await user.type(box, "株式会社サンプル ");
+    // 補足ではないので、「書かずに進む」は無い
+    expect(
+      screen.queryByRole("button", { name: "書かずに進む" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "次へ" }));
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+    ).toEqual({ questionId: "target", text: "株式会社サンプル" });
+  });
+
+  it("文章で答える質問の「わからない」も unknown を送る", async () => {
+    const user = userEvent.setup();
+    const { calls } = openInquiry(intakeView(Q_TARGET), {
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: intakeView(Q_NOTE, [makeTypeEntry()]),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "わからない" }));
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+    ).toEqual({ questionId: "target", unknown: true });
+  });
+
+  it("補足を書かずに進められる場合は「次へ」と「書かずに進む」があり、「わからない」と「文章で書く」は出ない", async () => {
+    const user = userEvent.setup();
+    const { calls } = openInquiry(intakeView(Q_NOTE), {
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: intakeView(null, [makeTypeEntry()], { step: "STRUCTURED" }),
+      },
+    });
+
+    expect(
+      await screen.findByLabelText("補足があれば書いてください"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "次へ" })).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "わからない" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "文章で書く" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "書かずに進む" }));
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+    ).toEqual({ questionId: "note", skipped: true });
+  });
+
+  it("補足に書いて「次へ」を押すと text が送られる", async () => {
+    const user = userEvent.setup();
+    const { calls } = openInquiry(intakeView(Q_NOTE), {
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: intakeView(null, [makeTypeEntry()], { step: "STRUCTURED" }),
+      },
+    });
+
+    await user.type(
+      await screen.findByLabelText("補足があれば書いてください"),
+      "先週から続いています",
+    );
+    await user.click(screen.getByRole("button", { name: "次へ" }));
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+    ).toEqual({ questionId: "note", text: "先週から続いています" });
+  });
+
+  it("書かずには進めない補足（canSkip が偽）は、「書かずに進む」を出さず、API が返した文言を出す", async () => {
+    openInquiry(
+      intakeView(
+        makeQuestion({
+          questionId: "note",
+          kind: "NOTE",
+          text: "状況を一言で教えてください",
+          options: [],
+          canSkip: false,
+        }),
+      ),
+    );
+
+    expect(
+      await screen.findByLabelText("状況を一言で教えてください"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "書かずに進む" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "わからない" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "次へ" })).toBeDisabled();
+    expect(
+      screen.queryByText("補足があれば書いてください"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("選択肢のほかに文章でも答えられる質問（allowsText）は、文章の欄も出して text を送る", async () => {
+    const user = userEvent.setup();
+    const { calls } = openInquiry(
+      intakeView(makeQuestion({ ...Q_SINCE, allowsText: true })),
+      {
+        "POST /api/inquiries/inq-1/intake/answers": {
+          body: intakeView(Q_NOTE, [makeTypeEntry()]),
+        },
+      },
+    );
+
+    await user.type(
+      await screen.findByLabelText("選択肢にない場合は、文章で答えられます"),
+      "昨日の夕方",
+    );
+    await user.click(screen.getByRole("button", { name: "次へ" }));
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/answers")?.body,
+    ).toEqual({ questionId: "since", text: "昨日の夕方" });
+  });
+
+  it("API の選択肢に説明が無い種類の質問でも、設定の説明を添える（戻って聞き直した1問目）", async () => {
+    openInquiry(makeView());
+
+    const group = await screen.findByRole("group", {
+      name: "何をしたいですか",
+    });
+    await waitFor(() =>
+      expect(
+        within(group).getByRole("button", { name: "使い方を知りたい" }),
+      ).toHaveAccessibleDescription("操作の手順"),
+    );
+    expect(group).toHaveClass("stacked");
+  });
+});
+
+describe("答えた質問の要約", () => {
+  const entries: IntakeEntry[] = [
+    makeTypeEntry("LOOKS_WRONG", "おかしいかもしれない"),
+    {
+      questionId: "system",
+      kind: "SYSTEM",
+      text: "どのシステムですか",
+      answer: { kind: "INFERRED", optionId: "system-a", label: "システムA" },
+    },
+    {
+      questionId: "function",
+      kind: "FUNCTION",
+      text: "どの機能ですか",
+      answer: { kind: "UNKNOWN" },
+    },
+    {
+      questionId: "target",
+      kind: "DETAIL",
+      text: "対象の取引先はどこですか",
+      answer: { kind: "TEXT", text: "株式会社サンプル" },
+    },
+  ];
+
+  it("「質問 → 答え」の1行になり、AI が文章から置いた答えにだけ注記が付く", async () => {
+    openInquiry(intakeView(Q_NOTE, entries));
+
+    await screen.findByLabelText("補足があれば書いてください");
+    expect(entryRow("何をしたいですか")).toHaveTextContent(
+      "何をしたいですか→おかしいかもしれない",
+    );
+    expect(entryRow("どのシステムですか")).toHaveTextContent(
+      "どのシステムですか→システムA（文章から読み取りました）",
+    );
+    expect(entryRow("どの機能ですか")).toHaveTextContent("わからない");
+    expect(entryRow("どの機能ですか")).not.toHaveTextContent("読み取りました");
+    expect(entryRow("対象の取引先はどこですか")).toHaveTextContent(
+      "株式会社サンプル",
+    );
+    expect(screen.getAllByText("（文章から読み取りました）")).toHaveLength(1);
+    // 入口の質問の間は、押して戻れるボタン
+    expect(entryRow("どのシステムですか").tagName).toBe("BUTTON");
+  });
+
+  it("書かずに進んだ補足は、その旨を答えとして示す", async () => {
+    openInquiry(
+      makeView({
+        intake: {
+          entries: [
+            makeTypeEntry(),
+            {
+              questionId: "note",
+              kind: "NOTE",
+              text: "補足があれば書いてください",
+              answer: { kind: "SKIPPED" },
+            },
+          ],
+          next: null,
+          complete: true,
+        },
+      }),
+    );
+
+    await screen.findByText("補足があれば書いてください");
+    expect(entryRow("補足があれば書いてください")).toHaveTextContent(
+      "書かずに進みました",
+    );
+  });
+
+  it("押すと intake/back が呼ばれ、その質問が聞き直される（それより後の答えは消える）", async () => {
+    const user = userEvent.setup();
+    const { calls } = openInquiry(intakeView(Q_NOTE, entries), {
+      "POST /api/inquiries/inq-1/intake/back": {
+        body: intakeView(
+          makeQuestion({ questionId: "system", kind: "SYSTEM" }),
+          entries.slice(0, 1),
+          { type: LOOKS_WRONG },
+        ),
+      },
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: /どのシステムですか/ }),
+    );
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/back")?.body,
+    ).toEqual({ questionId: "system" });
+    const group = await screen.findByRole("group", {
+      name: "どのシステムですか",
+    });
+    expect(
+      within(group).getByRole("button", { name: "システムA" }),
+    ).toBeEnabled();
+    expect(screen.queryByText("どの機能ですか")).not.toBeInTheDocument();
+    expect(screen.queryByText("株式会社サンプル")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("補足があれば書いてください"),
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByText("どのシステムですか", { selector: "p" }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("言い直しが出た後は、押して戻れない普通の行になる", async () => {
+    openRestatement({
+      intake: { entries, next: null, complete: true },
+    });
+
+    await screen.findByText("つまり、こういうことですね。");
+    const row = entryRow("どのシステムですか");
+    expect(row.tagName).toBe("DIV");
+    expect(
+      screen.queryByRole("button", { name: /どのシステムですか/ }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("文章で書く", () => {
+  it("作成前に書いて送ると、text つきで問い合わせを作り、書いた文章が吹き出しとして残る。読み取れなかった質問だけが続く", async () => {
+    const user = userEvent.setup();
+    const calls = installFakeFetch({
+      "POST /api/inquiries": {
+        status: 201,
+        body: intakeView(
+          makeQuestion(),
+          [
+            {
+              ...makeTypeEntry("LOOKS_WRONG", "おかしいかもしれない"),
+              answer: {
+                kind: "INFERRED",
+                optionId: "LOOKS_WRONG",
+                label: "おかしいかもしれない",
+              },
+            },
+          ],
+          { utterance: "応募者一覧の件数がおかしいです" },
+        ),
+      },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    // 入力欄は、リンクを押すまで出ない
+    expect(screen.queryByLabelText(INPUT_LABEL)).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "文章で書く" }));
+    const box = screen.getByLabelText(INPUT_LABEL);
+    expect(box).toHaveFocus();
+    expect(screen.getByRole("button", { name: "送信する" })).toBeDisabled();
+    await user.type(box, "応募者一覧の件数がおかしいです");
+    await user.click(screen.getByRole("button", { name: "送信する" }));
+
+    expect(await screen.findByText("どのシステムですか")).toBeInTheDocument();
+    expect(findCall(calls, "POST", "/api/inquiries")?.body).toEqual({
+      text: "応募者一覧の件数がおかしいです",
+    });
+    expect(document.querySelector(".utterance")?.textContent).toBe(
+      "応募者一覧の件数がおかしいです",
+    );
+    expect(entryRow("何をしたいですか")).toHaveTextContent(
+      "（文章から読み取りました）",
+    );
+    await waitFor(() =>
+      expect(window.location.pathname).toBe("/inquiries/inq-1"),
+    );
+    // 送った文章の入力欄は閉じ、リンクに戻る
+    expect(screen.queryByLabelText(INPUT_LABEL)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "文章で書く" }),
+    ).toBeInTheDocument();
+    // 作成のあとに、別の答えを送らない
+    expect(
+      countCalls(calls, "POST", "/api/inquiries/inq-1/intake/answers"),
+    ).toBe(0);
+    expectNoInternalWords();
+  });
+
+  it("作成後に書いて送ると、intake/text に text を送る", async () => {
+    const user = userEvent.setup();
+    const { calls } = openInquiry(intakeView(makeQuestion()), {
+      "POST /api/inquiries/inq-1/intake/text": {
+        body: intakeView(
+          makeQuestion({ questionId: "function", kind: "FUNCTION" }),
+          [makeTypeEntry()],
+          { utterance: "請求書の宛名のことです" },
+        ),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "文章で書く" }));
+    await user.type(
+      screen.getByLabelText(INPUT_LABEL),
+      "請求書の宛名のことです",
+    );
+    await user.click(screen.getByRole("button", { name: "送信する" }));
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/intake/text")?.body,
+    ).toEqual({ text: "請求書の宛名のことです" });
+    expect(
+      await screen.findByText("請求書の宛名のことです", {
+        selector: ".utterance p",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(INPUT_LABEL)).not.toBeInTheDocument();
+  });
+
+  it("URL の ?text= は入力欄を開いて文章を入れるだけで、自動では送信しない", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?text=%E6%8E%B2%E8%BC%89%E6%9C%9F%E9%99%90",
+    );
+    const calls = installFakeFetch({});
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    expect(await screen.findByLabelText(INPUT_LABEL)).toHaveValue("掲載期限");
+    // 1問目も並んでいて、選択肢から始めることもできる
+    expect(
+      await screen.findByRole("group", { name: "何をしたいですか" }),
+    ).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+  });
+
+  it("モックの例文は「文章で書く」の入力欄に入る（送信はしない）", async () => {
+    const user = userEvent.setup();
+    const calls = installFakeFetch({
+      "GET /api/config": { body: makeConfig({ mock: true }) },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await user.click(await screen.findByText("例文を試す"));
+    expect(screen.queryByLabelText(INPUT_LABEL)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "[根拠なし]" }));
+
+    expect(screen.getByLabelText(INPUT_LABEL)).toHaveValue(
+      "求人の掲載期限は、何日まで延長できますか？ [根拠なし]",
+    );
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+  });
+});
+
+describe("緊急度", () => {
+  it("作成前に選ぶと、作成のリクエストに urgency が付く（選択肢から始める場合）", async () => {
+    const user = userEvent.setup();
+    const calls = installFakeFetch({
+      "POST /api/inquiries": {
+        status: 201,
+        body: makeView({ urgency: "HURRY" }),
+      },
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: intakeView(makeQuestion(), [makeTypeEntry()], {
+          urgency: "HURRY",
+        }),
+      },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await user.click(await screen.findByRole("radio", { name: "急ぎ" }));
+    expect(screen.getByRole("radio", { name: "急ぎ" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "通常" })).not.toBeChecked();
+    // 作成前は API を呼ばない
+    expect(calls.filter((c) => c.method !== "GET")).toHaveLength(0);
+    await pickType(user);
+
+    await screen.findByText("どのシステムですか");
+    expect(findCall(calls, "POST", "/api/inquiries")?.body).toEqual({
+      urgency: "HURRY",
+    });
+    // 作成後も選ばれたまま
+    expect(screen.getByRole("radio", { name: "急ぎ" })).toBeChecked();
+  });
+
+  it("作成前に選ぶと、文章で始める場合も urgency が付く", async () => {
+    const user = userEvent.setup();
+    const calls = installFakeFetch({
+      "POST /api/inquiries": {
+        status: 201,
+        body: intakeView(makeQuestion(), [makeTypeEntry()], {
+          urgency: "BLOCKED",
+          utterance: "止まっています",
+        }),
+      },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    await user.click(
+      await screen.findByRole("radio", { name: "業務が止まっている" }),
+    );
+    await user.click(screen.getByRole("button", { name: "文章で書く" }));
+    await user.type(screen.getByLabelText(INPUT_LABEL), "止まっています");
+    await user.click(screen.getByRole("button", { name: "送信する" }));
+
+    await screen.findByText("どのシステムですか");
+    expect(findCall(calls, "POST", "/api/inquiries")?.body).toEqual({
+      text: "止まっています",
+      urgency: "BLOCKED",
+    });
+  });
+
+  it("作成後に選ぶと PUT …/urgency を呼び、返ってきた値が選ばれた状態になる", async () => {
+    const user = userEvent.setup();
+    const { calls } = openInquiry(intakeView(Q_SINCE), {
+      "PUT /api/inquiries/inq-1/urgency": {
+        body: intakeView(Q_SINCE, [makeTypeEntry()], { urgency: "HURRY" }),
+      },
+    });
+
+    const normal = await screen.findByRole("radio", { name: "通常" });
+    expect(normal).toBeChecked();
+    await user.click(screen.getByRole("radio", { name: "急ぎ" }));
+
+    expect(
+      findCall(calls, "PUT", "/api/inquiries/inq-1/urgency")?.body,
+    ).toEqual({
+      urgency: "HURRY",
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "急ぎ" })).toBeChecked(),
+    );
+    expect(screen.getByRole("radio", { name: "通常" })).not.toBeChecked();
+  });
+
+  it("緊急度の選択肢は、質問の下にあり、名前は API が返したものをそのまま出す", async () => {
+    installFakeFetch({
+      "GET /api/config": {
+        body: makeConfig({
+          urgencies: [
+            { id: "NORMAL", label: "ふつう" },
+            { id: "HURRY", label: "いそぎ" },
+            { id: "BLOCKED", label: "止まっている" },
+          ],
+        }),
+      },
+    });
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    const group = await screen.findByRole("group", { name: "急ぎですか" });
+    expect(
+      within(group)
+        .getAllByRole("radio")
+        .map((r) => r.closest("label")?.textContent),
+    ).toEqual(["ふつう", "いそぎ", "止まっている"]);
+    const question = screen.getByRole("group", { name: "何をしたいですか" });
+    expect(
+      question.compareDocumentPosition(group) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("「業務が止まっている」で入口を終えると、すぐ届けたと伝える（言い直しは出さない）", async () => {
+    const user = userEvent.setup();
+    openInquiry(intakeView(Q_NOTE, [makeTypeEntry()], { urgency: "BLOCKED" }), {
+      "POST /api/inquiries/inq-1/intake/answers": {
+        body: makeFiledView({
+          urgency: "BLOCKED",
+          intake: { entries: [makeTypeEntry()], next: null, complete: true },
+          structured: makeStructuredView().structured,
+        }),
+      },
+    });
+
+    await user.type(
+      await screen.findByLabelText("補足があれば書いてください"),
+      "請求画面が開きません",
+    );
+    await user.click(screen.getByRole("button", { name: "次へ" }));
+
+    expect(
+      await screen.findByText(
+        "担当者にすぐ届けました。書いていただいた内容をそのまま添えています。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "合っています" }),
+    ).not.toBeInTheDocument();
+    // 入口の質問が終わったので、緊急度の選択も出ない
+    expect(
+      screen.queryByRole("group", { name: "急ぎですか" }),
+    ).not.toBeInTheDocument();
+    expectNoInternalWords();
+  });
+});
+
+describe("入口から結果までの流れ", () => {
+  it("(a)(n) 選んで答え、言い直しに「合っています」から「解決しました」まで通せ、内部用語が出ない", async () => {
+    const user = userEvent.setup();
+    const stream = new FakeStream();
+    const typeEntry = makeTypeEntry();
+    const detailEntry: IntakeEntry = {
+      questionId: "target",
+      kind: "DETAIL",
+      text: "対象の取引先はどこですか",
+      answer: { kind: "TEXT", text: "株式会社サンプル" },
+    };
+    let answers = 0;
+    const calls = installFakeFetch({
+      "POST /api/inquiries": { status: 201, body: makeView() },
+      "POST /api/inquiries/inq-1/intake/answers": () =>
+        ++answers === 1
+          ? { body: intakeView(Q_TARGET, [typeEntry]) }
+          : {
+              body: makeStructuredView({
+                intake: {
+                  entries: [typeEntry, detailEntry],
+                  next: null,
+                  complete: true,
+                },
+              }),
+            },
       "PUT /api/inquiries/inq-1/structured": {
-        body: makeStructuredView({
-          step: "ANSWERING",
-          questions: [Q_SCREEN, Q_WHEN],
-        }),
+        body: makeStructuredView({ step: "ANSWERING", canSendNow: true }),
       },
       "POST /api/inquiries/inq-1/resolution": {
         body: makeView({
@@ -95,40 +960,34 @@ describe("会話の流れ", () => {
       },
     });
     render(<App subscribe={stream.subscribe} />);
+    await screen.findByRole("group", { name: "何をしたいですか" });
     expectNoInternalWords();
 
-    await send(user, "求人の掲載期限を知りたいです");
-    // 本人の言葉は残り、受け取りと質問の数が示される
-    expect(
-      await screen.findByText("仕様の確認・相談として受け取りました"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("求人の掲載期限を知りたいです"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("2つだけ教えてください")).toBeInTheDocument();
-    expectNoInternalWords();
-
-    // 1問ずつ出る
-    expect(screen.queryByText(Q_WHEN.text)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "詳細" }));
-    await user.type(await screen.findByLabelText(Q_WHEN.text), "先週");
+    await pickType(user);
+    await user.type(
+      await screen.findByLabelText("対象の取引先はどこですか"),
+      "株式会社サンプル",
+    );
     await user.click(screen.getByRole("button", { name: "次へ" }));
-
-    expect(
-      findCall(calls, "POST", "/api/inquiries/inq-1/answers")?.body,
-    ).toEqual({
-      answers: [
-        { questionId: "q1", answer: "詳細" },
-        { questionId: "q2", answer: "先週" },
-      ],
-    });
 
     // 言い直し。答えた質問は1行で残る
     expect(
       await screen.findByText("つまり、こういうことですね。"),
     ).toBeInTheDocument();
     expect(screen.getByText(SUMMARY)).toBeInTheDocument();
-    expect(screen.getByText("先週")).toBeInTheDocument();
+    expect(entryRow("対象の取引先はどこですか")).toHaveTextContent(
+      "株式会社サンプル",
+    );
+    // 入口の質問の間のものは、確定までに消える
+    expect(
+      screen.queryByRole("group", { name: "急ぎですか" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "文章で書く" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: SEND_NOW }),
+    ).not.toBeInTheDocument();
     expectNoInternalWords();
 
     await user.click(screen.getByRole("button", { name: "合っています" }));
@@ -151,17 +1010,16 @@ describe("会話の流れ", () => {
         .map((li) => li.textContent),
     ).toEqual(["コードを検索しています", "資料を照らし合わせています"]);
     expect(progress).toHaveAttribute("aria-live", "polite");
+    // 答えを待たずに送れる（canSendNow が真）
+    expect(
+      screen.getByText("待たずに人に見てもらいたいときはこちら。"),
+    ).toBeInTheDocument();
     expectNoInternalWords();
 
     // 調べた結果
     act(() =>
       stream.latest.handlers.onDone(
-        makeView({
-          step: "ANSWERED",
-          answer: groundedAnswer,
-          structured: makeStructuredView().structured,
-          questions: [Q_SCREEN, Q_WHEN],
-        }),
+        makeStructuredView({ step: "ANSWERED", answer: groundedAnswer }),
       ),
     );
     expect(
@@ -190,117 +1048,36 @@ describe("会話の流れ", () => {
     ).toBeInTheDocument();
     expectNoInternalWords();
     expect(
-      screen.queryByRole("button", { name: "今すぐ担当者に送る" }),
+      screen.queryByRole("button", { name: SEND_NOW }),
     ).not.toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: "新しい問い合わせを書く" }),
     );
-    expect(await screen.findByLabelText(INPUT_LABEL)).toHaveValue("");
+    expect(
+      await screen.findByRole("group", { name: "何をしたいですか" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("調べた結果")).not.toBeInTheDocument();
-  });
-
-  it("(b) 答えた質問の行を押すと答え直せて、以降の回答は消える", async () => {
-    const user = userEvent.setup();
-    const calls = installFakeFetch({
-      "POST /api/inquiries": {
-        status: 201,
-        body: makeView({ questions: [Q_SCREEN, Q_KIND, Q_WHEN] }),
-      },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
-
-    await send(user);
-    await user.click(await screen.findByRole("button", { name: "詳細" }));
-    await user.click(await screen.findByRole("button", { name: "操作" }));
-    // 3問目が出ている。1問目・2問目は要約の行
-    expect(await screen.findByLabelText(Q_WHEN.text)).toBeInTheDocument();
-
-    await user.click(
-      screen.getByRole("button", { name: new RegExp(Q_SCREEN.text) }),
-    );
-
-    // 1問目が聞き直され、2問目の回答と3問目は消える
-    expect(screen.getByRole("button", { name: "一覧" })).toBeInTheDocument();
-    expect(screen.queryByLabelText(Q_WHEN.text)).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: new RegExp(Q_KIND.text) }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("操作")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "一覧" }));
-    // 2問目から聞き直す
-    expect(
-      await screen.findByRole("button", { name: "表示" }),
-    ).toBeInTheDocument();
-    // 最後まで答えるまで送信していない
-    expect(
-      findCall(calls, "POST", "/api/inquiries/inq-1/answers"),
-    ).toBeUndefined();
-  });
-
-  it("(c) 「わからない」は answer: null で送られる", async () => {
-    const user = userEvent.setup();
-    const calls = installFakeFetch({
-      "POST /api/inquiries": {
-        status: 201,
-        body: makeView({ questions: [Q_SCREEN, Q_WHEN] }),
-      },
-      "POST /api/inquiries/inq-1/answers": { body: makeStructuredView() },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
-
-    await send(user);
-    await user.click(await screen.findByRole("button", { name: "わからない" }));
-    // 自由記述の質問にも「わからない」がある
-    await user.click(await screen.findByRole("button", { name: "わからない" }));
-
-    expect(
-      findCall(calls, "POST", "/api/inquiries/inq-1/answers")?.body,
-    ).toEqual({
-      answers: [
-        { questionId: "q1", answer: null },
-        { questionId: "q2", answer: null },
-      ],
-    });
-  });
-
-  it("(d) 質問が0個なら何も聞かずに言い直しまで進む", async () => {
-    const user = userEvent.setup();
-    const calls = installFakeFetch(restatementRoutes());
-    render(<App subscribe={new FakeStream().subscribe} />);
-
-    await send(user);
-
-    expect(
-      await screen.findByText("つまり、こういうことですね。"),
-    ).toBeInTheDocument();
-    expect(
-      findCall(calls, "POST", "/api/inquiries/inq-1/answers")?.body,
-    ).toEqual({ answers: [] });
-    expect(screen.queryByText(/つだけ教えてください/)).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "前の質問に戻る" }),
-    ).not.toBeInTheDocument();
+    expect(window.location.pathname).toBe("/");
   });
 
   it("(e) 「少し違います」の一言で作り直しを呼び、言い直しが差し替わる", async () => {
     const user = userEvent.setup();
-    const calls = installFakeFetch({
-      ...restatementRoutes(),
-      "POST /api/inquiries/inq-1/revision": {
-        body: makeStructuredView({
-          revisionsLeft: 1,
-          structured: {
-            ...makeStructuredView().structured!,
-            summary: "消えたのは一昨日からで、理由を知りたい。",
-          },
-        }),
+    const { calls } = openRestatement(
+      {},
+      {
+        "POST /api/inquiries/inq-1/revision": {
+          body: makeStructuredView({
+            revisionsLeft: 1,
+            structured: {
+              ...makeStructuredView().structured!,
+              summary: "消えたのは一昨日からで、理由を知りたい。",
+            },
+          }),
+        },
       },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
+    );
 
-    await send(user);
     await user.click(
       await screen.findByRole("button", { name: "少し違います" }),
     );
@@ -325,19 +1102,15 @@ describe("会話の流れ", () => {
 
   it("(f) 作り直しを使い切ると案内が出て、「このまま担当者に送る」が send-now を呼ぶ", async () => {
     const user = userEvent.setup();
-    const calls = installFakeFetch({
-      ...restatementRoutes(makeStructuredView({ revisionsLeft: 0 })),
-      "POST /api/inquiries/inq-1/send-now": {
-        body: makeStructuredView({
-          step: "CLOSED",
-          outcome: "FILED",
-          sentImmediately: true,
-        }),
+    const { calls } = openRestatement(
+      { revisionsLeft: 0, canSendNow: true },
+      {
+        "POST /api/inquiries/inq-1/send-now": {
+          body: makeFiledView({ structured: makeStructuredView().structured }),
+        },
       },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
+    );
 
-    await send(user);
     expect(
       await screen.findByText(
         "うまく汲み取れませんでした。書いていただいた内容のまま担当者に送ることもできます。",
@@ -368,15 +1141,15 @@ describe("会話の流れ", () => {
 
   it("(g) 「自分で書き直す」は書き直した文章を summary で確定する", async () => {
     const user = userEvent.setup();
-    const calls = installFakeFetch({
-      ...restatementRoutes(),
-      "PUT /api/inquiries/inq-1/structured": {
-        body: makeStructuredView({ step: "ANSWERING" }),
+    const { calls } = openRestatement(
+      {},
+      {
+        "PUT /api/inquiries/inq-1/structured": {
+          body: makeStructuredView({ step: "ANSWERING" }),
+        },
       },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
+    );
 
-    await send(user);
     await user.click(
       await screen.findByRole("button", { name: "少し違います" }),
     );
@@ -395,25 +1168,32 @@ describe("会話の流れ", () => {
     ).toEqual({ summary: "掲載期限を90日に延ばせるか確認したい。" });
   });
 
-  it("(h) 「前の質問に戻る」は reopen を呼び、質問を最初から聞き直す", async () => {
+  it("(h) 「前の質問に戻る」は reopen を呼び、最後の質問が聞き直される", async () => {
     const user = userEvent.setup();
-    const calls = installFakeFetch({
-      "POST /api/inquiries": {
-        status: 201,
-        body: makeView({ questions: [Q_SCREEN, Q_KIND] }),
+    const typeEntry = makeTypeEntry();
+    const { calls } = openRestatement(
+      {
+        intake: {
+          entries: [
+            typeEntry,
+            {
+              questionId: "since",
+              kind: "DETAIL",
+              text: "いつから起きていますか",
+              answer: { kind: "OPTION", optionId: "today", label: "今日から" },
+            },
+          ],
+          next: null,
+          complete: true,
+        },
       },
-      "POST /api/inquiries/inq-1/answers": {
-        body: makeStructuredView({ questions: [Q_SCREEN, Q_KIND] }),
+      {
+        "POST /api/inquiries/inq-1/reopen": {
+          body: intakeView(Q_SINCE, [typeEntry]),
+        },
       },
-      "POST /api/inquiries/inq-1/reopen": {
-        body: makeView({ questions: [Q_SCREEN, Q_KIND] }),
-      },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
+    );
 
-    await send(user);
-    await user.click(await screen.findByRole("button", { name: "詳細" }));
-    await user.click(await screen.findByRole("button", { name: "操作" }));
     await user.click(
       await screen.findByRole("button", { name: "前の質問に戻る" }),
     );
@@ -421,89 +1201,80 @@ describe("会話の流れ", () => {
     expect(
       findCall(calls, "POST", "/api/inquiries/inq-1/reopen"),
     ).toBeDefined();
-    // 1問目から聞き直し、言い直しは消える
+    const group = await screen.findByRole("group", {
+      name: "いつから起きていますか",
+    });
     expect(
-      await screen.findByRole("button", { name: "一覧" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("2つだけ教えてください")).toBeInTheDocument();
+      within(group).getByRole("button", { name: "今日から" }),
+    ).toBeEnabled();
+    // 言い直しは消え、答えた質問は押して戻れる形に戻る
     expect(
       screen.queryByText("つまり、こういうことですね。"),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "表示" }),
-    ).not.toBeInTheDocument();
+    expect(entryRow("何をしたいですか").tagName).toBe("BUTTON");
   });
 
-  it("(i) 受け取りの「変更」で内容を変えると質問が差し替わる", async () => {
-    const user = userEvent.setup();
-    const calls = installFakeFetch({
-      "POST /api/inquiries": {
-        status: 201,
-        body: makeView({ questions: [Q_SCREEN] }),
-      },
-      "PUT /api/inquiries/inq-1/category": {
-        body: makeView({
-          category: "WORK_REQUEST",
-          questions: [
-            { id: "wr-what", text: "何をしてほしいですか", options: [] },
-            { id: "wr-when", text: "いつまでに必要ですか", options: [] },
-            { id: "wr-target", text: "対象は何ですか", options: [] },
-          ],
-        }),
-      },
+  it("答えた質問が無ければ「前の質問に戻る」を出さない", async () => {
+    openRestatement({
+      intake: { entries: [], next: null, complete: true },
     });
-    render(<App subscribe={new FakeStream().subscribe} />);
 
-    await send(user);
-    expect(await screen.findByText(Q_SCREEN.text)).toBeInTheDocument();
-    // 選択肢は「変更」を押したときだけ出る
+    await screen.findByText("つまり、こういうことですね。");
     expect(
-      screen.queryByRole("button", { name: "作業の依頼" }),
-    ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "変更" }));
-    await user.click(screen.getByRole("button", { name: "作業の依頼" }));
-
-    expect(
-      findCall(calls, "PUT", "/api/inquiries/inq-1/category")?.body,
-    ).toEqual({ category: "WORK_REQUEST" });
-    expect(
-      await screen.findByText("作業の依頼として受け取りました"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("3つだけ教えてください")).toBeInTheDocument();
-    expect(screen.getByLabelText("何をしてほしいですか")).toBeInTheDocument();
-    expect(screen.queryByText(Q_SCREEN.text)).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "仕様の確認・相談" }),
+      screen.queryByRole("button", { name: "前の質問に戻る" }),
     ).not.toBeInTheDocument();
   });
+});
 
-  it("(j) 根拠なしの結果は見つからなかったと示し、担当者に送るが主のボタンになる", async () => {
-    const user = userEvent.setup();
+describe("種類ごとの結果", () => {
+  const config = {
+    "GET /api/config": {
+      body: makeConfig({ filedGuidance: "担当者が内容を確認して連絡します。" }),
+    },
+  };
+
+  /** 確定して調べている最中まで進め、届いた最後の応答で結果を出す。 */
+  async function reachResult(
+    user: User,
+    view: Partial<InquiryView>,
+    done: InquiryView,
+    routes: Record<string, RouteResult | ((body: unknown) => RouteResult)> = {},
+  ) {
     const stream = new FakeStream();
-    const calls = installFakeFetch({
-      ...restatementRoutes(),
-      "PUT /api/inquiries/inq-1/structured": {
-        body: makeStructuredView({ step: "ANSWERING" }),
+    const { calls } = openRestatement(
+      view,
+      {
+        ...config,
+        "PUT /api/inquiries/inq-1/structured": {
+          body: makeStructuredView({ ...view, step: "ANSWERING" }),
+        },
+        ...routes,
       },
-      "POST /api/inquiries/inq-1/resolution": {
-        body: makeStructuredView({
-          step: "CLOSED",
-          outcome: "FILED",
-          answer: ungroundedAnswer,
-        }),
-      },
-    });
-    render(<App subscribe={stream.subscribe} />);
-
-    await send(user);
+      stream,
+    );
     await user.click(
       await screen.findByRole("button", { name: "合っています" }),
     );
     await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
-    act(() =>
-      stream.latest.handlers.onDone(
-        makeStructuredView({ step: "ANSWERED", answer: ungroundedAnswer }),
-      ),
+    act(() => stream.latest.handlers.onDone(done));
+    return calls;
+  }
+
+  it("(j) 根拠なしの結果は見つからなかったと示し、担当者に送るが主のボタンになる", async () => {
+    const user = userEvent.setup();
+    const calls = await reachResult(
+      user,
+      {},
+      makeStructuredView({ step: "ANSWERED", answer: ungroundedAnswer }),
+      {
+        "POST /api/inquiries/inq-1/resolution": {
+          body: makeFiledView({
+            structured: makeStructuredView().structured,
+            sentImmediately: false,
+            answer: ungroundedAnswer,
+          }),
+        },
+      },
     );
 
     expect(
@@ -529,358 +1300,247 @@ describe("会話の流れ", () => {
         "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText("担当者が内容を確認して連絡します。"),
+    ).toBeInTheDocument();
   });
 
-  describe("(k) 終わりの文言", () => {
-    const config = {
-      body: {
-        mock: false,
-        filedGuidance: "担当者が内容を確認して連絡します。",
-      },
-    };
-
-    it("作業の依頼は内容を添えて送ったことと送った後の案内を示す", async () => {
-      const user = userEvent.setup();
-      installFakeFetch({
-        "GET /api/config": config,
-        ...restatementRoutes(
-          makeStructuredView({
-            category: "WORK_REQUEST",
-            categoryByAi: "WORK_REQUEST",
-          }),
-        ),
-        "PUT /api/inquiries/inq-1/structured": {
-          body: makeStructuredView({
-            category: "WORK_REQUEST",
-            step: "CLOSED",
-            outcome: "FILED",
-          }),
-        },
-      });
-      render(<App subscribe={new FakeStream().subscribe} />);
-
-      await send(user);
-      await user.click(
-        await screen.findByRole("button", { name: "合っています" }),
-      );
-
-      expect(
-        await screen.findByText(
-          "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
-        ),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText("担当者が内容を確認して連絡します。"),
-      ).toBeInTheDocument();
-      expectNoInternalWords();
-    });
-
-    it("障害は専用の窓口の案内と、目立つ形の案内文を示す", async () => {
-      const user = userEvent.setup();
-      installFakeFetch({
-        "POST /api/inquiries": {
-          status: 201,
-          body: makeView({
-            categoryByAi: "INCIDENT",
-            category: "INCIDENT",
-            questions: [
-              {
-                id: "incident-check",
-                text: "いま業務やサービスが止まっていますか",
-                options: ["はい", "いいえ"],
+  it("「やってほしい」で自分でできる手順が見つかったときは、「自分でできました」と「担当者に頼む」を出す", async () => {
+    const user = userEvent.setup();
+    const doForMe = { type: DO_FOR_ME };
+    const calls = await reachResult(
+      user,
+      doForMe,
+      makeStructuredView({
+        ...doForMe,
+        step: "ANSWERED",
+        answer: { ...groundedAnswer, answered: true },
+      }),
+      {
+        "POST /api/inquiries/inq-1/resolution": (body) =>
+          (body as { resolved: boolean }).resolved
+            ? {
+                body: makeView({
+                  step: "CLOSED",
+                  outcome: "SELF_RESOLVED",
+                  answer: groundedAnswer,
+                }),
+              }
+            : {
+                body: makeFiledView({
+                  ...doForMe,
+                  sentImmediately: false,
+                  answer: groundedAnswer,
+                }),
               },
-            ],
-          }),
-        },
-        "POST /api/inquiries/inq-1/answers": {
-          body: makeView({
-            category: "INCIDENT",
-            step: "CLOSED",
-            outcome: "INCIDENT_REDIRECTED",
-            incidentGuidance: "障害対応窓口（内線1234）へ至急ご連絡ください。",
-          }),
-        },
-      });
-      render(<App subscribe={new FakeStream().subscribe} />);
+      },
+    );
 
-      await send(user, "求人管理画面が落ちています");
-      expect(
-        await screen.findByText("障害かもしれない件として受け取りました"),
-      ).toBeInTheDocument();
-      await user.click(await screen.findByRole("button", { name: "はい" }));
-
-      expect(
-        await screen.findByText("障害の連絡は専用の窓口で受け付けています。"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("region", { name: "障害の案内" }),
-      ).toHaveTextContent("障害対応窓口（内線1234）へ至急ご連絡ください。");
+    const mine = await screen.findByRole("button", {
+      name: "自分でできました",
     });
+    const ask = screen.getByRole("button", { name: "担当者に頼む" });
+    expect(mine).toHaveClass("primary");
+    expect(ask).not.toHaveClass("primary");
+    expect(
+      screen.queryByRole("button", { name: "解決しました" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /まだ解決していません/ }),
+    ).not.toBeInTheDocument();
 
-    it("不具合かもしれない件は調べた結果を添えて送ったことを結果の上に示す", async () => {
-      const user = userEvent.setup();
-      const stream = new FakeStream();
-      const bug = {
-        category: "SUSPECTED_BUG",
-        categoryByAi: "SUSPECTED_BUG",
-      } as const;
-      installFakeFetch({
-        "GET /api/config": config,
-        "POST /api/inquiries": { status: 201, body: makeView(bug) },
-        "POST /api/inquiries/inq-1/answers": {
-          body: makeStructuredView(bug),
-        },
-        "PUT /api/inquiries/inq-1/structured": {
-          body: makeStructuredView({ ...bug, step: "ANSWERING" }),
-        },
-      });
-      render(<App subscribe={stream.subscribe} />);
+    await user.click(ask);
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/resolution")?.body,
+    ).toEqual({ resolved: false });
+    expect(
+      await screen.findByText(
+        "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
+      ),
+    ).toBeInTheDocument();
+    // 本人が頼んだ場合は、「手順が見つからなかった」旨の案内は出さない
+    expect(
+      screen.queryByText("調べた内容を添えて、担当者に送りました。"),
+    ).not.toBeInTheDocument();
+  });
 
-      await send(user, "件数がおかしい");
-      expect(
-        await screen.findByText("不具合かもしれない件として受け取りました"),
-      ).toBeInTheDocument();
-      await user.click(
-        await screen.findByRole("button", { name: "合っています" }),
-      );
-      await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
-      act(() =>
-        stream.latest.handlers.onDone(
-          makeStructuredView({
-            ...bug,
+  it("「自分でできました」は resolved: true を送り、自己解決の文言で終わる", async () => {
+    const user = userEvent.setup();
+    const doForMe = { type: DO_FOR_ME };
+    const calls = await reachResult(
+      user,
+      doForMe,
+      makeStructuredView({
+        ...doForMe,
+        step: "ANSWERED",
+        answer: { ...groundedAnswer, answered: true },
+      }),
+      {
+        "POST /api/inquiries/inq-1/resolution": {
+          body: makeView({
+            ...doForMe,
             step: "CLOSED",
-            outcome: "FILED",
+            outcome: "SELF_RESOLVED",
             answer: groundedAnswer,
           }),
-        ),
-      );
+        },
+      },
+    );
 
-      const notice = await screen.findByText(
-        "いまの動きを調べました。この内容を添えて担当者に送りました。",
-      );
-      const resultHeading = screen.getByRole("heading", {
-        name: "調べた結果",
-      });
-      // 結果の上に表示される
-      expect(
-        notice.compareDocumentPosition(resultHeading) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
-      expect(
-        screen.getByText(
-          "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
-        ),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText("担当者が内容を確認して連絡します。"),
-      ).toBeInTheDocument();
-      // 解決の判定は求めない
-      expect(
-        screen.queryByRole("button", { name: "解決しました" }),
-      ).not.toBeInTheDocument();
-    });
+    await user.click(
+      await screen.findByRole("button", { name: "自分でできました" }),
+    );
+
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/resolution")?.body,
+    ).toEqual({ resolved: true });
+    expect(
+      await screen.findByText(
+        "解決してよかったです。この内容は記録しておきます。",
+      ),
+    ).toBeInTheDocument();
   });
 
-  describe("(l) エラーの導線", () => {
-    /** 調べている最中まで進める。 */
-    async function reachResearching(user: User, stream: FakeStream) {
-      installFakeFetch({
-        ...restatementRoutes(),
+  it("「やってほしい」で手順が見つからなかったときは、結果の上に調べた内容を添えて送ったと示す", async () => {
+    const user = userEvent.setup();
+    const doForMe = { type: DO_FOR_ME };
+    await reachResult(
+      user,
+      doForMe,
+      makeStructuredView({
+        ...doForMe,
+        step: "CLOSED",
+        outcome: "FILED",
+        answer: ungroundedAnswer,
+        handlingStatus: "OPEN",
+        messages: [],
+      }),
+    );
+
+    const notice = await screen.findByText(
+      "調べた内容を添えて、担当者に送りました。",
+    );
+    const resultHeading = screen.getByRole("heading", { name: "調べた結果" });
+    expect(
+      notice.compareDocumentPosition(resultHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByText("担当者が内容を確認して連絡します。"),
+    ).toBeInTheDocument();
+    // 解決の判定は求めない
+    expect(
+      screen.queryByRole("button", { name: "自分でできました" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("「おかしいかもしれない」は、調べた結果を添えて送ったことを結果の上に示す", async () => {
+    const user = userEvent.setup();
+    const wrong = { type: LOOKS_WRONG };
+    await reachResult(
+      user,
+      wrong,
+      makeStructuredView({
+        ...wrong,
+        step: "CLOSED",
+        outcome: "FILED",
+        answer: groundedAnswer,
+        handlingStatus: "OPEN",
+        messages: [],
+      }),
+    );
+
+    const notice = await screen.findByText(
+      "いまの動きを調べました。この内容を添えて担当者に送りました。",
+    );
+    const resultHeading = screen.getByRole("heading", { name: "調べた結果" });
+    // 結果の上に表示される
+    expect(
+      notice.compareDocumentPosition(resultHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("担当者が内容を確認して連絡します。"),
+    ).toBeInTheDocument();
+    // 解決の判定は求めない
+    expect(
+      screen.queryByRole("button", { name: "解決しました" }),
+    ).not.toBeInTheDocument();
+    expectNoInternalWords();
+  });
+
+  it("「変えてほしい」は、言い直しを確かめた時点で調べずに送り、送った後の案内を示す", async () => {
+    const user = userEvent.setup();
+    openRestatement(
+      {
+        type: {
+          id: "CHANGE_REQUEST",
+          label: "変えてほしい",
+          by: "ASKER",
+        },
+      },
+      {
+        ...config,
         "PUT /api/inquiries/inq-1/structured": {
-          body: makeStructuredView({ step: "ANSWERING" }),
-        },
-      });
-      render(<App subscribe={stream.subscribe} />);
-      await send(user);
-      await user.click(
-        await screen.findByRole("button", { name: "合っています" }),
-      );
-      await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
-    }
-
-    it("進捗ストリームの failed で再試行と「今すぐ担当者に送る」が出る", async () => {
-      const user = userEvent.setup();
-      const stream = new FakeStream();
-      await reachResearching(user, stream);
-      act(() =>
-        stream.latest.handlers.onFailed({
-          code: "AI_UNAVAILABLE",
-          message: "model down",
-        }),
-      );
-
-      const alert = await screen.findByRole("alert");
-      expect(alert).toHaveTextContent(
-        "いま自動の調査を使えません。担当者に直接送れます。",
-      );
-      expect(alert).not.toHaveTextContent("model down");
-      expect(
-        screen.getByRole("button", { name: "今すぐ担当者に送る" }),
-      ).toBeEnabled();
-
-      await user.click(screen.getByRole("button", { name: "もう一度調べる" }));
-      await waitFor(() => expect(stream.subscriptions).toHaveLength(2));
-      expect(stream.subscriptions[0].closed).toBe(true);
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    });
-
-    it("拒否された場合は自動では調べられなかったと伝える", async () => {
-      const user = userEvent.setup();
-      const stream = new FakeStream();
-      await reachResearching(user, stream);
-      act(() =>
-        stream.latest.handlers.onFailed({ code: "AI_REFUSED", message: "x" }),
-      );
-
-      expect(await screen.findByRole("alert")).toHaveTextContent(
-        "この内容は自動では調べられませんでした。担当者に直接送れます。",
-      );
-    });
-
-    it("判定のAIエラー（inquiryId つき）では発話を残し、その id に今すぐ送れる", async () => {
-      const user = userEvent.setup();
-      const calls = installFakeFetch({
-        "POST /api/inquiries": {
-          status: 503,
-          body: {
-            code: "AI_UNAVAILABLE",
-            message: "down",
-            inquiryId: "saved-9",
-          },
-        },
-        "POST /api/inquiries/saved-9/send-now": {
-          body: makeView({
-            id: "saved-9",
-            categoryByAi: null,
-            category: null,
-            step: "CLOSED",
-            outcome: "FILED",
-            sentImmediately: true,
+          body: makeFiledView({
+            sentImmediately: false,
+            structured: makeStructuredView().structured,
           }),
         },
-      });
-      render(<App subscribe={new FakeStream().subscribe} />);
-
-      await send(user, "つらい");
-      expect(await screen.findByRole("alert")).toHaveTextContent(
-        "いま自動の調査を使えません。担当者に直接送れます。",
-      );
-      expect(screen.getByLabelText(INPUT_LABEL)).toHaveValue("つらい");
-
-      await user.click(
-        screen.getByRole("button", { name: "今すぐ担当者に送る" }),
-      );
-
-      expect(
-        findCall(calls, "POST", "/api/inquiries/saved-9/send-now"),
-      ).toBeDefined();
-      expect(
-        await screen.findByText(
-          "担当者に送りました。書いていただいた内容をそのまま添えています。",
-        ),
-      ).toBeInTheDocument();
-      // 受け取った内容が判定できていなくても壊れない
-      expect(screen.getByText("内容を受け取りました")).toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: "今すぐ担当者に送る" }),
-      ).not.toBeInTheDocument();
-    });
-
-    it("inquiryId のないエラーでは今すぐ担当者に送るを出さず、汎用の文言にする", async () => {
-      const user = userEvent.setup();
-      installFakeFetch({
-        "POST /api/inquiries": {
-          status: 400,
-          body: { code: "VALIDATION", message: "stacktrace here" },
-        },
-      });
-      render(<App subscribe={new FakeStream().subscribe} />);
-
-      await send(user);
-
-      const alert = await screen.findByRole("alert");
-      expect(alert).toHaveTextContent("うまく処理できませんでした");
-      expect(alert).not.toHaveTextContent("stacktrace here");
-      expect(
-        screen.queryByRole("button", { name: "今すぐ担当者に送る" }),
-      ).not.toBeInTheDocument();
-    });
-
-    it("回答の送信に失敗したら「もう一度送る」で送り直せる", async () => {
-      const user = userEvent.setup();
-      let attempts = 0;
-      const calls = installFakeFetch({
-        "POST /api/inquiries": {
-          status: 201,
-          body: makeView({ questions: [Q_SCREEN] }),
-        },
-        "POST /api/inquiries/inq-1/answers": () =>
-          ++attempts === 1
-            ? { status: 503, body: { code: "AI_UNAVAILABLE", message: "x" } }
-            : { body: makeStructuredView({ questions: [Q_SCREEN] }) },
-      });
-      render(<App subscribe={new FakeStream().subscribe} />);
-
-      await send(user);
-      await user.click(await screen.findByRole("button", { name: "詳細" }));
-      await screen.findByRole("alert");
-      await user.click(screen.getByRole("button", { name: "もう一度送る" }));
-
-      expect(
-        await screen.findByText("つまり、こういうことですね。"),
-      ).toBeInTheDocument();
-      const bodies = calls
-        .filter((c) => c.path === "/api/inquiries/inq-1/answers")
-        .map((c) => c.body);
-      expect(bodies).toEqual([
-        { answers: [{ questionId: "q1", answer: "詳細" }] },
-        { answers: [{ questionId: "q1", answer: "詳細" }] },
-      ]);
-    });
-  });
-
-  it("(m) URL の ?text= が入力欄に入り、自動では送信しない", async () => {
-    window.history.replaceState(
-      {},
-      "",
-      "/?text=%E6%8E%B2%E8%BC%89%E6%9C%9F%E9%99%90",
+      },
     );
-    const calls = installFakeFetch({});
-    render(<App subscribe={new FakeStream().subscribe} />);
 
-    expect(await screen.findByLabelText(INPUT_LABEL)).toHaveValue("掲載期限");
+    await user.click(
+      await screen.findByRole("button", { name: "合っています" }),
+    );
+
     expect(
-      calls.filter((c) => c.method === "POST" && c.path === "/api/inquiries"),
-    ).toHaveLength(0);
+      await screen.findByText(
+        "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("担当者が内容を確認して連絡します。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "調べています" }),
+    ).not.toBeInTheDocument();
+    expectNoInternalWords();
   });
 
-  it("「今すぐ担当者に送る」は作成後から終わりまで下部にあり、send-now を呼んで完了になる", async () => {
-    const user = userEvent.setup();
-    const calls = installFakeFetch({
-      "POST /api/inquiries": {
-        status: 201,
-        body: makeView({ questions: [Q_SCREEN] }),
-      },
-      "POST /api/inquiries/inq-1/send-now": {
-        body: makeView({
-          step: "CLOSED",
-          outcome: "FILED",
-          sentImmediately: true,
-        }),
-      },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
+  it("種類や対象システムを変える操作と、障害の案内は出ない", async () => {
+    openInquiry(intakeView(Q_SINCE, [makeTypeEntry()], { type: LOOKS_WRONG }));
 
+    await screen.findByText("いつから起きていますか");
     expect(
-      screen.queryByRole("button", { name: "今すぐ担当者に送る" }),
+      screen.queryByRole("button", { name: "変更" }),
     ).not.toBeInTheDocument();
-    await send(user);
+    expect(screen.queryByText(/として受け取りました/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/障害/)).not.toBeInTheDocument();
+  });
+});
+
+describe("答えを待たずに送る", () => {
+  it("canSendNow が真の調べている間だけページの下部に出て、send-now を呼んで完了になる", async () => {
+    const user = userEvent.setup();
+    const { calls } = openRestatement(
+      { step: "ANSWERING", canSendNow: true },
+      {
+        "POST /api/inquiries/inq-1/send-now": {
+          body: makeFiledView({ structured: makeStructuredView().structured }),
+        },
+      },
+    );
+
     expect(
       await screen.findByText("待たずに人に見てもらいたいときはこちら。"),
     ).toBeInTheDocument();
-    await user.click(
-      screen.getByRole("button", { name: "今すぐ担当者に送る" }),
-    );
+    await user.click(screen.getByRole("button", { name: SEND_NOW }));
 
     expect(
       findCall(calls, "POST", "/api/inquiries/inq-1/send-now"),
@@ -891,41 +1551,347 @@ describe("会話の流れ", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "今すぐ担当者に送る" }),
+      screen.queryByRole("button", { name: SEND_NOW }),
     ).not.toBeInTheDocument();
+  });
+
+  it("canSendNow が偽なら、どの段階でも出さない", async () => {
+    openRestatement({ step: "ANSWERING", canSendNow: false });
+
+    await screen.findByRole("heading", { name: "調べています" });
+    expect(
+      screen.queryByRole("button", { name: SEND_NOW }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("待たずに人に見てもらいたいときはこちら。"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("入口の質問の間は、canSendNow が真でも出さない", async () => {
+    openInquiry(intakeView(Q_SINCE, [makeTypeEntry()], { canSendNow: true }));
+
+    await screen.findByText("いつから起きていますか");
+    expect(
+      screen.queryByRole("button", { name: SEND_NOW }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("調べた結果の画面でも、canSendNow が真なら出る", async () => {
+    openRestatement({
+      step: "ANSWERED",
+      answer: groundedAnswer,
+      canSendNow: true,
+    });
+
+    expect(
+      await screen.findByRole("button", { name: SEND_NOW }),
+    ).toBeInTheDocument();
   });
 });
 
-describe("入力とモック表示", () => {
-  it("通信中は送信ボタンが無効になり二重送信できない", async () => {
+describe("エラーの導線", () => {
+  /** 調べている最中まで進める。 */
+  function reachResearching(stream: FakeStream) {
+    return openRestatement({ step: "ANSWERING", canSendNow: true }, {}, stream);
+  }
+
+  it("進捗ストリームの failed で再試行と「答えを待たずに担当者に送る」が出る", async () => {
     const user = userEvent.setup();
-    let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    installFakeFetch({});
-    const fake = vi.mocked(fetch);
-    const base = fake.getMockImplementation()!;
-    fake.mockImplementation(async (input, init) => {
-      if (String(input) === "/api/inquiries") {
-        await gate;
-        return new Response(
-          JSON.stringify(makeView({ questions: [Q_SCREEN] })),
-          { status: 201 },
-        );
-      }
-      return base(input, init);
+    const stream = new FakeStream();
+    reachResearching(stream);
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
+    act(() =>
+      stream.latest.handlers.onFailed({
+        code: "AI_UNAVAILABLE",
+        message: "model down",
+      }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "いま自動の調査を使えません。担当者に直接送れます。",
+    );
+    expect(alert).not.toHaveTextContent("model down");
+    expect(screen.getByRole("button", { name: SEND_NOW })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "もう一度調べる" }));
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(2));
+    expect(stream.subscriptions[0].closed).toBe(true);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("拒否された場合は自動では調べられなかったと伝える", async () => {
+    const stream = new FakeStream();
+    reachResearching(stream);
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
+    act(() =>
+      stream.latest.handlers.onFailed({ code: "AI_REFUSED", message: "x" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "この内容は自動では調べられませんでした。担当者に直接送れます。",
+    );
+  });
+
+  describe("入口の最後の答えのあとに問いを組み立てられなかった場合（言い直しの失敗）", () => {
+    const stalled = (overrides: Partial<InquiryView> = {}) =>
+      makeView({
+        canSendNow: true,
+        intake: {
+          entries: [
+            makeTypeEntry(),
+            {
+              questionId: "note",
+              kind: "NOTE",
+              text: "補足があれば書いてください",
+              answer: { kind: "TEXT", text: "先週から" },
+            },
+          ],
+          next: null,
+          complete: true,
+        },
+        utterance: "先週から",
+        ...overrides,
+      });
+
+    /** 補足に答えるところから始め、最後の答えの後に言い直しが失敗する状態にする。 */
+    async function failCompose(
+      user: User,
+      routes: Record<
+        string,
+        RouteResult | ((body: unknown) => RouteResult)
+      > = {},
+    ) {
+      let gets = 0;
+      const opened = openInquiry(intakeView(Q_NOTE), {
+        "GET /api/inquiries/inq-1": () => ({
+          body: ++gets === 1 ? intakeView(Q_NOTE) : stalled(),
+        }),
+        "POST /api/inquiries/inq-1/intake/answers": {
+          status: 503,
+          body: {
+            code: "AI_UNAVAILABLE",
+            message: "down",
+            inquiryId: "inq-1",
+          },
+        },
+        ...routes,
+      });
+      await user.type(
+        await screen.findByLabelText("補足があれば書いてください"),
+        "先週から",
+      );
+      await user.click(screen.getByRole("button", { name: "次へ" }));
+      return opened;
+    }
+
+    it("エラーの表示の中に「もう一度試す」と「担当者に送る」を出す。ページの下の送る操作は出さない", async () => {
+      const user = userEvent.setup();
+      await failCompose(user);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        "いま自動の調査を使えません。担当者に直接送れます。",
+      );
+      expect(alert).not.toHaveTextContent("down");
+      expect(
+        await within(alert).findByRole("button", { name: "もう一度試す" }),
+      ).toBeEnabled();
+      expect(
+        within(alert).getByRole("button", { name: "担当者に送る" }),
+      ).toBeEnabled();
+      expect(
+        screen.queryByRole("button", { name: SEND_NOW }),
+      ).not.toBeInTheDocument();
+      // 保存された答えが画面に反映され、止まった質問は残らない
+      expect(
+        screen.queryByLabelText("補足があれば書いてください"),
+      ).not.toBeInTheDocument();
+      expectNoInternalWords();
+    });
+
+    it("「もう一度試す」は intake/compose を呼び、言い直しに進む", async () => {
+      const user = userEvent.setup();
+      const { calls } = await failCompose(user, {
+        "POST /api/inquiries/inq-1/intake/compose": {
+          body: makeStructuredView({
+            intake: stalled().intake,
+            utterance: "先週から",
+          }),
+        },
+      });
+
+      const alert = await screen.findByRole("alert");
+      await user.click(
+        await within(alert).findByRole("button", { name: "もう一度試す" }),
+      );
+
+      expect(
+        findCall(calls, "POST", "/api/inquiries/inq-1/intake/compose"),
+      ).toBeDefined();
+      expect(
+        await screen.findByText("つまり、こういうことですね。"),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("「担当者に送る」は send-now を呼んで、送った旨で終わる", async () => {
+      const user = userEvent.setup();
+      const { calls } = await failCompose(user, {
+        "POST /api/inquiries/inq-1/send-now": {
+          body: makeFiledView({ utterance: "先週から" }),
+        },
+      });
+
+      const alert = await screen.findByRole("alert");
+      await user.click(
+        await within(alert).findByRole("button", { name: "担当者に送る" }),
+      );
+
+      expect(
+        findCall(calls, "POST", "/api/inquiries/inq-1/send-now"),
+      ).toBeDefined();
+      expect(
+        await screen.findByText(
+          "担当者に送りました。書いていただいた内容をそのまま添えています。",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("canSendNow が偽なら「担当者に送る」は出さず、「もう一度試す」だけを出す", async () => {
+      const user = userEvent.setup();
+      let gets = 0;
+      openInquiry(intakeView(Q_NOTE), {
+        "GET /api/inquiries/inq-1": () => ({
+          body:
+            ++gets === 1 ? intakeView(Q_NOTE) : stalled({ canSendNow: false }),
+        }),
+        "POST /api/inquiries/inq-1/intake/answers": {
+          status: 503,
+          body: { code: "AI_REFUSED", message: "x", inquiryId: "inq-1" },
+        },
+      });
+      await user.click(
+        await screen.findByRole("button", { name: "書かずに進む" }),
+      );
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        "この内容は自動では調べられませんでした。担当者に直接送れます。",
+      );
+      expect(
+        await within(alert).findByRole("button", { name: "もう一度試す" }),
+      ).toBeInTheDocument();
+      expect(
+        within(alert).queryByRole("button", { name: "担当者に送る" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("文章で始めた作成が言い直しの失敗になった場合も、保存された問い合わせを開いて同じ導線を出す", async () => {
+      const user = userEvent.setup();
+      const calls = installFakeFetch({
+        "POST /api/inquiries": {
+          status: 503,
+          body: {
+            code: "AI_UNAVAILABLE",
+            message: "down",
+            inquiryId: "saved-9",
+          },
+        },
+        "GET /api/inquiries/saved-9": {
+          body: stalled({ id: "saved-9", utterance: "つらい" }),
+        },
+        "POST /api/inquiries/saved-9/send-now": {
+          body: makeFiledView({ id: "saved-9", utterance: "つらい" }),
+        },
+      });
+      render(<App subscribe={new FakeStream().subscribe} />);
+
+      await user.click(
+        await screen.findByRole("button", { name: "文章で書く" }),
+      );
+      await user.type(screen.getByLabelText(INPUT_LABEL), "つらい");
+      await user.click(screen.getByRole("button", { name: "送信する" }));
+
+      const alert = await screen.findByRole("alert");
+      expect(
+        await within(alert).findByRole("button", { name: "担当者に送る" }),
+      ).toBeInTheDocument();
+      expect(
+        within(alert).getByRole("button", { name: "もう一度試す" }),
+      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(window.location.pathname).toBe("/inquiries/saved-9"),
+      );
+      // 送った文章は本人の言葉として残り、入力欄は閉じる
+      expect(
+        screen.getByText("つらい", { selector: ".utterance p" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByLabelText(INPUT_LABEL)).not.toBeInTheDocument();
+
+      await user.click(
+        within(alert).getByRole("button", { name: "担当者に送る" }),
+      );
+      expect(
+        findCall(calls, "POST", "/api/inquiries/saved-9/send-now"),
+      ).toBeDefined();
+      expect(
+        await screen.findByText(
+          "担当者に送りました。書いていただいた内容をそのまま添えています。",
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("答えの送信に失敗しても（組み立ての失敗ではない）、質問を残して汎用の文言にする", async () => {
+    const user = userEvent.setup();
+    openInquiry(intakeView(Q_SINCE), {
+      "POST /api/inquiries/inq-1/intake/answers": {
+        status: 400,
+        body: { code: "VALIDATION", message: "stacktrace here" },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "今日から" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("うまく処理できませんでした");
+    expect(alert).not.toHaveTextContent("stacktrace here");
+    expect(within(alert).queryByRole("button")).not.toBeInTheDocument();
+    // もう一度押せる
+    expect(screen.getByRole("button", { name: "今日から" })).toBeEnabled();
+  });
+
+  it("作成に失敗し、保存された問い合わせも無いときは、答えを待たずに送る案内を出さず汎用の文言にする", async () => {
+    const user = userEvent.setup();
+    installFakeFetch({
+      "POST /api/inquiries": {
+        status: 500,
+        body: { code: "INTERNAL", message: "boom" },
+      },
     });
     render(<App subscribe={new FakeStream().subscribe} />);
 
-    await send(user);
-    expect(screen.getByRole("button", { name: "送信する" })).toBeDisabled();
+    await pickType(user);
 
-    release();
-    expect(await screen.findByText(Q_SCREEN.text)).toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("うまく処理できませんでした");
+    expect(
+      screen.queryByRole("button", { name: SEND_NOW }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: "何をしたいですか" }),
+    ).toBeInTheDocument();
   });
+});
 
-  it("モック時はバッジと例文ボタンが出て、押すと入力欄に例文が入る", async () => {
+describe("モック表示", () => {
+  it("モック時はバッジと例文ボタンが出る。状況の例は5つの種類、動きの例は12個のタグ", async () => {
     const user = userEvent.setup();
-    installFakeFetch({ "GET /api/config": { body: { mock: true } } });
+    installFakeFetch({
+      "GET /api/config": { body: makeConfig({ mock: true }) },
+    });
     render(<App subscribe={new FakeStream().subscribe} />);
 
     const badge = await screen.findByText("モック");
@@ -934,13 +1900,50 @@ describe("入力とモック表示", () => {
     expect(details).not.toHaveAttribute("open");
     await user.click(screen.getByText("例文を試す"));
     expect(details).toHaveAttribute("open");
-    await user.click(screen.getByRole("button", { name: "[根拠なし]" }));
-    expect(screen.getByLabelText(INPUT_LABEL)).toHaveValue(
-      "求人の掲載期限は、何日まで延長できますか？ [根拠なし]",
-    );
     const bar = screen.getByRole("region", { name: "モックのシナリオ" });
-    expect(within(bar).getAllByRole("button")).toHaveLength(15);
-    expect(within(bar).queryByText("種別の例")).not.toBeInTheDocument();
+    const situations = within(bar).getByRole("group", { name: "状況の例" });
+    expect(
+      within(situations)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual([
+      "使い方を知りたい",
+      "仕組みを知りたい",
+      "おかしいかもしれない",
+      "やってほしい",
+      "変えてほしい",
+    ]);
+    const actions = within(bar).getByRole("group", { name: "動きの例" });
+    expect(within(actions).getAllByRole("button")).toHaveLength(12);
+    expect(
+      within(actions).getByRole("button", { name: "[言い直しエラー]" }),
+    ).toBeInTheDocument();
+    expect(within(bar).getAllByRole("button")).toHaveLength(17);
+    expect(
+      within(bar).getByText(/「文章で書く」の入力欄に入ります/),
+    ).toBeInTheDocument();
+
+    // 種類の例文を選ぶと、その文章が入力欄に入る
+    await user.click(
+      within(situations).getByRole("button", { name: "やってほしい" }),
+    );
+    expect(screen.getByLabelText(INPUT_LABEL)).toHaveValue(
+      "掲載期限を一括で延長してほしいです。",
+    );
+  });
+
+  it("問い合わせを作った後は例文ボタンを使えない", async () => {
+    installFakeFetch({
+      "GET /api/config": { body: makeConfig({ mock: true }) },
+      "GET /api/inquiries/inq-1": { body: intakeView(Q_SINCE) },
+    });
+    window.history.replaceState({}, "", "/inquiries/inq-1");
+    render(<App subscribe={new FakeStream().subscribe} />);
+
+    const bar = await screen.findByRole("region", { name: "モックのシナリオ" });
+    for (const button of within(bar).getAllByRole("button")) {
+      expect(button).toBeDisabled();
+    }
   });
 
   describe("スキルごとの実装の表示", () => {
@@ -958,7 +1961,7 @@ describe("入力とモック表示", () => {
         { reception: "mock", investigator: "mock" },
       ]) {
         installFakeFetch({
-          "GET /api/config": { body: { mock: true, skills } },
+          "GET /api/config": { body: makeConfig({ mock: true, skills }) },
         });
         const { unmount } = render(
           <App subscribe={new FakeStream().subscribe} />,
@@ -977,7 +1980,7 @@ describe("入力とモック表示", () => {
     it("(b) 一部が ollama なら「一部モック」と内訳、タグの注記、調査がモックの注記が出る", async () => {
       installFakeFetch({
         "GET /api/config": {
-          body: { mock: true, skills: ollamaExceptInvestigator },
+          body: makeConfig({ mock: true, skills: ollamaExceptInvestigator }),
         },
       });
       render(<App subscribe={new FakeStream().subscribe} />);
@@ -1001,14 +2004,14 @@ describe("入力とモック表示", () => {
     it("(b) 調査が実際のモデルなら、調査の注記は出さない", async () => {
       installFakeFetch({
         "GET /api/config": {
-          body: {
+          body: makeConfig({
             mock: true,
             skills: {
               ...ollamaExceptInvestigator,
               investigator: "ollama",
               reception: "mock",
             },
-          },
+          }),
         },
       });
       render(<App subscribe={new FakeStream().subscribe} />);
@@ -1025,7 +2028,7 @@ describe("入力とモック表示", () => {
     it("(c) mock が false なら案内枠を出さない", async () => {
       installFakeFetch({
         "GET /api/config": {
-          body: {
+          body: makeConfig({
             mock: false,
             skills: {
               reception: "ollama",
@@ -1034,252 +2037,36 @@ describe("入力とモック表示", () => {
               investigator: "ollama",
               explainer: "ollama",
             },
-          },
+          }),
         },
       });
       render(<App subscribe={new FakeStream().subscribe} />);
 
-      expect(await screen.findByLabelText(INPUT_LABEL)).toBeInTheDocument();
+      expect(
+        await screen.findByRole("group", { name: "何をしたいですか" }),
+      ).toBeInTheDocument();
       expect(
         screen.queryByRole("region", { name: "モックのシナリオ" }),
       ).not.toBeInTheDocument();
       expect(screen.queryByText(/モック/)).not.toBeInTheDocument();
     });
   });
-
-  it("config の取得に失敗しても非モックとして描画される", async () => {
-    installFakeFetch({
-      "GET /api/config": { status: 500, body: { code: "X", message: "x" } },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
-
-    expect(await screen.findByLabelText(INPUT_LABEL)).toBeInTheDocument();
-    expect(screen.queryByText("モック")).not.toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-});
-
-describe("対象システム", () => {
-  const systems = [
-    { id: "job-admin", label: "求人管理画面" },
-    { id: "billing", label: "請求管理" },
-  ];
-  const withSystems = { "GET /api/config": { body: { mock: false, systems } } };
-  const bug = {
-    category: "SUSPECTED_BUG",
-    categoryByAi: "SUSPECTED_BUG",
-  } as const;
-
-  /** 作成の本文を取り出す。 */
-  const createBody = (calls: RecordedCall[]) =>
-    findCall(calls, "POST", "/api/inquiries")?.body;
-
-  it("(a) 選んで送ると systemId が送られ、もう一度押すと解除される", async () => {
-    const user = userEvent.setup();
-    const calls = installFakeFetch({
-      ...withSystems,
-      "POST /api/inquiries": { status: 201, body: makeView() },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
-
-    const job = await screen.findByRole("button", { name: "求人管理画面" });
-    expect(job).toHaveAttribute("aria-pressed", "false");
-    await user.click(job);
-    expect(job).toHaveAttribute("aria-pressed", "true");
-    // もう一度押すと解除。別のものを選べば付け替わる
-    await user.click(job);
-    expect(job).toHaveAttribute("aria-pressed", "false");
-    await user.click(job);
-    await user.click(screen.getByRole("button", { name: "請求管理" }));
-    expect(job).toHaveAttribute("aria-pressed", "false");
-    await user.click(screen.getByRole("button", { name: "請求管理" }));
-    await user.click(job);
-    await user.type(screen.getByLabelText(INPUT_LABEL), "掲載期限");
-    await user.click(screen.getByRole("button", { name: "送信する" }));
-
-    expect(createBody(calls)).toEqual({
-      utterance: "掲載期限",
-      systemId: "job-admin",
-    });
-  });
-
-  it("(a) 未選択と「わからない」はどちらも systemId: null で送られる", async () => {
-    for (const choose of [false, true]) {
-      // 作成すると URL が /inquiries/{id} に変わるため、2周目は入力画面の URL に戻す
-      window.history.replaceState({}, "", "/");
-      const user = userEvent.setup();
-      const calls = installFakeFetch({
-        ...withSystems,
-        "POST /api/inquiries": { status: 201, body: makeView() },
-      });
-      const { unmount } = render(
-        <App subscribe={new FakeStream().subscribe} />,
-      );
-
-      const unknown = await screen.findByRole("button", { name: "わからない" });
-      if (choose) {
-        await user.click(unknown);
-        expect(unknown).toHaveAttribute("aria-pressed", "true");
-      }
-      await user.type(screen.getByLabelText(INPUT_LABEL), "掲載期限");
-      await user.click(screen.getByRole("button", { name: "送信する" }));
-
-      await waitFor(() =>
-        expect(createBody(calls)).toEqual({
-          utterance: "掲載期限",
-          systemId: null,
-        }),
-      );
-      unmount();
-    }
-  });
-
-  it("(b) systems が空なら選択を出さない", async () => {
-    installFakeFetch({
-      "GET /api/config": { body: { mock: false, systems: [] } },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
-
-    expect(await screen.findByLabelText(INPUT_LABEL)).toBeInTheDocument();
-    expect(
-      screen.queryByRole("group", { name: /どのシステムの話ですか/ }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "わからない" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("(c) 受け取りに対象システムが出て、推測のときは推測と分かる", async () => {
-    const user = userEvent.setup();
-    installFakeFetch({
-      ...withSystems,
-      "POST /api/inquiries": {
-        status: 201,
-        body: makeView({
-          ...bug,
-          system: systems[0],
-          systemGuessed: true,
-          questions: [Q_SCREEN],
-        }),
-      },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
-
-    await send(user);
-    expect(
-      await screen.findByText(
-        "求人管理画面の話だと推測しました。不具合かもしれない件として受け取りました",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("(d) 「変更」から対象システムを直すと PUT …/system が呼ばれ、質問が差し替わる", async () => {
-    const user = userEvent.setup();
-    const calls = installFakeFetch({
-      ...withSystems,
-      "POST /api/inquiries": {
-        status: 201,
-        body: makeView({
-          ...bug,
-          system: systems[0],
-          systemGuessed: true,
-          questions: [Q_SCREEN, Q_KIND],
-        }),
-      },
-      "PUT /api/inquiries/inq-1/system": {
-        body: makeView({
-          ...bug,
-          system: systems[1],
-          systemGuessed: false,
-          questions: [Q_KIND],
-        }),
-      },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
-
-    await send(user);
-    await screen.findByText(Q_SCREEN.text);
-    await user.click(screen.getByRole("button", { name: "変更" }));
-    const panel = screen.getByRole("group", { name: "どのシステムの話ですか" });
-    // 推測された値は「選択済み」の扱いにならない
-    expect(
-      within(panel).getByRole("button", { name: "求人管理画面" }),
-    ).toHaveAttribute("aria-pressed", "false");
-    await user.click(within(panel).getByRole("button", { name: "請求管理" }));
-
-    expect(findCall(calls, "PUT", "/api/inquiries/inq-1/system")?.body).toEqual(
-      {
-        systemId: "billing",
-      },
-    );
-    expect(
-      await screen.findByText(
-        "請求管理の、不具合かもしれない件として受け取りました",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(Q_SCREEN.text)).not.toBeInTheDocument();
-    expect(screen.getByText("1つだけ教えてください")).toBeInTheDocument();
-  });
-
-  it("(d) 「わからない」に戻すと systemId: null で直せる", async () => {
-    const user = userEvent.setup();
-    const calls = installFakeFetch({
-      ...withSystems,
-      "POST /api/inquiries": {
-        status: 201,
-        body: makeView({ ...bug, system: systems[0], questions: [Q_SCREEN] }),
-      },
-      "PUT /api/inquiries/inq-1/system": {
-        body: makeView({ ...bug, system: null, questions: [Q_SCREEN, Q_KIND] }),
-      },
-    });
-    render(<App subscribe={new FakeStream().subscribe} />);
-
-    await send(user);
-    expect(
-      await screen.findByText(
-        "求人管理画面の、不具合かもしれない件として受け取りました",
-      ),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "変更" }));
-    const panel = screen.getByRole("group", { name: "どのシステムの話ですか" });
-    await user.click(within(panel).getByRole("button", { name: "わからない" }));
-
-    expect(findCall(calls, "PUT", "/api/inquiries/inq-1/system")?.body).toEqual(
-      {
-        systemId: null,
-      },
-    );
-    expect(
-      await screen.findByText("不具合かもしれない件として受け取りました"),
-    ).toBeInTheDocument();
-  });
 });
 
 describe("調査の結果と説明の失敗", () => {
-  /** 確定して調べている最中まで進める。`researching` はそのときの PUT の応答。 */
-  async function reachResearching(
-    user: User,
+  /** 調べている最中まで進める。`researching` は取得した問い合わせ。 */
+  function reachResearching(
     stream: FakeStream,
-    researching = makeStructuredView({ step: "ANSWERING" }),
+    researching = makeStructuredView({ step: "ANSWERING", canSendNow: true }),
   ) {
-    installFakeFetch({
-      ...restatementRoutes(),
-      "PUT /api/inquiries/inq-1/structured": { body: researching },
-    });
-    render(<App subscribe={stream.subscribe} />);
-    await send(user);
-    await user.click(
-      await screen.findByRole("button", { name: "合っています" }),
-    );
-    await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
+    return openInquiry(researching, {}, stream);
   }
 
   /** 結果まで進めて詳しい内容を返す。 */
   async function showResult(answer: typeof groundedAnswer) {
-    const user = userEvent.setup();
     const stream = new FakeStream();
-    await reachResearching(user, stream);
+    reachResearching(stream);
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
     act(() =>
       stream.latest.handlers.onDone(
         makeStructuredView({ step: "ANSWERED", answer }),
@@ -1311,10 +2098,11 @@ describe("調査の結果と説明の失敗", () => {
     expectNoInternalWords();
   });
 
-  it("(d) 説明だけが失敗しても failed で再試行と今すぐ担当者に送るが出る", async () => {
+  it("(d) 説明だけが失敗しても failed で再試行と答えを待たずに送るが出る", async () => {
     const user = userEvent.setup();
     const stream = new FakeStream();
-    await reachResearching(user, stream);
+    reachResearching(stream);
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
     act(() => stream.latest.handlers.onProgress("根拠を確かめています"));
     act(() => stream.latest.handlers.onProgress("答えをまとめています"));
     act(() =>
@@ -1337,24 +2125,20 @@ describe("調査の結果と説明の失敗", () => {
     expect(
       screen.queryByRole("heading", { name: "調べた結果" }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "今すぐ担当者に送る" }),
-    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: SEND_NOW })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "もう一度調べる" }));
     await waitFor(() => expect(stream.subscriptions).toHaveLength(2));
   });
 
   it("(e) ANSWERING の間は answer が入った応答でも調べている表示を保ち、結果を描かない", async () => {
-    const user = userEvent.setup();
     const stream = new FakeStream();
-    await reachResearching(
-      user,
+    reachResearching(
       stream,
       makeStructuredView({ step: "ANSWERING", answer: groundedAnswer }),
     );
 
     expect(
-      screen.getByRole("heading", { name: "調べています" }),
+      await screen.findByRole("heading", { name: "調べています" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "調べた結果" }),
@@ -1370,33 +2154,30 @@ describe("調査の結果と説明の失敗", () => {
 
 describe("問いに答えられたか", () => {
   const OFF_TOPIC = "ご質問への答えは、手元の資料では確認できませんでした。";
-  const bug = {
-    category: "SUSPECTED_BUG",
-    categoryByAi: "SUSPECTED_BUG",
-  } as const;
 
   /** 調べている最中まで進め、届いた最後の応答で結果を出す。 */
   async function showResult(
     user: User,
     done: ReturnType<typeof makeStructuredView>,
-    extra: Parameters<typeof makeView>[0] = {},
+    extra: Partial<InquiryView> = {},
   ) {
     const stream = new FakeStream();
-    installFakeFetch({
-      ...restatementRoutes(makeStructuredView(extra)),
-      "PUT /api/inquiries/inq-1/structured": {
-        body: makeStructuredView({ ...extra, step: "ANSWERING" }),
+    openRestatement(
+      extra,
+      {
+        "PUT /api/inquiries/inq-1/structured": {
+          body: makeStructuredView({ ...extra, step: "ANSWERING" }),
+        },
+        "POST /api/inquiries/inq-1/resolution": {
+          body: makeFiledView({
+            structured: makeStructuredView().structured,
+            sentImmediately: false,
+            answer: done.answer,
+          }),
+        },
       },
-      "POST /api/inquiries/inq-1/resolution": {
-        body: makeStructuredView({
-          step: "CLOSED",
-          outcome: "FILED",
-          answer: done.answer,
-        }),
-      },
-    });
-    render(<App subscribe={stream.subscribe} />);
-    await send(user);
+      stream,
+    );
     await user.click(
       await screen.findByRole("button", { name: "合っています" }),
     );
@@ -1433,12 +2214,10 @@ describe("問いに答えられたか", () => {
 
   it("(a) 根拠はあるが答えていない場合は、答えを確認できなかったと先に示し、説明は関連として控えめに出す", async () => {
     const user = userEvent.setup();
-    const calls: RecordedCall[] = [];
     await showResult(
       user,
       makeStructuredView({ step: "ANSWERED", answer: relatedAnswer }),
     );
-    void calls;
 
     const off = screen.getByText(OFF_TOPIC);
     const related = screen.getByRole("heading", {
@@ -1462,13 +2241,13 @@ describe("問いに答えられたか", () => {
     expectNoInternalWords();
 
     // 担当者に送るが主、解決しましたが副（根拠なしの場合と同じ並び）
-    const send1 = screen.getByRole("button", { name: "担当者に送る" });
+    const sendButton = screen.getByRole("button", { name: "担当者に送る" });
     const solved = screen.getByRole("button", { name: "解決しました" });
-    expect(send1).toHaveClass("primary");
+    expect(sendButton).toHaveClass("primary");
     expect(solved).not.toHaveClass("primary");
-    expect(follows(send1, solved)).toBe(true);
+    expect(follows(sendButton, solved)).toBe(true);
 
-    await user.click(send1);
+    await user.click(sendButton);
     expect(
       await screen.findByText(/担当者に送りました。ここまでの内容と調べた結果/),
     ).toBeInTheDocument();
@@ -1491,7 +2270,7 @@ describe("問いに答えられたか", () => {
     expect(screen.queryByText("関連して分かったこと")).not.toBeInTheDocument();
   });
 
-  it("(b) answered が無い古い応答は grounded と同じ値として従来どおりに表示する", async () => {
+  it("(b) answered が無い応答は grounded と同じ値として表示する", async () => {
     const user = userEvent.setup();
     await showResult(
       user,
@@ -1506,17 +2285,17 @@ describe("問いに答えられたか", () => {
     );
   });
 
-  it("(c) 不具合かもしれない件でも、答えていないときは同じ見せ方で、担当者に送ったことも示す", async () => {
+  it("(c) おかしいかもしれない件でも、答えていないときは同じ見せ方で、担当者に送ったことも示す", async () => {
     const user = userEvent.setup();
     await showResult(
       user,
       makeStructuredView({
-        ...bug,
+        type: LOOKS_WRONG,
         step: "CLOSED",
         outcome: "FILED",
         answer: relatedAnswer,
       }),
-      bug,
+      { type: LOOKS_WRONG },
     );
 
     expect(

@@ -3,14 +3,12 @@ package dev.inquiryassist.inquiry;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.MediaType;
 
 /** スキルの実行記録（trace）と、利用者の表示を返す設定を確認する（既定の設定。trace は有効）。 */
 class TraceApiTest extends ApiSupport {
@@ -50,11 +48,8 @@ class TraceApiTest extends ApiSupport {
 
     @Test
     void 失敗した呼び出しの時間も記録される() throws Exception {
-        String body = text(mvc.perform(post("/api/inquiries")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"utterance\":\"[判定エラー] 期限の仕様\"}"))
-                .andExpect(status().isServiceUnavailable()));
-        String id = JsonPath.read(body, "$.inquiryId");
+        // 受付の失敗はエラーにならず、失敗した呼び出しとして記録に残る
+        String id = idOf(create("[判定エラー] 期限の仕様"));
 
         mvc.perform(get("/api/inquiries/" + id))
                 .andExpect(jsonPath("$.trace.length()").value(1))
@@ -77,7 +72,7 @@ class TraceApiTest extends ApiSupport {
 
     @Test
     void durationMillisのない既存の形のusagesを持つ行も読める() throws Exception {
-        String id = idOf(create("期限の仕様", null));
+        String id = idOf(create("期限の仕様"));
         // この項目を加える前に保存された形（durationMillis がない）
         jdbc.update(
                 "update inquiries set usages = ?::jsonb where id = ?::uuid",
@@ -91,17 +86,12 @@ class TraceApiTest extends ApiSupport {
                 .andExpect(jsonPath("$.trace[0].skill").value("reception"))
                 .andExpect(jsonPath("$.trace[0].durationMillis").value(nullValue()));
         // 読んだ行に新しい呼び出しが加わっても保存できる（古い形と新しい形が1つの配列に混ざる）
-        mvc.perform(put_category(id)).andExpect(status().isOk());
+        finishIntake(id, null);
         mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.trace[0].durationMillis").value(nullValue()));
         // 古い形の行を、担当者に送った後のオペレータ詳細でも読める
+        confirm(id).andExpect(status().isOk());
         sendNow(id).andExpect(status().isOk());
         mvc.perform(get("/api/operator/inquiries/" + id)).andExpect(jsonPath("$.trace[0].durationMillis").value(nullValue()));
-    }
-
-    private static org.springframework.test.web.servlet.RequestBuilder put_category(String id) {
-        return org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/inquiries/" + id + "/category")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"category\":\"SPEC_QUESTION\"}");
     }
 
     @Test

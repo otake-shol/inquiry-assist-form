@@ -30,11 +30,11 @@ class EvalRunnerTest {
 
     private static final String RECEPTION_FILE = "{\"systems\":[{\"id\":\"billing\",\"label\":\"請求管理\"}],\"cases\":["
             + "{\"id\":\"rc-1\",\"split\":\"dev\",\"utterance\":\"仕組みを知りたい\",\"selectedSystemId\":null,"
-            + "\"expect\":{\"category\":\"SPEC_QUESTION\",\"systemId\":null}},"
+            + "\"expect\":{\"type\":\"HOW_IT_WORKS\",\"systemId\":null}},"
             + "{\"id\":\"rc-2\",\"split\":\"dev\",\"utterance\":\"金額がおかしい\",\"selectedSystemId\":null,"
-            + "\"expect\":{\"category\":\"SUSPECTED_BUG\",\"systemId\":\"billing\"}},"
+            + "\"expect\":{\"type\":\"LOOKS_WRONG\",\"systemId\":\"billing\"}},"
             + "{\"id\":\"rc-3\",\"split\":\"holdout\",\"utterance\":\"作業の依頼\",\"selectedSystemId\":null,"
-            + "\"expect\":{\"category\":\"WORK_REQUEST\",\"systemId\":null}}]}";
+            + "\"expect\":{\"type\":\"DO_FOR_ME\",\"systemId\":null}}]}";
 
     private EvalRunner runner(FakeOllama ollama, String... args) {
         EvalConfig config = EvalConfig.parse(root, List.of(args));
@@ -46,7 +46,7 @@ class EvalRunnerTest {
         writeCases(RECEPTION_FILE);
         try (FakeOllama ollama = new FakeOllama()) {
             ollama.raw(TAGS)
-                    .reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 10, 2) // rc-1: 通る
+                    .reply("{\"type\":\"HOW_IT_WORKS\",\"systemId\":null,\"functionId\":null}", 10, 2) // rc-1: 通る
                     .status(500); // rc-2: 呼び出しの失敗
             ByteArrayOutputStream stdout = new ByteArrayOutputStream();
             EvalConfig config = EvalConfig.parse(
@@ -76,16 +76,16 @@ class EvalRunnerTest {
     void holdoutを測った結果に出力は出ない() throws Exception {
         writeCases(RECEPTION_FILE);
         try (FakeOllama ollama = new FakeOllama()) {
-            ollama.raw(TAGS).reply("{\"category\":\"INCIDENT\",\"systemId\":\"billing\"}", 1, 1);
+            ollama.raw(TAGS).reply("{\"type\":\"CHANGE_REQUEST\",\"systemId\":\"billing\",\"functionId\":null}", 1, 1);
 
             var outcome = runner(ollama, "--skill=reception", "--split=holdout", "--ollamaUrl=" + ollama.baseUrl()).run();
 
             String report = Files.readString(outcome.reportDir().resolve("report.md"));
             String json = Files.readString(outcome.reportDir().resolve("results.json"));
-            assertThat(report).contains("rc-3").contains("category").contains("holdout のため、出力は出しません");
-            // モデルが返した値（INCIDENT）は出さない。期待値の「WORK_REQUEST」も理由に含まれるため出さない
-            assertThat(report).doesNotContain("INCIDENT").doesNotContain("すべての例の出力");
-            assertThat(json).doesNotContain("INCIDENT").doesNotContain("\"output\"");
+            assertThat(report).contains("rc-3").contains("type").contains("holdout のため、出力は出しません");
+            // モデルが返した値（CHANGE_REQUEST）は出さない。期待値の「DO_FOR_ME」も理由に含まれるため出さない
+            assertThat(report).doesNotContain("CHANGE_REQUEST").doesNotContain("すべての例の出力");
+            assertThat(json).doesNotContain("CHANGE_REQUEST").doesNotContain("\"output\"");
         }
     }
 
@@ -119,11 +119,11 @@ class EvalRunnerTest {
 
     @Test
     void 例の誤りは通信より前に止まる() throws Exception {
-        writeCases(RECEPTION_FILE.replace("\"category\":\"SPEC_QUESTION\"", "\"categoryy\":\"SPEC_QUESTION\""));
+        writeCases(RECEPTION_FILE.replace("\"type\":\"HOW_IT_WORKS\"", "\"typee\":\"HOW_IT_WORKS\""));
         try (FakeOllama ollama = new FakeOllama()) {
             assertThatThrownBy(() -> runner(ollama, "--skill=reception", "--ollamaUrl=" + ollama.baseUrl()).run())
                     .isInstanceOf(EvalConfigException.class)
-                    .hasMessageContaining("知らない条件の名前: categoryy");
+                    .hasMessageContaining("知らない条件の名前: typee");
             assertThat(ollama.requests()).isEmpty();
         }
     }
@@ -133,8 +133,8 @@ class EvalRunnerTest {
         writeCases(RECEPTION_FILE);
         try (FakeOllama ollama = new FakeOllama()) {
             ollama.raw(TAGS)
-                    .reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 1, 1)
-                    .reply("{\"category\":\"SUSPECTED_BUG\",\"systemId\":\"billing\"}", 1, 1);
+                    .reply("{\"type\":\"HOW_IT_WORKS\",\"systemId\":null,\"functionId\":null}", 1, 1)
+                    .reply("{\"type\":\"LOOKS_WRONG\",\"systemId\":\"billing\",\"functionId\":null}", 1, 1);
 
             var outcome = runner(ollama, "--skill=reception", "--cases=all", "--ollamaUrl=" + ollama.baseUrl()).run();
 
@@ -148,7 +148,7 @@ class EvalRunnerTest {
         try (FakeOllama ollama = new FakeOllama()) {
             ollama.raw(TAGS);
             for (int i = 0; i < 6; i++) {
-                ollama.reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 1, 1);
+                ollama.reply("{\"type\":\"HOW_IT_WORKS\",\"systemId\":null,\"functionId\":null}", 1, 1);
             }
 
             var outcome = runner(ollama, "--skill=reception", "--repeat=3", "--ollamaUrl=" + ollama.baseUrl()).run();
@@ -162,8 +162,8 @@ class EvalRunnerTest {
         writeCases(RECEPTION_FILE);
         try (FakeOllama ollama = new FakeOllama()) {
             ollama.raw(TAGS)
-                    .reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 1, 1)
-                    .reply("{\"category\":\"SPEC_QUESTION\",\"systemId\":null}", 1, 1);
+                    .reply("{\"type\":\"HOW_IT_WORKS\",\"systemId\":null,\"functionId\":null}", 1, 1)
+                    .reply("{\"type\":\"HOW_IT_WORKS\",\"systemId\":null,\"functionId\":null}", 1, 1);
 
             var outcome = runner(ollama, "--skill=reception", "--seed=7", "--ollamaUrl=" + ollama.baseUrl()).run();
 
@@ -186,7 +186,7 @@ class EvalRunnerTest {
         assertThat(config.skills()).containsExactly(EvalSkill.values());
         assertThat(config.splits()).containsExactly("dev");
         assertThat(config.cases()).isEqualTo("public");
-        assertThat(config.promptVersion()).isEqualTo("v1");
+        assertThat(config.promptVersion()).isEqualTo("v2");
         assertThat(config.repeat()).isEqualTo(1);
     }
 }

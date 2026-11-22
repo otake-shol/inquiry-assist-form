@@ -2,7 +2,7 @@ package dev.inquiryassist.eval;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.InquiryType;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -133,13 +133,16 @@ class ScorerTest {
     // ---- 受付 ----
 
     @Test
-    void 受付のcategoryとcategoryAnyOf() {
-        assertThat(Scorer.scoreReception(expect("{\"category\":\"SPEC_QUESTION\"}"), InquiryCategory.SPEC_QUESTION, null)).isEmpty();
-        assertThat(names(Scorer.scoreReception(expect("{\"category\":\"SPEC_QUESTION\"}"), InquiryCategory.INCIDENT, null)))
-                .containsExactly("category");
-        var any = expect("{\"categoryAnyOf\":[\"SPEC_QUESTION\",\"SUSPECTED_BUG\"]}");
-        assertThat(Scorer.scoreReception(any, InquiryCategory.SUSPECTED_BUG, null)).isEmpty();
-        assertThat(names(Scorer.scoreReception(any, InquiryCategory.WORK_REQUEST, null))).containsExactly("categoryAnyOf");
+    void 受付のtypeとtypeAnyOf() {
+        assertThat(Scorer.scoreReception(expect("{\"type\":\"HOW_IT_WORKS\"}"), InquiryType.HOW_IT_WORKS, null)).isEmpty();
+        assertThat(names(Scorer.scoreReception(expect("{\"type\":\"HOW_IT_WORKS\"}"), InquiryType.LOOKS_WRONG, null)))
+                .containsExactly("type");
+        // 種類を読み取れなかった（null）出力は、期待と合わない
+        assertThat(names(Scorer.scoreReception(expect("{\"type\":\"HOW_IT_WORKS\"}"), null, null)))
+                .containsExactly("type");
+        var any = expect("{\"typeAnyOf\":[\"HOW_IT_WORKS\",\"LOOKS_WRONG\"]}");
+        assertThat(Scorer.scoreReception(any, InquiryType.LOOKS_WRONG, null)).isEmpty();
+        assertThat(names(Scorer.scoreReception(any, InquiryType.DO_FOR_ME, null))).containsExactly("typeAnyOf");
     }
 
     @Test
@@ -147,10 +150,10 @@ class ScorerTest {
         var none = expect("{\"systemId\":null}");
         var billing = expect("{\"systemId\":\"billing\"}");
 
-        assertThat(Scorer.scoreReception(none, InquiryCategory.SPEC_QUESTION, null)).isEmpty();
-        assertThat(names(Scorer.scoreReception(none, InquiryCategory.SPEC_QUESTION, "billing"))).containsExactly("systemId");
-        assertThat(Scorer.scoreReception(billing, InquiryCategory.SPEC_QUESTION, "billing")).isEmpty();
-        assertThat(names(Scorer.scoreReception(billing, InquiryCategory.SPEC_QUESTION, null))).containsExactly("systemId");
+        assertThat(Scorer.scoreReception(none, InquiryType.HOW_IT_WORKS, null)).isEmpty();
+        assertThat(names(Scorer.scoreReception(none, InquiryType.HOW_IT_WORKS, "billing"))).containsExactly("systemId");
+        assertThat(Scorer.scoreReception(billing, InquiryType.HOW_IT_WORKS, "billing")).isEmpty();
+        assertThat(names(Scorer.scoreReception(billing, InquiryType.HOW_IT_WORKS, null))).containsExactly("systemId");
     }
 
     @Test
@@ -158,10 +161,10 @@ class ScorerTest {
         var withNull = expect("{\"systemIdAnyOf\":[\"job-admin\",null]}");
         var withoutNull = expect("{\"systemIdAnyOf\":[\"job-admin\",\"billing\"]}");
 
-        assertThat(Scorer.scoreReception(withNull, InquiryCategory.SPEC_QUESTION, "job-admin")).isEmpty();
-        assertThat(Scorer.scoreReception(withNull, InquiryCategory.SPEC_QUESTION, null)).isEmpty();
-        assertThat(names(Scorer.scoreReception(withNull, InquiryCategory.SPEC_QUESTION, "billing"))).containsExactly("systemIdAnyOf");
-        assertThat(names(Scorer.scoreReception(withoutNull, InquiryCategory.SPEC_QUESTION, null))).containsExactly("systemIdAnyOf");
+        assertThat(Scorer.scoreReception(withNull, InquiryType.HOW_IT_WORKS, "job-admin")).isEmpty();
+        assertThat(Scorer.scoreReception(withNull, InquiryType.HOW_IT_WORKS, null)).isEmpty();
+        assertThat(names(Scorer.scoreReception(withNull, InquiryType.HOW_IT_WORKS, "billing"))).containsExactly("systemIdAnyOf");
+        assertThat(names(Scorer.scoreReception(withoutNull, InquiryType.HOW_IT_WORKS, null))).containsExactly("systemIdAnyOf");
     }
 
     // ---- 聞き手 ----

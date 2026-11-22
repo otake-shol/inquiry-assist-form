@@ -2,6 +2,7 @@ package dev.inquiryassist.inquiry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.Usage;
 import dev.inquiryassist.core.skill.Skill;
 import java.time.Instant;
@@ -15,6 +16,10 @@ class TraceViewsTest {
 
     private static InquiryProperties properties(boolean traceEnabled) {
         return new InquiryProperties(
+                List.of("ja"),
+                List.of(),
+                List.of(),
+                List.of(),
                 List.of(),
                 new InquiryProperties.Slack(null, java.time.Duration.ofSeconds(5)),
                 null,
@@ -29,7 +34,7 @@ class TraceViewsTest {
     }
 
     private static InquiryEntity entity() {
-        InquiryEntity e = new InquiryEntity("local-user", "発話", Instant.now());
+        InquiryEntity e = new InquiryEntity("local-user", Urgency.NORMAL, Instant.now());
         e.addUsage(Skill.RECEPTION, Usage.ofMock(), 3);
         e.addUsage(Skill.INVESTIGATOR, new Usage("qwen", "v1", 2663, 197, 0, false), 2921);
         return e;
@@ -46,7 +51,7 @@ class TraceViewsTest {
 
     @Test
     void 設定で呼び出しがモックでなくてもUsageがモックならmockになる() {
-        InquiryEntity e = new InquiryEntity("local-user", "発話", Instant.now());
+        InquiryEntity e = new InquiryEntity("local-user", Urgency.NORMAL, Instant.now());
         // 調査は ollama の設定だが、この呼び出しはモックだった（切り替え前の記録など）
         e.addUsage(Skill.INVESTIGATOR, Usage.ofMock(), 1);
 
@@ -55,7 +60,7 @@ class TraceViewsTest {
 
     @Test
     void 時間を持たない既存の形の利用量は_durationMillisがnullのまま読める() {
-        InquiryEntity e = new InquiryEntity("local-user", "発話", Instant.now());
+        InquiryEntity e = new InquiryEntity("local-user", Urgency.NORMAL, Instant.now());
         e.usages.add(new InquiryEntity.StoredUsage("restater", "mock", "mock", 0, 0, 0, true, false, null));
 
         assertThat(TraceViews.of(e, properties(true), implementations()).get(0).durationMillis()).isNull();

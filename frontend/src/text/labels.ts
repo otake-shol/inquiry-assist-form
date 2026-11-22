@@ -1,61 +1,10 @@
-import type {
-  InquiryCategory,
-  InquiryView,
-  SourceType,
-  SystemOption,
-} from "../api/types.ts";
+import type { InquiryView, SourceType } from "../api/types.ts";
 
 /**
  * 画面に出す文言を集約する。言葉づかいの仕様は docs/ux-principles.md。
  * 「0次回答」「種別」「判定」「整形」「起票」「出典」は画面に出さない。
+ * 後で日本語と英語に切り替えられるよう、文言はコンポーネントに直接書かずここに集める。
  */
-
-/** 受け取りの1行に使う、内容の呼び名。 */
-export const CATEGORY_LABELS: Record<InquiryCategory, string> = {
-  SPEC_QUESTION: "仕様の確認・相談",
-  SUSPECTED_BUG: "不具合かもしれない件",
-  WORK_REQUEST: "作業の依頼",
-  INCIDENT: "障害かもしれない件",
-};
-
-/** 変更の選択肢の並び順。 */
-export const CATEGORY_ORDER: InquiryCategory[] = [
-  "SPEC_QUESTION",
-  "SUSPECTED_BUG",
-  "WORK_REQUEST",
-  "INCIDENT",
-];
-
-/**
- * 受け取りの1行の文言。対象システムが決まっていれば添える。
- * AIが推測したときは「推測しました」と分かる言い方にする。
- * @param category 受け取った内容の分類（判定できなかった場合は null）
- * @param system 対象システム（決まっていなければ null）
- * @param guessed system がAIの推測か
- */
-export function receiptText(
-  category: InquiryCategory | null,
-  system: SystemOption | null = null,
-  guessed = false,
-): string {
-  const base =
-    category === null
-      ? "内容を受け取りました"
-      : `${CATEGORY_LABELS[category]}として受け取りました`;
-  if (system === null) return base;
-  if (guessed) return `${system.label}の話だと推測しました。${base}`;
-  return category === null
-    ? `${system.label}の話として内容を受け取りました`
-    : `${system.label}の、${base}`;
-}
-
-/**
- * 追加質問の最初に伝える数。
- * @param count 質問の数
- */
-export function questionsIntroText(count: number): string {
-  return `${count}つだけ教えてください`;
-}
 
 /** 根拠にした資料の種類の呼び名。 */
 export const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
@@ -68,17 +17,20 @@ export const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
 /** 画面の固定文言。 */
 export const TEXT = {
   appTitle: "問い合わせアシスト",
+  /** 問い合わせの作成前に、画面が描く1問目の質問文（作成後は API が返す） */
+  firstQuestion: "何をしたいですか",
+  writeLink: "文章で書く",
   inputLabel:
     "うまくまとまっていなくて大丈夫です。起きていること、知りたいことをそのまま書いてください。",
   send: "送信する",
-  systemLegend: "どのシステムの話ですか（選ばなくても大丈夫です）",
-  systemChangeLegend: "どのシステムの話ですか",
-  change: "変更",
-  changeLegend: "どの内容として受け取りますか",
   unknown: "わからない",
   next: "次へ",
+  skip: "書かずに進む",
+  skippedAnswer: "書かずに進みました",
+  alsoWriteLabel: "選択肢にない場合は、文章で答えられます",
+  inferredNote: "（文章から読み取りました）",
   rewindHint: "（押すと答え直せます）",
-  resendAnswers: "もう一度送る",
+  urgencyLegend: "急ぎですか",
   working: "少しお待ちください。",
   restatementLead: "つまり、こういうことですね。",
   restatementOk: "合っています",
@@ -94,6 +46,7 @@ export const TEXT = {
   sendAsIs: "このまま担当者に送る",
   backToQuestions: "前の質問に戻る",
   researching: "調べています",
+  researchingLabel: "調べている内容",
   resultTitle: "調べた結果",
   notFound: "手元の資料からは答えを見つけられませんでした。",
   notAnswered: "ご質問への答えは、手元の資料では確認できませんでした。",
@@ -105,10 +58,14 @@ export const TEXT = {
   memoNextChecks: "次に確認すること",
   resolved: "解決しました",
   notResolved: "まだ解決していません（担当者に送る）",
+  doneByMyself: "自分でできました",
+  askStaff: "担当者に頼む",
   sendToStaff: "担当者に送る",
   bugFiled: "いまの動きを調べました。この内容を添えて担当者に送りました。",
+  doForMeFiled: "調べた内容を添えて、担当者に送りました。",
   retryResearch: "もう一度調べる",
-  sendNow: "今すぐ担当者に送る",
+  retryCompose: "もう一度試す",
+  sendNow: "答えを待たずに担当者に送る",
   sendNowHint: "待たずに人に見てもらいたいときはこちら。",
   restart: "新しい問い合わせを書く",
 } as const;
@@ -123,6 +80,10 @@ export const AI_ERROR_TEXT: Record<string, string> = {
 export const GENERIC_ERROR_TEXT =
   "うまく処理できませんでした。時間をおいてもう一度お試しください。";
 
+/** AI を使えない失敗のあと、答えを待たずに送れるとき（ページの下に案内が出ている場合）の案内。 */
+export const AI_ERROR_SEND_NOW_HINT =
+  "ページの下の「答えを待たずに担当者に送る」から送れます。";
+
 /** 問い合わせがまだ保存されていないときの案内。 */
 export const AI_ERROR_BEFORE_CREATE_HINT =
   "内容を少し変えるか、時間をおいてもう一度送信してください。";
@@ -130,8 +91,6 @@ export const AI_ERROR_BEFORE_CREATE_HINT =
 /** 終わりの文言。 */
 export interface ClosingText {
   lead: string;
-  /** 障害の案内文（API の incidentGuidance）。目立たせて表示する。 */
-  incident: string | null;
   /** 送った後の案内（API の filedGuidance）。 */
   guidance: string | null;
 }
@@ -149,29 +108,23 @@ export function closingText(
     case "SELF_RESOLVED":
       return {
         lead: "解決してよかったです。この内容は記録しておきます。",
-        incident: null,
         guidance: null,
       };
     case "FILED":
       return {
-        lead: view.sentImmediately
-          ? "担当者に送りました。書いていただいた内容をそのまま添えています。"
-          : view.answer !== null
-            ? "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。"
-            : "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
-        incident: null,
+        lead:
+          view.urgency === "BLOCKED" && view.sentImmediately
+            ? "担当者にすぐ届けました。書いていただいた内容をそのまま添えています。"
+            : view.sentImmediately
+              ? "担当者に送りました。書いていただいた内容をそのまま添えています。"
+              : view.answer !== null
+                ? "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。"
+                : "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
         guidance: filedGuidance,
-      };
-    case "INCIDENT_REDIRECTED":
-      return {
-        lead: "障害の連絡は専用の窓口で受け付けています。",
-        incident: view.incidentGuidance,
-        guidance: null,
       };
     default:
       return {
         lead: "この問い合わせは終了しました。",
-        incident: null,
         guidance: null,
       };
   }

@@ -24,9 +24,7 @@ class RoundTripApiTest extends ApiSupport {
 
     /** 作って今すぐ担当者に送り、id を返す。 */
     private String filed(String utterance) throws Exception {
-        String id = idOf(create(utterance, null));
-        sendNow(id).andExpect(status().isOk());
-        return id;
+        return filedNow(utterance, null);
     }
 
     private ResultActions reply(String id, String body) throws Exception {
@@ -105,7 +103,7 @@ class RoundTripApiTest extends ApiSupport {
 
     @Test
     void 担当者に送った問い合わせはOPEN_送っていない問い合わせはnull() throws Exception {
-        String notFiled = idOf(create("期限の仕様", null));
+        String notFiled = idOf(create("期限の仕様"));
         String id = filed("期限の仕様");
 
         mvc.perform(get("/api/inquiries/" + notFiled)).andExpect(jsonPath("$.handlingStatus").value(nullValue()));
@@ -201,7 +199,7 @@ class RoundTripApiTest extends ApiSupport {
 
     @Test
     void 担当者に送られていない問い合わせへの追記はINVALID_STATE() throws Exception {
-        String inProgress = idOf(create("期限の仕様", null));
+        String inProgress = idOf(create("期限の仕様"));
         String resolved = toAnswering("期限の仕様", null);
         stream(resolved);
         resolve(resolved, true);
@@ -248,43 +246,29 @@ class RoundTripApiTest extends ApiSupport {
     // ---- 担当者向けの対応状況 ----
 
     @Test
-    void 対応状況を変えられ_一覧の絞り込みとcountsが合う() throws Exception {
-        String counts = "$.counts.";
-        String base = operatorList("");
-        int open0 = JsonPath.read(base, counts + "OPEN");
-        int progress0 = JsonPath.read(base, counts + "IN_PROGRESS");
-        int done0 = JsonPath.read(base, counts + "DONE");
+    void 対応状況を変えられ_一覧の項目に反映される() throws Exception {
         String a = filed("状況A");
         String b = filed("状況B");
-        String c = filed("状況C");
 
         setStatus(a, "IN_PROGRESS").andExpect(status().isOk()).andExpect(jsonPath("$.handlingStatus").value("IN_PROGRESS"));
         setStatus(b, "DONE").andExpect(jsonPath("$.handlingStatus").value("DONE"));
-        mvc.perform(post("/api/operator/inquiries/" + c + "/read")).andExpect(status().isOk());
 
         String all = operatorList("");
-        assertThat((Integer) JsonPath.read(all, counts + "OPEN")).isEqualTo(open0 + 1);
-        assertThat((Integer) JsonPath.read(all, counts + "IN_PROGRESS")).isEqualTo(progress0 + 1);
-        assertThat((Integer) JsonPath.read(all, counts + "DONE")).isEqualTo(done0 + 1);
-        assertThat(operatorIds("?status=OPEN")).contains(c).doesNotContain(a, b);
-        assertThat(operatorIds("?status=IN_PROGRESS")).contains(a).doesNotContain(b, c);
-        assertThat(operatorIds("?status=DONE")).contains(b).doesNotContain(a, c);
-        // 絞り込みでも件数は全体のまま。未読との併用もできる
-        assertThat((Integer) JsonPath.read(operatorList("?status=DONE"), counts + "OPEN")).isEqualTo(open0 + 1);
-        assertThat(operatorIds("?status=OPEN&unreadOnly=true")).doesNotContain(a, b, c);
-        assertThat(operatorIds("?status=IN_PROGRESS&unreadOnly=true")).contains(a);
         assertThat(JsonPath.<Object>read(all, "$.items[?(@.id=='" + a + "')].handlingStatus"))
                 .isEqualTo(List.of("IN_PROGRESS"));
+        assertThat(JsonPath.<Object>read(all, "$.items[?(@.id=='" + b + "')].handlingStatus"))
+                .isEqualTo(List.of("DONE"));
         assertThat(JsonPath.<Object>read(all, "$.items[?(@.id=='" + a + "')].messageCount")).isEqualTo(List.of(0));
+        // 対応状況の絞り込みと件数は廃止した
+        assertThat(all).doesNotContain("\"counts\"");
 
         setStatus(b, "OPEN").andExpect(jsonPath("$.handlingStatus").value("OPEN"));
-        assertThat(operatorIds("?status=OPEN")).contains(b, c);
     }
 
     @Test
     void 対応状況の値が不正なら400_送られていない問い合わせは404() throws Exception {
         String id = filed("状況の検証");
-        String notFiled = idOf(create("期限の仕様", null));
+        String notFiled = idOf(create("期限の仕様"));
 
         setStatus(id, "ARCHIVED").andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"));
         mvc.perform(put("/api/operator/inquiries/" + id + "/status")
@@ -292,7 +276,6 @@ class RoundTripApiTest extends ApiSupport {
                         .content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION"));
-        mvc.perform(get("/api/operator/inquiries?status=ARCHIVED")).andExpect(status().isBadRequest());
         setStatus(notFiled, "DONE").andExpect(status().isNotFound());
         reply(notFiled, "返信").andExpect(status().isNotFound());
         mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.handlingStatus").value("OPEN"));
@@ -302,9 +285,9 @@ class RoundTripApiTest extends ApiSupport {
 
     @Test
     void 一覧は自分の問い合わせだけを新しい順に返す() throws Exception {
-        String first = idOf(create("一覧の1件目", null));
+        String first = idOf(create("一覧の1件目"));
         String second = filed("一覧の2件目");
-        String third = idOf(create("一覧の3件目", null));
+        String third = idOf(create("一覧の3件目"));
         jdbc.update("update inquiries set asker_id = 'someone-else' where id = ?::uuid", second);
 
         String body = myList();
@@ -312,7 +295,7 @@ class RoundTripApiTest extends ApiSupport {
 
         assertThat(ids).startsWith(third, first).doesNotContain(second);
         assertThat(ids.size()).isLessThanOrEqualTo(50);
-        assertThat(listed(third, "step")).isEqualTo("TRIAGED");
+        assertThat(listed(third, "step")).isEqualTo("INTAKE");
         assertThat(listed(third, "outcome")).isEqualTo("IN_PROGRESS");
         assertThat(listed(third, "summary")).isEqualTo("一覧の3件目");
         assertThat(listed(third, "createdAt")).isNotNull();
@@ -328,11 +311,12 @@ class RoundTripApiTest extends ApiSupport {
         String json = "application/json";
 
         mvc.perform(get("/api/inquiries/" + id)).andExpect(status().isNotFound());
-        mvc.perform(put("/api/inquiries/" + id + "/category").contentType(json).content("{\"category\":\"WORK_REQUEST\"}"))
+        postJson("/api/inquiries/" + id + "/intake/answers", "{\"questionId\":\"type\",\"unknown\":true}")
                 .andExpect(status().isNotFound());
-        mvc.perform(put("/api/inquiries/" + id + "/system").contentType(json).content("{\"systemId\":null}"))
-                .andExpect(status().isNotFound());
-        answers(id, EMPTY_ANSWERS).andExpect(status().isNotFound());
+        back(id, "type").andExpect(status().isNotFound());
+        intakeText(id, "追記").andExpect(status().isNotFound());
+        compose(id).andExpect(status().isNotFound());
+        urgency(id, "BLOCKED").andExpect(status().isNotFound());
         confirm(id).andExpect(status().isNotFound());
         mvc.perform(post("/api/inquiries/" + id + "/revision").contentType(json).content("{\"note\":\"x\"}"))
                 .andExpect(status().isNotFound());
@@ -345,38 +329,5 @@ class RoundTripApiTest extends ApiSupport {
         // 取得できないので、返信の未読も消えない。担当者側の API は影響を受けない
         assertThat(row(id).get("asker_unread_reply")).isEqualTo(true);
         mvc.perform(get("/api/operator/inquiries/" + id)).andExpect(status().isOk());
-    }
-
-    // ---- 送信した回答 ----
-
-    @Test
-    void submittedAnswersは送信前null_送信後は回答_5bの後はnull() throws Exception {
-        String id = idOf(create("期限の仕様", null));
-        mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.submittedAnswers").value(nullValue()));
-
-        String sent = text(answers(
-                        id,
-                        "{\"answers\":[{\"questionId\":\"q1\",\"answer\":\"求人管理画面\"},{\"questionId\":\"q2\",\"answer\":null}]}")
-                .andExpect(status().isOk()));
-        assertThat((List<String>) JsonPath.read(sent, "$.submittedAnswers[*].questionId")).containsExactly("q1", "q2");
-        assertThat((String) JsonPath.read(sent, "$.submittedAnswers[0].answer")).isEqualTo("求人管理画面");
-        assertThat((Object) JsonPath.read(sent, "$.submittedAnswers[1].answer")).isNull();
-        mvc.perform(get("/api/inquiries/" + id))
-                .andExpect(jsonPath("$.submittedAnswers[0].answer").value("求人管理画面"))
-                .andExpect(jsonPath("$.submittedAnswers[1].answer").value(nullValue()));
-
-        mvc.perform(post("/api/inquiries/" + id + "/reopen"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("TRIAGED"))
-                .andExpect(jsonPath("$.submittedAnswers").value(nullValue()));
-    }
-
-    @Test
-    void 答えずに送った問い合わせのsubmittedAnswersはnullで_担当者向けの未回答の判定は変わらない() throws Exception {
-        String id = filed("答える前に送る");
-
-        mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.submittedAnswers").value(nullValue()));
-        mvc.perform(get("/api/operator/inquiries/" + id))
-                .andExpect(jsonPath("$.followUps[0].status").value("NOT_ANSWERED"));
     }
 }

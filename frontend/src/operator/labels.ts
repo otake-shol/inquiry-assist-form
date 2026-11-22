@@ -1,23 +1,60 @@
-import type { HandlingStatus, InquiryCategory } from "../api/types.ts";
+import type {
+  HandlingStatus,
+  IntakeAnswer,
+  SystemOption,
+  Urgency,
+} from "../api/types.ts";
 
 /**
- * オペレータ画面の文言。担当者は開発チームなので、内部の言葉（種別・出典・技術メモ）を使ってよい。
+ * オペレータ画面の文言。担当者は開発チームなので、内部の言葉（出典・技術メモ）を使ってよい。
  */
 
-/** 種別の呼び名。 */
-export const OP_CATEGORY_LABELS: Record<InquiryCategory, string> = {
-  SPEC_QUESTION: "仕様確認・相談",
-  SUSPECTED_BUG: "不具合の疑い",
-  WORK_REQUEST: "作業依頼",
-  INCIDENT: "障害",
+/**
+ * 種類の呼び名。API が返す表示名をそのまま使い、決まっていなければ「種類未定」と示す。
+ * @param type 種類（決まっていなければ null）
+ */
+export function opTypeLabel(type: { label: string } | null): string {
+  return type === null ? OP_TEXT.typeUnknown : type.label;
+}
+
+/** 緊急度の呼び名（設定から名前を取れないときの代わり）。 */
+const URGENCY_LABELS: Record<Urgency, string> = {
+  NORMAL: "通常",
+  HURRY: "急ぎ",
+  BLOCKED: "業務が止まっている",
 };
 
 /**
- * 種別の呼び名を返す。判定できなかった問い合わせは「種別未判定」。
- * @param category 種別（判定できなかった場合は null）
+ * 緊急度の呼び名。一覧と詳細には緊急度の id だけが入るので、`GET /api/config` の名前があればそれを使う。
+ * @param urgency 緊急度
+ * @param urgencies 設定の緊急度の選択肢（取得前や取得に失敗したときは省く）
  */
-export function opCategoryLabel(category: InquiryCategory | null): string {
-  return category === null ? "種別未判定" : OP_CATEGORY_LABELS[category];
+export function opUrgencyLabel(
+  urgency: Urgency,
+  urgencies: SystemOption[] = [],
+): string {
+  return (
+    urgencies.find((u) => u.id === urgency)?.label ?? URGENCY_LABELS[urgency]
+  );
+}
+
+/**
+ * 入口の答えの表示用の文字列。
+ * @param answer 入口の質問への答え
+ */
+export function opAnswerLabel(answer: IntakeAnswer): string {
+  switch (answer.kind) {
+    case "OPTION":
+      return answer.label;
+    case "INFERRED":
+      return `${answer.label}${OP_TEXT.inferredNote}`;
+    case "TEXT":
+      return answer.text;
+    case "UNKNOWN":
+      return OP_TEXT.unknownAnswer;
+    case "SKIPPED":
+      return OP_TEXT.skippedAnswer;
+  }
 }
 
 /** 担当者の画面での、対応状況の呼び名。 */
@@ -41,16 +78,18 @@ export const OP_TEXT = {
   dismiss: "通知を閉じる",
   unread: "未読",
   sentImmediately: "今すぐ送る",
+  typeUnknown: "種類未定",
   systemUnknown: "システム未定",
-  systemGuessed: "（AIの推測）",
+  placedByAi: "（AIが文章から置きました）",
   slackOk: "Slack に投稿済み",
   slackFailed: "Slack への投稿に失敗しました",
   inquiryNotFound: "この問い合わせは見つかりませんでした",
   utterance: "元の発話",
   restatement: "言い直し",
-  followUps: "追加質問と回答",
+  intake: "入口の質問と答え",
   unknownAnswer: "わからない",
-  notAnswered: "未回答（答える前に送られました）",
+  skippedAnswer: "書かずに進みました",
+  inferredNote: "（文章から読み取り）",
   unconfirmed: "根拠を確かめられなかったこと",
   unconfirmedNote: "調査で挙がりましたが、資料で裏づけを取れていません。",
   revisionNotes: "作り直しで伝えられた一言",

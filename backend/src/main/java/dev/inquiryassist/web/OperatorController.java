@@ -43,17 +43,14 @@ public class OperatorController {
     }
 
     /**
-     * 担当者に送られた問い合わせの一覧（新しい順）。
+     * 担当者に送られた問い合わせの一覧（新しい順。業務が止まっている件は先頭）。
      *
      * @param unreadOnly true なら未読だけ
-     * @param status 指定した対応状況だけ。省略すると絞らない
-     * @return 一覧と、未読数・対応状況ごとの件数
+     * @return 一覧（業務が止まっている件が先頭）と、未読数
      */
     @GetMapping("/inquiries")
-    public OperatorList list(
-            @RequestParam(defaultValue = "false") boolean unreadOnly,
-            @RequestParam(required = false) HandlingStatus status) {
-        return operators.list(unreadOnly, status);
+    public OperatorList list(@RequestParam(defaultValue = "false") boolean unreadOnly) {
+        return operators.list(unreadOnly);
     }
 
     /**

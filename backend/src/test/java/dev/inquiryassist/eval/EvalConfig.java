@@ -135,7 +135,7 @@ record EvalConfig(
                 skills,
                 splits,
                 cases,
-                values.getOrDefault("promptVersion", "v1"),
+                values.getOrDefault("promptVersion", "v2"),
                 values.getOrDefault("model", DEFAULT_MODEL),
                 think,
                 temperature,

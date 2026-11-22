@@ -2,7 +2,8 @@ package dev.inquiryassist.web;
 
 import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiUnavailableException;
-import dev.inquiryassist.core.InquiryCategory;
+import dev.inquiryassist.core.Urgency;
+import dev.inquiryassist.core.intake.IntakeReply;
 import dev.inquiryassist.inquiry.InquiryList;
 import dev.inquiryassist.inquiry.InquiryService;
 import dev.inquiryassist.inquiry.InquiryView;
@@ -12,7 +13,6 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -36,20 +36,24 @@ public class InquiryController {
     private static final Logger log = LoggerFactory.getLogger(InquiryController.class);
     private static final long STREAM_TIMEOUT_MILLIS = 5 * 60 * 1000L;
 
-    /** 新規の問い合わせ。 */
-    public record CreateRequest(@NotBlank @Size(max = 4000) String utterance, String systemId) {}
+    /** 新規の問い合わせ。どちらの項目も省ける。文章が空白のみの場合はサービスが検証する。 */
+    public record CreateRequest(@Size(max = 4000) String text, Urgency urgency) {}
 
-    /** 対象システムの変更。{@code systemId} が null なら「わからない」に戻す。 */
-    public record SystemRequest(String systemId) {}
+    /**
+     * 入口の質問への答え。答え方（{@code optionId}、{@code text}、{@code unknown}、{@code skipped}）は1つだけ指定する。
+     * 文章の長さは、質問の種類で上限が違うため、入口の処理が検証する。
+     */
+    public record IntakeAnswerRequest(
+            @NotBlank String questionId, String optionId, String text, Boolean unknown, Boolean skipped) {}
 
-    /** 種別の変更。 */
-    public record CategoryRequest(@NotNull InquiryCategory category) {}
+    /** 入口の質問へ戻る。 */
+    public record IntakeBackRequest(@NotBlank String questionId) {}
 
-    /** 追加質問への回答1件。 */
-    public record AnswerItem(@NotBlank String questionId, String answer) {}
+    /** 文章で書く道への切り替え。 */
+    public record IntakeTextRequest(@NotBlank @Size(max = 4000) String text) {}
 
-    /** 追加質問への回答。 */
-    public record AnswersRequest(@NotNull List<@NotNull @Valid AnswerItem> answers) {}
+    /** 緊急度の変更。 */
+    public record UrgencyRequest(@NotNull Urgency urgency) {}
 
     /** 言い直しの作り直し。 */
     public record RevisionRequest(@NotBlank @Size(max = 1000) String note) {}
@@ -70,55 +74,81 @@ public class InquiryController {
     }
 
     /**
-     * 種別を判定し追加質問を作る。
+     * 問い合わせを作り、入口の最初の質問を出す。文章があれば、受付が置き場所を置く。
      *
-     * @param request 発話
-     * @return {@code TRIAGED} の問い合わせ
+     * @param request 文章と緊急度。本文なしでもよい
+     * @return {@code INTAKE} の問い合わせ
      */
     @PostMapping("/api/inquiries")
     @ResponseStatus(HttpStatus.CREATED)
-    public InquiryView create(@Valid @RequestBody CreateRequest request) {
-        return service.create(request.utterance(), request.systemId());
+    public InquiryView create(@Valid @RequestBody(required = false) CreateRequest request) {
+        return request == null ? service.create(null, null) : service.create(request.text(), request.urgency());
     }
 
     /**
-     * 対象システムを直す。
+     * 入口の質問に答える。
      *
      * @param id 問い合わせの識別子
-     * @param request 対象システムの識別子（null で「わからない」）
+     * @param request 答え
      * @return 更新後の問い合わせ
      */
-    @PutMapping("/api/inquiries/{id}/system")
-    public InquiryView changeSystem(@PathVariable UUID id, @RequestBody SystemRequest request) {
-        return service.changeSystem(id, request.systemId());
-    }
-
-    /**
-     * 種別を変更する。
-     *
-     * @param id 問い合わせの識別子
-     * @param request 変更後の種別
-     * @return 更新後の問い合わせ
-     */
-    @PutMapping("/api/inquiries/{id}/category")
-    public InquiryView changeCategory(@PathVariable UUID id, @Valid @RequestBody CategoryRequest request) {
-        return service.changeCategory(id, request.category());
-    }
-
-    /**
-     * 追加質問に回答する。
-     *
-     * @param id 問い合わせの識別子
-     * @param request 回答
-     * @return 更新後の問い合わせ
-     */
-    @PostMapping("/api/inquiries/{id}/answers")
-    public InquiryView answers(@PathVariable UUID id, @Valid @RequestBody AnswersRequest request) {
-        return service.answerQuestions(
+    @PostMapping("/api/inquiries/{id}/intake/answers")
+    public InquiryView answerIntake(@PathVariable UUID id, @Valid @RequestBody IntakeAnswerRequest request) {
+        return service.answerIntake(
                 id,
-                request.answers().stream()
-                        .map(a -> new InquiryService.AnswerInput(a.questionId(), a.answer()))
-                        .toList());
+                new IntakeReply(
+                        request.questionId(),
+                        request.optionId(),
+                        request.text(),
+                        Boolean.TRUE.equals(request.unknown()),
+                        Boolean.TRUE.equals(request.skipped())));
+    }
+
+    /**
+     * 答え終えた質問に戻る。
+     *
+     * @param id 問い合わせの識別子
+     * @param request 戻る質問
+     * @return 更新後の問い合わせ
+     */
+    @PostMapping("/api/inquiries/{id}/intake/back")
+    public InquiryView back(@PathVariable UUID id, @Valid @RequestBody IntakeBackRequest request) {
+        return service.back(id, request.questionId());
+    }
+
+    /**
+     * 文章で書く道に切り替える。
+     *
+     * @param id 問い合わせの識別子
+     * @param request 文章
+     * @return 更新後の問い合わせ
+     */
+    @PostMapping("/api/inquiries/{id}/intake/text")
+    public InquiryView writeText(@PathVariable UUID id, @Valid @RequestBody IntakeTextRequest request) {
+        return service.writeText(id, request.text());
+    }
+
+    /**
+     * 入口を終えたのに組み立てに失敗した問い合わせで、問いの組み立てだけをやり直す。
+     *
+     * @param id 問い合わせの識別子
+     * @return 更新後の問い合わせ
+     */
+    @PostMapping("/api/inquiries/{id}/intake/compose")
+    public InquiryView compose(@PathVariable UUID id) {
+        return service.compose(id);
+    }
+
+    /**
+     * 緊急度を変える。
+     *
+     * @param id 問い合わせの識別子
+     * @param request 変更後の緊急度
+     * @return 更新後の問い合わせ
+     */
+    @PutMapping("/api/inquiries/{id}/urgency")
+    public InquiryView changeUrgency(@PathVariable UUID id, @Valid @RequestBody UrgencyRequest request) {
+        return service.changeUrgency(id, request.urgency());
     }
 
     /**
@@ -157,7 +187,7 @@ public class InquiryController {
     }
 
     /**
-     * 追加質問へ戻る。
+     * 入口の質問へ戻る。最後に答えた質問に戻り、その答えを捨てる。
      *
      * @param id 問い合わせの識別子
      * @return 更新後の問い合わせ
