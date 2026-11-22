@@ -12,6 +12,7 @@ import dev.inquiryassist.core.intake.IntakeEntry;
 import dev.inquiryassist.core.intake.IntakeNext;
 import dev.inquiryassist.core.intake.IntakeQuestion;
 import dev.inquiryassist.core.intake.IntakeSnapshot;
+import dev.inquiryassist.core.lifecycle.Actor;
 import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.Ending;
@@ -118,6 +119,11 @@ class InquiryEntity {
     /** 終わり方。終わっていない件は null。 */
     @Enumerated(EnumType.STRING)
     Ending ending;
+
+    /** 終わらせた人（本人、担当者、時間）。終わっていない件は null。開き直すと null に戻る。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "closed_by")
+    Actor closedBy;
 
     /**
      * 待っていることが、いまのものになった時刻（返事がないときの決まりの起点）。待っていることが変わる遷移のたびに更新する。
@@ -403,7 +409,8 @@ class InquiryEntity {
                 handedOverAt != null,
                 phaseBeforeClosed,
                 next instanceof IntakeNext.Complete,
-                revisionsLeft);
+                revisionsLeft,
+                closedBy);
     }
 
     /**
@@ -441,6 +448,8 @@ class InquiryEntity {
         turn = to.turn();
         awaiting = to.awaiting();
         ending = to.ending();
+        // 終わらせた遷移の actor を持つ。開き直す（終わっていない状態になる）と消える
+        closedBy = to.closed() ? transition.actor() : null;
         if (transition.event() == dev.inquiryassist.core.lifecycle.HistoryEvent.REMINDED) {
             remindedAt = now;
         }

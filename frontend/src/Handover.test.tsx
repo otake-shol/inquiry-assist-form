@@ -1,4 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Root from "./Root.tsx";
@@ -560,7 +566,12 @@ describe("本人のページ: 返事がないときの知らせ", () => {
 
   it("知らせる前は、何も出さない（急かさない）", async () => {
     openInquiry(
-      aiResult({ remindAt: REMIND_AT, remindedAt: null, closesAt: null }),
+      aiResult({
+        endsAs: "ANSWERED",
+        remindAt: REMIND_AT,
+        remindedAt: null,
+        closesAt: null,
+      }),
     );
 
     await screen.findByRole("button", { name: "解決しました" });
@@ -578,6 +589,7 @@ describe("本人のページ: 返事がないときの知らせ", () => {
   it("知らせた後は、結果を確かめる選択肢のすぐ上に、終わる予定の日（月と日）を入れて出す", async () => {
     openInquiry(
       aiResult({
+        endsAs: "ANSWERED",
         remindAt: REMIND_AT,
         remindedAt: REMINDED_AT,
         closesAt: CLOSES_AT,
@@ -606,6 +618,7 @@ describe("本人のページ: 返事がないときの知らせ", () => {
     openInquiry(
       resultDelivered({
         noReply: {
+          endsAs: "ANSWERED",
           remindAt: REMIND_AT,
           remindedAt: REMINDED_AT,
           closesAt: CLOSES_AT,
@@ -625,7 +638,12 @@ describe("本人のページ: 返事がないときの知らせ", () => {
   it("担当者の結果を確かめている件でも、知らせる前は出さない", async () => {
     openInquiry(
       resultDelivered({
-        noReply: { remindAt: REMIND_AT, remindedAt: null, closesAt: null },
+        noReply: {
+          endsAs: "ANSWERED",
+          remindAt: REMIND_AT,
+          remindedAt: null,
+          closesAt: null,
+        },
       }),
     );
 
@@ -704,5 +722,132 @@ describe("本人のページ: 返事がないまま「回答済み」で終わ�
         "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe("本人のページ: 聞き返しに返事がないときの知らせ", () => {
+  const NOTICE_ASK_JA =
+    "お返事がないため、12月1日に「取り下げ」として終了します。続ける場合は、下から担当者の質問に答えてください。終了した後も、このページから続きを送れます。";
+
+  const asked = (noReply: InquiryView["noReply"]) =>
+    makeFiledView({
+      ...ASKER_REPLY_STATE,
+      messages: [
+        makeMessage({ id: "m1", kind: "ASK", body: "いつからですか。" }),
+      ],
+      noReply,
+    });
+
+  it("知らせた後だけ、「担当者の質問に答える」の入力欄のすぐ上に、「取り下げ」の知らせを出す", async () => {
+    openInquiry(
+      asked({
+        endsAs: "WITHDRAWN",
+        remindAt: REMIND_AT,
+        remindedAt: REMINDED_AT,
+        closesAt: CLOSES_AT,
+      }),
+    );
+
+    const notice = await screen.findByText(NOTICE_ASK_JA);
+    const box = screen.getByLabelText("担当者の質問に答える");
+    expect(
+      notice.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // 結果の確かめの知らせ（回答済み）は出ない
+    expect(screen.queryByText(/「回答済み」として終了します/)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/endsAs|ASKER_REPLY/);
+  });
+
+  it("知らせる前と、noReply が null のときは出さない", async () => {
+    openInquiry(
+      asked({
+        endsAs: "WITHDRAWN",
+        remindAt: REMIND_AT,
+        remindedAt: null,
+        closesAt: null,
+      }),
+    );
+    await screen.findByLabelText("担当者の質問に答える");
+    expect(screen.queryByText(/お返事がないため/)).not.toBeInTheDocument();
+    cleanup();
+
+    openInquiry(asked(null));
+    await screen.findByLabelText("担当者の質問に答える");
+    expect(screen.queryByText(/お返事がないため/)).not.toBeInTheDocument();
+  });
+
+  it("結果の確かめの知らせは、endsAs が ANSWERED のときの文言として残る", async () => {
+    openInquiry(
+      resultDelivered({
+        noReply: {
+          endsAs: "ANSWERED",
+          remindAt: REMIND_AT,
+          remindedAt: REMINDED_AT,
+          closesAt: CLOSES_AT,
+        },
+      }),
+    );
+
+    expect(await screen.findByText(NOTICE_JA)).toBeInTheDocument();
+    expect(screen.queryByText(/「取り下げ」として終了します/)).toBeNull();
+  });
+});
+
+describe("本人のページ: 時間で「取り下げ」になった件", () => {
+  it("専用の終わりの文言を出し、続きを送る欄を出す。送ると POST …/messages を呼ぶ", async () => {
+    const user = userEvent.setup();
+    const calls = openInquiry(
+      makeFiledView({
+        ...closedState("WITHDRAWN"),
+        closedBy: "TIME",
+        messages: [
+          makeMessage({ id: "m1", kind: "ASK", body: "いつからですか。" }),
+        ],
+      }),
+      {
+        "POST /api/inquiries/inq-1/messages": {
+          body: makeFiledView({ messages: [] }),
+        },
+      },
+    );
+
+    expect(
+      await screen.findByText(
+        "お返事がなかったため、取り下げとして終了しました。続ける場合は、このページから送れます。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("この問い合わせは取り下げました。"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("取り下げ", { selector: ".handling-status" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("送ると、担当者の番で開き直します。"),
+    ).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("追加で伝える"), "昨日からです。");
+    await user.click(screen.getByRole("button", { name: "送る" }));
+    expect(
+      callsTo(calls, "POST", "/api/inquiries/inq-1/messages")[0].body,
+    ).toEqual({ body: "昨日からです。" });
+    expect(
+      await screen.findByText("担当者が確認しています"),
+    ).toBeInTheDocument();
+  });
+
+  it("本人が自分で取り下げた件（closedBy が ASKER）には、続きを送る欄を出さず、従来の文言", async () => {
+    openInquiry(
+      makeFiledView({
+        ...closedState("WITHDRAWN"),
+        closedBy: "ASKER",
+        messages: [],
+      }),
+    );
+
+    expect(
+      await screen.findByText("この問い合わせは取り下げました。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("追加で伝える")).not.toBeInTheDocument();
   });
 });

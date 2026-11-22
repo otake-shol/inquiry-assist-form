@@ -76,6 +76,16 @@ describe("endingText", () => {
       lead: "担当者から、今回は対応を見送るとの連絡がありました。",
       reason: "対象外です",
     });
+    // 時間で「取り下げ」になった件だけ、専用の文言
+    expect(endingText("WITHDRAWN", null, ja.asker, "TIME").lead).toBe(
+      "お返事がなかったため、取り下げとして終了しました。続ける場合は、このページから送れます。",
+    );
+    expect(endingText("WITHDRAWN", null, ja.asker, "ASKER").lead).toBe(
+      "この問い合わせは取り下げました。",
+    );
+    expect(endingText("ANSWERED", null, ja.asker, "TIME").lead).toBe(
+      ja.asker.endingText.ANSWERED,
+    );
     expect(endingText("WITHDRAWN", null, ja.asker).lead).toBe(
       "この問い合わせは取り下げました。",
     );

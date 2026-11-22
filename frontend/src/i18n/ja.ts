@@ -117,6 +117,9 @@ export const ja = {
     /** 返事がないことの知らせ。`date` は終わる予定の日（月と日） */
     noReplyNotice: (date: string) =>
       `お返事がないため、${date}に「回答済み」として終了します。解決したかどうかを、下から選んでください。終了した後も、このページから続きを送れます。`,
+    /** 聞き返しに答えていない件の知らせ（終わり方は「取り下げ」） */
+    noReplyNoticeWithdrawn: (date: string) =>
+      `お返事がないため、${date}に「取り下げ」として終了します。続ける場合は、下から担当者の質問に答えてください。終了した後も、このページから続きを送れます。`,
     withdrawLink: "この問い合わせを取り下げる",
     withdrawConfirm: "取り下げますか。取り下げた後は、続きを送れません。",
     withdrawDo: "取り下げる",
@@ -191,6 +194,9 @@ export const ja = {
       DECLINE: "見送りの連絡",
       NOTE: null,
     } as Record<MessageKind, string | null>,
+    /** 返事がないまま期間が過ぎて、時間で「取り下げ」になった件の終わりの文言 */
+    endingTextTimeWithdrawn:
+      "お返事がなかったため、取り下げとして終了しました。続ける場合は、このページから送れます。",
     /** 担当者に渡した直後の案内（渡し方で言い方が変わる） */
     handover: {
       blocked:
@@ -367,6 +373,8 @@ export const ja = {
       `返事がなければ、${remindDate}に本人へ知らせます`,
     noReplyReminded: (remindedDate: string, closeDate: string) =>
       `${remindedDate}に本人へ知らせました。返事がなければ、${closeDate}に「回答済み」で終わります`,
+    noReplyRemindedWithdrawn: (remindedDate: string, closeDate: string) =>
+      `${remindedDate}に本人へ知らせました。返事がなければ、${closeDate}に「取り下げ」で終わります`,
     waitingAskerReply: "本人の返事を待っています。",
     waitingResult: "本人が結果を確かめるのを待っています。",
     waitingAi: "AI の処理を待っています。",

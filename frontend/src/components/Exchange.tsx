@@ -124,7 +124,8 @@ export function MessageForm({
 }
 
 /**
- * 返事がないことの知らせ。知らせた後（`remindedAt` がある間）だけ、結果を確かめる選択肢のすぐ上に出す。
+ * 返事がないことの知らせ。知らせた後（`remindedAt` がある間）だけ、結果を確かめる選択肢、または
+ * 聞き返しへの返事の入力欄のすぐ上に出す。終わり方（回答済み、取り下げ）で文言が変わる。
  * 知らせる前は何も出さない（急かさない）。日付は終わる予定の日を、見る人の言語の書式で（月と日）。
  * @param props 返事がないときの予定
  */
@@ -132,9 +133,12 @@ export function NoReplyNotice({ noReply }: { noReply: NoReply | null }) {
   const { user: USER_TEXT, meta } = useMessages();
   if (noReply === null || noReply.remindedAt === null) return null;
   if (noReply.closesAt === null) return null;
+  const date = formatMonthDay(noReply.closesAt, meta.locale);
   return (
     <p className="notice-inline no-reply-notice">
-      {USER_TEXT.noReplyNotice(formatMonthDay(noReply.closesAt, meta.locale))}
+      {noReply.endsAs === "WITHDRAWN"
+        ? USER_TEXT.noReplyNoticeWithdrawn(date)
+        : USER_TEXT.noReplyNotice(date)}
     </p>
   );
 }
@@ -289,6 +293,7 @@ export function FollowUp({
       {canAppend && (
         <>
           {ended && <p className="muted">{USER_TEXT.reopenNote}</p>}
+          {awaiting === "ASKER_REPLY" && <NoReplyNotice noReply={noReply} />}
           <MessageForm
             label={
               awaiting === "ASKER_REPLY"

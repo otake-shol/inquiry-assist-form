@@ -178,11 +178,13 @@ export function resultFromOperator(view: InquiryView): boolean {
  * 追記の入力欄を出せるか。担当者に渡したことがあり、取り下げていない件。
  * 終わっている件（解決済み、回答済み、見送り）でも、追記で開き直せる。
  * 担当者に渡したことのない件も、返事がないまま「回答済み」で終わっていれば出す（送ると担当者に渡る）。
+ * 時間で「取り下げ」になった件（聞き返しに返事がなかった件）も出す。
  * @param view 現在の問い合わせ
  */
 export function canAppend(view: InquiryView): boolean {
   if (view.handedOverAt === null) return view.ending === "ANSWERED";
-  return view.ending !== "WITHDRAWN";
+  // 本人が自分で取り下げた件には出さない。時間で「取り下げ」になった件には出す
+  return view.ending !== "WITHDRAWN" || view.closedBy === "TIME";
 }
 
 /**

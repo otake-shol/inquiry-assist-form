@@ -47,6 +47,9 @@ export interface Declined {
   reason: string;
 }
 
+/** 問い合わせを終わらせた人。時間は、返事がないまま期間が過ぎたこと。 */
+export type ClosedBy = "ASKER" | "OPERATOR" | "TIME";
+
 /** 状態の4項目。本人向けの表現にも、担当者向けの一覧と詳細にも入る。 */
 export interface StateFields {
   phase: Phase;
@@ -218,10 +221,12 @@ export interface TraceEntry {
 }
 
 /**
- * 返事がないときの予定。結果を本人が確かめている間だけ非 null（それ以外は null）。
+ * 返事がないときの予定。本人の返事を待っている間（結果の確かめ、聞き返しへの返事）だけ非 null（それ以外は null）。
  * `remindedAt` は実際に知らせた時刻（まだなら null）、`closesAt` は終わる予定の時刻（知らせた後だけ非 null）。
  */
 export interface NoReply {
+  /** 期間が過ぎたときの終わり方（結果の確かめは回答済み、聞き返しへの返事は取り下げ） */
+  endsAs: "ANSWERED" | "WITHDRAWN";
   /** 知らせる予定の時刻 */
   remindAt: string;
   remindedAt: string | null;
@@ -235,6 +240,8 @@ export interface InquiryView extends StateFields {
   language: string;
   /** 見送りで終わった件だけが持つ */
   declined: Declined | null;
+  /** 終わらせた人（終わっていない件は null） */
+  closedBy: ClosedBy | null;
   urgency: Urgency;
   /** 種類。決まっていなければ null */
   type: Placement<InquiryTypeId> | null;
@@ -257,7 +264,7 @@ export interface InquiryView extends StateFields {
   handedOverAt: string | null;
   /** 担当者の新しい発言（返事がないことの知らせを含む）が、まだ読まれていないか */
   unreadReply: boolean;
-  /** 返事がないときの予定（結果を確かめている間だけ非 null） */
+  /** 返事がないときの予定（本人の返事を待っている間だけ非 null） */
   noReply: NoReply | null;
   /** 作成日時 */
   createdAt?: string;
@@ -373,7 +380,9 @@ export interface OperatorDetail extends StateFields {
   language: string;
   /** 見送りで終わった件だけが持つ */
   declined: Declined | null;
-  /** 返事がないときの予定（結果を本人が確かめている間だけ非 null） */
+  /** 終わらせた人（終わっていない件は null） */
+  closedBy: ClosedBy | null;
+  /** 返事がないときの予定（本人の返事を待っている間だけ非 null） */
   noReply: NoReply | null;
   filedAt: string;
   askerId: string;

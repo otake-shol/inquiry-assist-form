@@ -310,6 +310,7 @@ public class OperatorService {
                 e.turn,
                 e.awaiting,
                 e.ending,
+                e.closedBy,
                 e.declined,
                 presenter.noReplyOf(e),
                 MessageBodies.viewsOf(e),

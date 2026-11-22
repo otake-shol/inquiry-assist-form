@@ -3,6 +3,7 @@ package dev.inquiryassist.inquiry;
 import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.TechnicalMemo;
 import dev.inquiryassist.core.Urgency;
+import dev.inquiryassist.core.lifecycle.Actor;
 import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.Ending;
@@ -37,8 +38,9 @@ import java.util.UUID;
  * @param turn 誰の番か。終わった件は null
  * @param awaiting 待っていること。終わった件は null
  * @param ending 終わり方。終わっていない件は null
+ * @param closedBy 終わらせた人（{@code ASKER}、{@code OPERATOR}、{@code TIME}）。終わっていない件は null
  * @param declined 見送りの内容。見送りで終わった件だけ非 null
- * @param noReply 返事がないときの決まりの予定。結果を本人が確かめている間だけ非 null
+ * @param noReply 返事がないときの決まりの予定。本人の返事（結果の確かめ、聞き返しへの返事）を待っている間だけ非 null
  * @param messages 担当者の発言と本人の追記（古い順）
  * @param history 状態の履歴（起きた順）
  * @param trace スキルの実行記録。無効にしている場合は null
@@ -65,6 +67,7 @@ public record OperatorDetail(
         Turn turn,
         Awaiting awaiting,
         Ending ending,
+        Actor closedBy,
         Declined declined,
         InquiryView.NoReplyView noReply,
         List<MessageView> messages,

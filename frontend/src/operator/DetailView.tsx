@@ -221,7 +221,9 @@ export function DetailView({
           <p className="op-no-reply">
             {detail.noReply.remindedAt !== null &&
             detail.noReply.closesAt !== null
-              ? OP_TEXT.noReplyReminded(
+              ? (detail.noReply.endsAs === "WITHDRAWN"
+                  ? OP_TEXT.noReplyRemindedWithdrawn
+                  : OP_TEXT.noReplyReminded)(
                   formatMonthDay(detail.noReply.remindedAt, dict.meta.locale),
                   formatMonthDay(detail.noReply.closesAt, dict.meta.locale),
                 )

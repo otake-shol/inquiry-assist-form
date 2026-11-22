@@ -722,6 +722,75 @@ test("返事がないまま期間が過ぎると知らせたうえで回答済�
   expect(pageErrors).toEqual([]);
 });
 
+/**
+ * 返事がないとき: 担当者の聞き返しに答えないまま期間が過ぎると、1度知らせたうえで「取り下げ」で終わる。
+ * 時間で取り下げになった件は、続きを送ると開き直せる。
+ */
+test("聞き返しに返事がないまま期間が過ぎると取り下げで終わり、続きを送ると開き直せる", async ({
+  page,
+  request,
+}) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+  const mark = `聞き返し放置 ${Date.now()}`;
+  const question = `担当者からの質問 ${Date.now()}`;
+  const late = `遅くなりましたが答えます ${Date.now()}`;
+  const day = 24 * 60 * 60 * 1000;
+  const runRulesAfter = async (days: number) => {
+    const response = await request.post(
+      "http://localhost:8080/api/dev/rules/run",
+      { data: { now: new Date(Date.now() + days * day).toISOString() } },
+    );
+    expect(response.ok()).toBe(true);
+  };
+
+  await fileByText(page, `${mark} 請求書の宛名を知りたい`);
+  const askerUrl = page.url();
+
+  const board = page.getByRole("region", { name: "受付一覧" });
+  const cardIn = (name: RegExp) =>
+    board
+      .getByRole("region", { name })
+      .getByRole("listitem")
+      .filter({ hasText: mark });
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+
+  await page.goto("/operator");
+  await cardIn(/^担当者の番/)
+    .getByRole("button")
+    .click();
+  await detail.getByLabel("本人に送る").fill(question);
+  await detail.getByRole("button", { name: "聞き返す" }).click();
+  await expect(cardIn(/^本人の番/)).toBeVisible();
+
+  // 知らせる
+  await runRulesAfter(8);
+  await page.goto(askerUrl);
+  await expect(
+    page.getByText(/お返事がないため、.+に「取り下げ」として終了します/),
+  ).toBeVisible();
+  await expect(page.getByLabel("担当者の質問に答える")).toBeVisible();
+
+  // 終える。担当者のボードでは「終わり」に入る
+  await runRulesAfter(16);
+  await page.goto("/operator");
+  await expect(cardIn(/^終わり/)).toContainText("取り下げ");
+
+  // 本人は、続きを送って開き直せる（自分で取り下げた件とは違う）
+  await page.goto(askerUrl);
+  await expect(
+    page.getByText(/お返事がなかったため、取り下げとして終了しました/),
+  ).toBeVisible();
+  await page.getByLabel("追加で伝える").fill(late);
+  await page.getByRole("button", { name: "送る", exact: true }).click();
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+
+  await page.goto("/operator");
+  await expect(cardIn(/^担当者の番/)).toBeVisible();
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
 test("スマホの幅でボードがページの横幅からはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   for (const path of ["/operator", "/inquiries"]) {

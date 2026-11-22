@@ -941,6 +941,7 @@ describe("担当者のパネル: 返事がないときの予定", () => {
 
   it("知らせる前は、知らせる予定の日を1行で出す", async () => {
     const panel = await openWaiting({
+      endsAs: "ANSWERED",
       remindAt: REMIND_AT,
       remindedAt: null,
       closesAt: null,
@@ -956,6 +957,7 @@ describe("担当者のパネル: 返事がないときの予定", () => {
 
   it("知らせた後は、知らせた日と、終わる予定の日を1行で出す", async () => {
     const panel = await openWaiting({
+      endsAs: "ANSWERED",
       remindAt: REMIND_AT,
       remindedAt: REMINDED_AT,
       closesAt: CLOSES_AT,
@@ -967,6 +969,103 @@ describe("担当者のパネル: 返事がないときの予定", () => {
       ),
     ).toBeInTheDocument();
     expect(within(panel).queryByText(/知らせます$/)).not.toBeInTheDocument();
+  });
+
+  it("聞き返しの返事を待つ件は、終わり方が「取り下げ」の行を出す（知らせる前の行は共通）", async () => {
+    const user = userEvent.setup();
+    const waitingForReply = (noReply: object) =>
+      makeDetail({
+        id: "op-2",
+        read: true,
+        ...ASKER_REPLY_STATE,
+        messages: [],
+        noReply: noReply as never,
+      });
+    await renderBoard({
+      "GET /api/operator/inquiries/op-2": {
+        body: waitingForReply({
+          endsAs: "WITHDRAWN",
+          remindAt: REMIND_AT,
+          remindedAt: REMINDED_AT,
+          closesAt: CLOSES_AT,
+        }),
+      },
+    });
+    await user.click(screen.getByRole("button", { name: /返事待ちの件/ }));
+    const panel = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+
+    expect(
+      await within(panel).findByText(
+        "11月24日に本人へ知らせました。返事がなければ、12月1日に「取り下げ」で終わります",
+      ),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByText(/「回答済み」で終わります/)).toBeNull();
+  });
+
+  it("聞き返しの返事を待つ件の、知らせる前の行は、結果の確かめと同じ文言", async () => {
+    const user = userEvent.setup();
+    await renderBoard({
+      "GET /api/operator/inquiries/op-2": {
+        body: makeDetail({
+          id: "op-2",
+          read: true,
+          ...ASKER_REPLY_STATE,
+          messages: [],
+          noReply: {
+            endsAs: "WITHDRAWN",
+            remindAt: REMIND_AT,
+            remindedAt: null,
+            closesAt: null,
+          },
+        }),
+      },
+    });
+    await user.click(screen.getByRole("button", { name: /返事待ちの件/ }));
+    const panel = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+
+    expect(
+      await within(panel).findByText(
+        "返事がなければ、11月24日に本人へ知らせます",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("時間で取り下げになった件の履歴は、起こした人が「期間」の「取り下げた」として出る", async () => {
+    const user = userEvent.setup();
+    const { card } = await renderBoard({
+      "GET /api/operator/inquiries/op-1": {
+        body: makeDetail({
+          read: true,
+          messages: [],
+          ...closedState("WITHDRAWN"),
+          closedBy: "TIME",
+          history: [
+            {
+              at: CLOSES_AT,
+              actor: "TIME",
+              event: "WITHDRAWN",
+              phase: "CLOSED",
+              turn: null,
+              awaiting: null,
+              ending: "WITHDRAWN",
+            },
+          ],
+        }),
+      },
+    });
+    const panel = await openPanel(user, card);
+    await user.click(within(panel).getByText("状態の履歴"));
+
+    const row = within(
+      within(panel).getByText("状態の履歴").closest("details")!,
+    ).getByRole("listitem");
+    expect(row).toHaveTextContent("期間");
+    expect(row).toHaveTextContent("取り下げた");
+    expect(row).toHaveTextContent("終わり（取り下げ）");
   });
 
   it("noReply が null の件（担当者の番など）には出さない", async () => {

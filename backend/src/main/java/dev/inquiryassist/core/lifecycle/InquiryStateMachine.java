@@ -23,9 +23,30 @@ public final class InquiryStateMachine {
      * @param phaseBeforeClose 終わる前の区間。終わっていなければ {@code null}
      * @param intakeComplete 入口の質問が終わっているか
      * @param revisionsLeft 言い直しを作り直せる残り回数
+     * @param closedBy 終わらせた人。終わっていなければ {@code null}
      */
     public record Context(
-            InquiryType type, boolean handedOver, Phase phaseBeforeClose, boolean intakeComplete, int revisionsLeft) {}
+            InquiryType type,
+            boolean handedOver,
+            Phase phaseBeforeClose,
+            boolean intakeComplete,
+            int revisionsLeft,
+            Actor closedBy) {
+
+        /**
+         * 終わらせた人を指定しない文脈を作る（終わっていない件、または終わらせた人が遷移に関係しない場合）。
+         *
+         * @param type 種類
+         * @param handedOver 担当者に渡したことがあるか
+         * @param phaseBeforeClose 終わる前の区間
+         * @param intakeComplete 入口の質問が終わっているか
+         * @param revisionsLeft 言い直しを作り直せる残り回数
+         */
+        public Context(
+                InquiryType type, boolean handedOver, Phase phaseBeforeClose, boolean intakeComplete, int revisionsLeft) {
+            this(type, handedOver, phaseBeforeClose, intakeComplete, revisionsLeft, null);
+        }
+    }
 
     private InquiryStateMachine() {}
 
@@ -263,14 +284,32 @@ public final class InquiryStateMachine {
     }
 
     /**
+     * 返事がないときの決まり（時間）で、期間が過ぎたときの終わり方。結果を確かめている件は回答済み、聞き返しへの返事を待っている件は
+     * 取り下げ。決まりの対象でない状態は {@code null}。
+     *
+     * @param awaiting 待っていること
+     * @return 終わり方。対象でなければ {@code null}
+     */
+    public static Ending timeEnding(Awaiting awaiting) {
+        if (awaiting == null) {
+            return null;
+        }
+        return switch (awaiting) {
+            case RESULT_CONFIRMATION -> Ending.ANSWERED;
+            case ASKER_REPLY -> Ending.WITHDRAWN;
+            default -> null;
+        };
+    }
+
+    /**
      * 返事がないことを本人に知らせる。状態は変えない（出来事は {@code REMINDED}。番は変わらないが、時間が起こした出来事なので履歴に残す）。
      *
-     * @param state いまの状態（{@code RESULT_CONFIRMATION}）
+     * @param state いまの状態（{@code RESULT_CONFIRMATION} か {@code ASKER_REPLY}）
      * @return 遷移
-     * @throws IllegalTransitionException 結果を確かめている状態でない場合
+     * @throws IllegalTransitionException 本人の返事を待っている状態でない場合
      */
     public static Transition reminded(InquiryState state) {
-        require(state, Awaiting.RESULT_CONFIRMATION);
+        require(state, Awaiting.RESULT_CONFIRMATION, Awaiting.ASKER_REPLY);
         return new Transition(state, HistoryEvent.REMINDED, Actor.TIME, false, null);
     }
 
@@ -287,7 +326,32 @@ public final class InquiryStateMachine {
     }
 
     /**
-     * 本人が追記する。担当者に渡したことのある、取り下げていない問い合わせと、担当者に渡したことがなく回答済みで終わった問い合わせ
+     * 聞き返しに返事がないまま期間が過ぎたので、取り下げで終える（出来事は {@code WITHDRAWN}。起こしたのは時間）。
+     *
+     * @param state いまの状態（{@code ASKER_REPLY}）
+     * @return 遷移
+     * @throws IllegalTransitionException 聞き返しへの返事を待っている状態でない場合
+     */
+    public static Transition withdrawnByTime(InquiryState state) {
+        require(state, Awaiting.ASKER_REPLY);
+        return move(state, new InquiryState(Phase.CLOSED, null, null, Ending.WITHDRAWN), HistoryEvent.WITHDRAWN, Actor.TIME);
+    }
+
+    /**
+     * 返事がないまま期間が過ぎたので、待っていたことに応じた終わり方で終える
+     * （結果の確かめなら回答済み、聞き返しへの返事なら取り下げ）。
+     *
+     * @param state いまの状態（{@code RESULT_CONFIRMATION} か {@code ASKER_REPLY}）
+     * @return 遷移
+     * @throws IllegalTransitionException 本人の返事を待っている状態でない場合
+     */
+    public static Transition closedByTime(InquiryState state) {
+        require(state, Awaiting.RESULT_CONFIRMATION, Awaiting.ASKER_REPLY);
+        return state.awaiting() == Awaiting.ASKER_REPLY ? withdrawnByTime(state) : answeredByTime(state);
+    }
+
+    /**
+     * 本人が追記する。担当者に渡したことのある、本人が取り下げていない問い合わせと、担当者に渡したことがなく回答済みで終わった問い合わせ
      * （AI の答えに返事がなかった件）。追記したときの状態で、その後が決まる。
      *
      * @param state いまの状態
@@ -305,7 +369,8 @@ public final class InquiryStateMachine {
             throw new IllegalTransitionException("担当者に渡した問い合わせにだけ追記できます");
         }
         if (state.closed()) {
-            if (state.ending() == Ending.WITHDRAWN) {
+            // 時間で取り下げになった件は、本人が離れたわけではないので開き直せる。本人が自分で取り下げた件は開き直せない
+            if (state.ending() == Ending.WITHDRAWN && ctx.closedBy() != Actor.TIME) {
                 throw new IllegalTransitionException("取り下げた問い合わせには追記できません");
             }
             Phase phase = ctx.phaseBeforeClose() != null ? ctx.phaseBeforeClose() : handOverPhase(ctx.type());

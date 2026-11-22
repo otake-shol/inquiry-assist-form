@@ -780,6 +780,7 @@ describe("英語の返事がないときの知らせ", () => {
           language: "en",
           answer: groundedAnswer,
           noReply: {
+            endsAs: "ANSWERED",
             remindAt: REMIND_AT,
             remindedAt: REMINDED_AT,
             closesAt: CLOSES_AT,
@@ -830,7 +831,12 @@ describe("英語の返事がないときの知らせ", () => {
       language: "en",
       messages: [],
       ...RESULT_STATE,
-      noReply: { remindAt: REMIND_AT, remindedAt: null, closesAt: null },
+      noReply: {
+        endsAs: "ANSWERED",
+        remindAt: REMIND_AT,
+        remindedAt: null,
+        closesAt: null,
+      },
       history: [
         {
           at: REMINDED_AT,
@@ -888,6 +894,7 @@ describe("英語の返事がないときの知らせ", () => {
     detail = {
       ...detail,
       noReply: {
+        endsAs: "ANSWERED",
         remindAt: REMIND_AT,
         remindedAt: REMINDED_AT,
         closesAt: CLOSES_AT,
@@ -904,6 +911,109 @@ describe("英語の返事がないときの知らせ", () => {
     expect(
       await within(second).findByText(
         "The requester was reminded on November 24. If there is no reply, this will be closed as “Answered” on December 1.",
+      ),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("英語の聞き返しに返事がないときの画面", () => {
+  const CLOSES_AT = new Date(2026, 11, 1, 12, 0).toISOString();
+  const REMINDED_AT = new Date(2026, 10, 24, 12, 0).toISOString();
+  const REMIND_AT = new Date(2026, 10, 24, 9, 0).toISOString();
+
+  it("本人のページ: 知らせが、入力欄のすぐ上に英語で出る", async () => {
+    storedEnglish();
+    installFakeFetch({
+      ...bilingualConfig(),
+      ...inquiry(
+        makeFiledView({
+          ...ASKER_REPLY_STATE,
+          language: "en",
+          messages: [
+            makeMessage({ id: "m1", kind: "ASK", body: "Since when?" }),
+          ],
+          noReply: {
+            endsAs: "WITHDRAWN",
+            remindAt: REMIND_AT,
+            remindedAt: REMINDED_AT,
+            closesAt: CLOSES_AT,
+          },
+        }),
+      ),
+    });
+    open("/inquiries/inq-1");
+
+    const notice = await screen.findByText(
+      "There has been no reply, so this inquiry will be closed as “Withdrawn” on December 1. To continue, please answer the support team's question below. You can still send a follow-up from this page after it is closed.",
+    );
+    const box = screen.getByLabelText("Answer the support team's question");
+    expect(
+      notice.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("本人のページ: 時間で取り下げになった件の終わりの文言と、続きを送る欄", async () => {
+    storedEnglish();
+    installFakeFetch({
+      ...bilingualConfig(),
+      ...inquiry(
+        makeFiledView({
+          ...closedState("WITHDRAWN"),
+          closedBy: "TIME",
+          language: "en",
+          messages: [],
+        }),
+      ),
+    });
+    open("/inquiries/inq-1");
+
+    expect(
+      await screen.findByText(
+        "This inquiry was closed as withdrawn because there was no reply. You can continue by sending a message from this page.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Add more details")).toBeInTheDocument();
+  });
+
+  it("担当者のパネル: 知らせた後の行が「Withdrawn」で出る", async () => {
+    const user = userEvent.setup();
+    storedEnglish();
+    installFakeFetch({
+      ...bilingualConfig(),
+      "GET /api/operator/inquiries": {
+        body: {
+          unreadCount: 0,
+          items: [
+            makeItem({ read: true, language: "en", ...ASKER_REPLY_STATE }),
+          ],
+        },
+      },
+      "GET /api/operator/inquiries/op-1": {
+        body: makeDetail({
+          read: true,
+          language: "en",
+          messages: [],
+          ...ASKER_REPLY_STATE,
+          noReply: {
+            endsAs: "WITHDRAWN",
+            remindAt: REMIND_AT,
+            remindedAt: REMINDED_AT,
+            closesAt: CLOSES_AT,
+          },
+        }),
+      },
+    });
+    open("/operator");
+
+    await user.click(
+      await screen.findByRole("button", { name: /求人が一覧に出なくなった/ }),
+    );
+    const panel = await screen.findByRole("region", {
+      name: "Inquiry details",
+    });
+    expect(
+      await within(panel).findByText(
+        "The requester was reminded on November 24. If there is no reply, this will be closed as “Withdrawn” on December 1.",
       ),
     ).toBeInTheDocument();
   });

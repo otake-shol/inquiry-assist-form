@@ -1,4 +1,10 @@
-import type { Declined, Ending, NoReply, ZeroAnswer } from "../api/types.ts";
+import type {
+  ClosedBy,
+  Declined,
+  Ending,
+  NoReply,
+  ZeroAnswer,
+} from "../api/types.ts";
 import { NoReplyNotice } from "./Exchange.tsx";
 import { useMessages } from "../i18n/context.ts";
 import { endingText } from "../text/inquiries.ts";
@@ -226,6 +232,8 @@ interface ClosingProps {
   ending: Ending;
   /** 見送りの理由（見送りで終わった件だけ） */
   declined: Declined | null;
+  /** 終わらせた人（時間で「取り下げ」になった件は、専用の終わりの文言） */
+  closedBy?: ClosedBy | null;
   onRestart: () => void;
   /** 「新しい問い合わせを書く」をここに出すか。やり取りが続く場合は、やり取りの下に出すので false */
   showRestart?: boolean;
@@ -239,11 +247,12 @@ interface ClosingProps {
 export function Closing({
   ending,
   declined,
+  closedBy = null,
   onRestart,
   showRestart = true,
 }: ClosingProps) {
   const { text: TEXT, asker } = useMessages();
-  const text = endingText(ending, declined, asker);
+  const text = endingText(ending, declined, asker, closedBy);
   return (
     <div className="system closing">
       <div tabIndex={-1} data-autofocus className="focus-target">

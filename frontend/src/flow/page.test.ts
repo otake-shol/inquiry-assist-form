@@ -325,6 +325,26 @@ describe("canAppend と canWithdraw", () => {
     expect(canAppend(makeView(closedState("WITHDRAWN")))).toBe(false);
   });
 
+  it("時間で「取り下げ」になった件には続きを送る欄を出し、本人が自分で取り下げた件には出さない", () => {
+    expect(
+      canAppend(
+        makeFiledView({ ...closedState("WITHDRAWN"), closedBy: "TIME" }),
+      ),
+    ).toBe(true);
+    expect(
+      canAppend(
+        makeFiledView({ ...closedState("WITHDRAWN"), closedBy: "ASKER" }),
+      ),
+    ).toBe(false);
+    expect(
+      kinds(
+        pageSections(
+          makeFiledView({ ...closedState("WITHDRAWN"), closedBy: "TIME" }),
+        ),
+      ).slice(-2),
+    ).toEqual(["closing", "followup"]);
+  });
+
   it("担当者に渡したことがなくても、返事がないまま「回答済み」で終わった件には、続きを送る欄を出す", () => {
     const answered = makeStructuredView({
       ...closedState("ANSWERED"),

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.TechnicalMemo;
 import dev.inquiryassist.core.Urgency;
+import dev.inquiryassist.core.lifecycle.Actor;
 import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.Ending;
@@ -27,6 +28,7 @@ import java.util.UUID;
  * @param turn 誰の番か。終わった件は null
  * @param awaiting 待っていること。終わった件は null
  * @param ending 終わり方。終わっていない件は null
+ * @param closedBy 終わらせた人（{@code ASKER}、{@code OPERATOR}、{@code TIME}）。終わっていない件は null。開き直すと null に戻る
  * @param declined 見送りの内容。見送りで終わった件だけ非 null
  * @param urgency 緊急度
  * @param type 種類。決まっていなければ null
@@ -41,7 +43,7 @@ import java.util.UUID;
  * @param sentImmediately 答えを待たずに担当者へ送られたか
  * @param handedOverAt 担当者に初めて渡した時刻。渡していなければ null
  * @param unreadReply 本人がまだ読んでいない知らせがあるか（担当者の発言、返事がないことの知らせ、期間が過ぎて終えたこと）
- * @param noReply 返事がないときの決まりの予定。結果を本人が確かめている間だけ非 null
+ * @param noReply 返事がないときの決まりの予定。本人の返事（結果の確かめ、聞き返しへの返事）を待っている間だけ非 null
  * @param messages 担当者の発言と本人の追記（古い順）。なければ空
  * @param trace スキルの実行記録。無効にしている場合は null
  * @param mock モック実装による記録か
@@ -54,6 +56,7 @@ public record InquiryView(
         Turn turn,
         Awaiting awaiting,
         Ending ending,
+        Actor closedBy,
         Declined declined,
         Urgency urgency,
         PlacedView type,
@@ -128,11 +131,12 @@ public record InquiryView(
     /**
      * 返事がないときの決まりの予定（契約書「返事がないとき」）。
      *
+     * @param endsAs 期間が過ぎたときの終わり方（{@code ANSWERED} か {@code WITHDRAWN}）
      * @param remindAt 知らせる予定の時刻
      * @param remindedAt 実際に知らせた時刻。まだなら null
      * @param closesAt 終わる予定の時刻。知らせた後だけ非 null
      */
-    public record NoReplyView(Instant remindAt, Instant remindedAt, Instant closesAt) {}
+    public record NoReplyView(Ending endsAs, Instant remindAt, Instant remindedAt, Instant closesAt) {}
 
     /**
      * 整形後の問い。緊急度は持たない（問い合わせの {@code urgency} に一本化している）。

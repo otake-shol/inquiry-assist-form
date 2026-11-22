@@ -5,6 +5,7 @@ import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
 import dev.inquiryassist.core.lifecycle.NoReplyRule;
 import dev.inquiryassist.core.lifecycle.Transition;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,7 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 時間で動く決まりを、結果を本人が確かめている件に適用する（契約書「返事がないとき」）。どの件を知らせ、どの件を終えるかは、
+ * 時間で動く決まりを、本人の返事を待っている件（結果の確かめ、聞き返しへの返事）に適用する（契約書「返事がないとき」）。どの件を知らせ、どの件を終えるかは、
  * Spring に依存しない {@link NoReplyRule} が決める。ここは、対象の件を引き、1件ずつ別のトランザクションで更新し、通知する。
  *
  * <p>同じ件を別の操作（本人の返事など）と同時に変えようとして楽観ロックが失敗したら、その件は次の回に回す。
@@ -29,12 +30,15 @@ public class TimeRuleService {
      * 判定の結果。
      *
      * @param reminded 知らせた件数
-     * @param closed 回答済みで終えた件数
+     * @param closed 終えた件数（結果の確かめは回答済み、聞き返しへの返事は取り下げ）
      */
     public record Result(int reminded, int closed) {}
 
     /** 1件の更新の結果。 */
     private record Outcome(NoReplyRule.Action action, InquiryEntity saved) {}
+
+    /** 決まりの対象の、待っていること（本人の返事を待っている件）。 */
+    private static final List<Awaiting> TARGETS = List.of(Awaiting.RESULT_CONFIRMATION, Awaiting.ASKER_REPLY);
 
     private final InquiryRepository repository;
     private final InquiryProperties properties;
@@ -71,7 +75,7 @@ public class TimeRuleService {
     public Result run(Instant now) {
         int reminded = 0;
         int closed = 0;
-        for (UUID id : repository.findIdsByAwaiting(Awaiting.RESULT_CONFIRMATION)) {
+        for (UUID id : repository.findIdsByAwaitingIn(TARGETS)) {
             Outcome outcome;
             try {
                 outcome = transaction.execute(status -> runOne(id, now));
@@ -100,7 +104,7 @@ public class TimeRuleService {
     /** 1件を判定して更新する。何もしない件は null。 */
     private Outcome runOne(UUID id, Instant now) {
         InquiryEntity inquiry = repository.findById(id).orElse(null);
-        if (inquiry == null || inquiry.awaiting != Awaiting.RESULT_CONFIRMATION) {
+        if (inquiry == null || InquiryStateMachine.timeEnding(inquiry.awaiting) == null) {
             return null;
         }
         NoReplyRule.Action action =
@@ -108,7 +112,7 @@ public class TimeRuleService {
         Transition transition;
         switch (action) {
             case REMIND -> transition = InquiryStateMachine.reminded(inquiry.state());
-            case CLOSE -> transition = InquiryStateMachine.answeredByTime(inquiry.state());
+            case CLOSE -> transition = InquiryStateMachine.closedByTime(inquiry.state());
             default -> {
                 return null;
             }

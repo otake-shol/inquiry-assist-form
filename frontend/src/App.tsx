@@ -477,6 +477,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
           <Closing
             ending={view!.ending!}
             declined={view!.declined}
+            closedBy={view!.closedBy}
             onRestart={restart}
             showRestart={!hasFollowUp}
           />

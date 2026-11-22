@@ -39,10 +39,10 @@ class NoReplyApiTest extends ApiSupport {
     @BeforeEach
     @AfterEach
     void releaseBackdated() {
-        // 過去に置いた起点を残すと、あとの判定に巻き込まれる。結果を確かめている件の起点を、いまに戻す
+        // 過去に置いた起点を残すと、あとの判定に巻き込まれる。本人の返事を待っている件の起点を、いまに戻す
         jdbc.update(
                 "update inquiries set awaiting_since = now(), reminded_at = null"
-                        + " where awaiting = 'RESULT_CONFIRMATION' and awaiting_since < '2026-06-01'");
+                        + " where awaiting in ('RESULT_CONFIRMATION', 'ASKER_REPLY') and awaiting_since < '2026-06-01'");
     }
 
     private void backdate(String id, Instant at) {
@@ -246,13 +246,7 @@ class NoReplyApiTest extends ApiSupport {
     // ---- 対象外 ----
 
     @Test
-    void 聞き返しへの返事を待つ件と入口の途中の件は対象外() throws Exception {
-        String asked = filedNow("期限の仕様", "job-admin");
-        mvc.perform(post("/api/operator/inquiries/" + asked + "/replies")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json("kind", "ASK", "body", "詳しく教えてください")))
-                .andExpect(status().isOk());
-        jdbc.update("update inquiries set awaiting_since = ? where id = ?::uuid", Timestamp.from(ORIGIN), asked);
+    void 入口の途中の件と担当者の番の件は対象外() throws Exception {
         String intake = idOf(start());
         jdbc.update("update inquiries set awaiting_since = ? where id = ?::uuid", Timestamp.from(ORIGIN), intake);
         String handling = filedNow("期限の仕様", "job-admin");
@@ -260,10 +254,179 @@ class NoReplyApiTest extends ApiSupport {
 
         assertThat(rules.run(ORIGIN.plusSeconds(86400L * 200))).isEqualTo(new TimeRuleService.Result(0, 0));
 
-        assertThat((String) JsonPath.read(view(asked), "$.awaiting")).isEqualTo("ASKER_REPLY");
         assertThat((String) JsonPath.read(view(intake), "$.awaiting")).isEqualTo("INTAKE_ANSWER");
         assertThat((String) JsonPath.read(view(handling), "$.awaiting")).isEqualTo("HANDLING");
-        assertThat(row(asked).get("reminded_at")).isNull();
+        assertThat((Object) JsonPath.read(view(intake), "$.noReply")).isNull();
+        assertThat((Object) JsonPath.read(view(handling), "$.noReply")).isNull();
+        assertThat(row(handling).get("reminded_at")).isNull();
+    }
+
+    // ---- 聞き返しへの返事を待つ件 ----
+
+    private String askedBack() throws Exception {
+        String id = filedNow("期限の仕様", "job-admin");
+        mvc.perform(post("/api/operator/inquiries/" + id + "/replies")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json("kind", "ASK", "body", "詳しく教えてください")))
+                .andExpect(status().isOk());
+        return id;
+    }
+
+    /** 知らせて、さらに期間が過ぎるまで進めて、時間で取り下げにする。 */
+    private void withdrawByTime(String id) {
+        backdate(id, ORIGIN);
+        Instant remindAt = remindAfter(ORIGIN);
+        rules.run(remindAt);
+        rules.run(BusinessDays.plus(remindAt, 5, TOKYO));
+    }
+
+    @Test
+    void noReplyのendsAsは待っていることで変わる() throws Exception {
+        String result = answeredByAi();
+        String asked = askedBack();
+
+        assertThat((String) JsonPath.read(view(result), "$.noReply.endsAs")).isEqualTo("ANSWERED");
+        assertThat((String) JsonPath.read(view(asked), "$.noReply.endsAs")).isEqualTo("WITHDRAWN");
+        assertThat((String) JsonPath.read(operatorDetail(asked), "$.noReply.endsAs")).isEqualTo("WITHDRAWN");
+        assertThat((String) JsonPath.read(operatorDetail(asked), "$.awaiting")).isEqualTo("ASKER_REPLY");
+    }
+
+    @Test
+    void 聞き返しに返事がなければ_知らせてから取り下げで終わり_起こしたのは時間() throws Exception {
+        String id = askedBack();
+        backdate(id, ORIGIN);
+        Instant remindAt = remindAfter(ORIGIN);
+        mvc.perform(post("/api/operator/inquiries/" + id + "/read")).andExpect(status().isOk());
+
+        assertThat(rules.run(remindAt.minusSeconds(1))).isEqualTo(new TimeRuleService.Result(0, 0));
+        assertThat(rules.run(remindAt)).isEqualTo(new TimeRuleService.Result(1, 0));
+        assertThat(listed(id, "unreadReply")).isEqualTo(true);
+        assertThat((String) JsonPath.read(view(id), "$.awaiting")).isEqualTo("ASKER_REPLY");
+        assertThat((String) JsonPath.read(operatorDetail(id), "$.noReply.remindedAt")).isEqualTo(remindAt.toString());
+        // 知らせた直後には終えない
+        assertThat(rules.run(remindAt)).isEqualTo(new TimeRuleService.Result(0, 0));
+
+        MvcResult stream = mvc.perform(get("/api/operator/stream").accept(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        assertThat(rules.run(BusinessDays.plus(remindAt, 5, TOKYO))).isEqualTo(new TimeRuleService.Result(0, 1));
+
+        // 本人が開く前の一覧で、未読が見える
+        assertThat(listed(id, "unreadReply")).isEqualTo(true);
+        String closed = view(id);
+        assertThat((String) JsonPath.read(closed, "$.phase")).isEqualTo("CLOSED");
+        assertThat((String) JsonPath.read(closed, "$.ending")).isEqualTo("WITHDRAWN");
+        assertThat((String) JsonPath.read(closed, "$.closedBy")).isEqualTo("TIME");
+        assertThat((Object) JsonPath.read(closed, "$.noReply")).isNull();
+        String detail = operatorDetail(id);
+        assertThat((String) JsonPath.read(detail, "$.closedBy")).isEqualTo("TIME");
+        assertThat(historyEvents(detail)).endsWith("ASKED_BACK", "REMINDED", "WITHDRAWN");
+        assertThat(historyActors(detail)).endsWith("OPERATOR", "TIME", "TIME");
+        // 担当者側の未読は変えない。担当者のストリームには updated が流れる
+        assertThat((Boolean) JsonPath.read(detail, "$.read")).isTrue();
+        assertThat(waitFor(() -> content(stream).contains("event:updated") && content(stream).contains(id), 5000))
+                .isTrue();
+    }
+
+    @Test
+    void 時間で取り下げになった件に追記すると開き直り_終わる前の区間で担当者の番になりclosedByは消える() throws Exception {
+        String id = askedBack();
+        String phaseBefore = JsonPath.read(operatorDetail(id), "$.phase");
+        withdrawByTime(id);
+        assertThat((String) JsonPath.read(view(id), "$.closedBy")).isEqualTo("TIME");
+
+        String reopened = text(mvc.perform(post("/api/inquiries/" + id + "/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json("body", "返事が遅れました")))
+                .andExpect(status().isOk()));
+
+        assertThat((String) JsonPath.read(reopened, "$.phase")).isEqualTo(phaseBefore);
+        assertThat((String) JsonPath.read(reopened, "$.turn")).isEqualTo("OPERATOR");
+        assertThat((String) JsonPath.read(reopened, "$.awaiting")).isEqualTo("HANDLING");
+        assertThat((Object) JsonPath.read(reopened, "$.ending")).isNull();
+        assertThat((Object) JsonPath.read(reopened, "$.closedBy")).isNull();
+        String detail = operatorDetail(id);
+        assertThat((Object) JsonPath.read(detail, "$.closedBy")).isNull();
+        assertThat((Boolean) JsonPath.read(detail, "$.read")).isFalse();
+        assertThat(historyEvents(detail)).endsWith("REMINDED", "WITHDRAWN", "REOPENED");
+        assertThat(historyActors(detail)).endsWith("TIME", "TIME", "ASKER");
+    }
+
+    @Test
+    void 本人が自分で取り下げた件への追記はINVALID_STATEのまま() throws Exception {
+        String id = filedNow("期限の仕様", "job-admin");
+        mvc.perform(post("/api/inquiries/" + id + "/withdraw")).andExpect(status().isOk());
+        assertThat((String) JsonPath.read(view(id), "$.closedBy")).isEqualTo("ASKER");
+
+        mvc.perform(post("/api/inquiries/" + id + "/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json("body", "追記")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INVALID_STATE"));
+    }
+
+    @Test
+    void 本人が答えて担当者がもう一度聞き返すと起点と知らせたかどうかが最初からになる() throws Exception {
+        String id = askedBack();
+        backdate(id, ORIGIN);
+        Instant remindAt = remindAfter(ORIGIN);
+        assertThat(rules.run(remindAt)).isEqualTo(new TimeRuleService.Result(1, 0));
+        assertThat(row(id).get("reminded_at")).isNotNull();
+
+        // 本人が返事を追記して担当者の番に戻り、担当者がもう一度聞き返す
+        mvc.perform(post("/api/inquiries/" + id + "/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json("body", "こうです")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"));
+        assertThat(row(id).get("reminded_at")).isNull();
+        mvc.perform(post("/api/operator/inquiries/" + id + "/replies")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json("kind", "ASK", "body", "もう少し教えてください")))
+                .andExpect(status().isOk());
+
+        Instant newSince = ((Timestamp) row(id).get("awaiting_since")).toInstant();
+        assertThat(newSince).isAfter(ORIGIN.plusSeconds(86400L * 100));
+        assertThat(row(id).get("reminded_at")).isNull();
+        String view = view(id);
+        assertThat((String) JsonPath.read(view, "$.awaiting")).isEqualTo("ASKER_REPLY");
+        assertThat((Object) JsonPath.read(view, "$.noReply.remindedAt")).isNull();
+        assertThat((String) JsonPath.read(view, "$.noReply.remindAt")).isEqualTo(remindAfter(newSince).toString());
+        assertThat(rules.run(remindAt.plusSeconds(86400L * 30))).isEqualTo(new TimeRuleService.Result(0, 0));
+    }
+
+    // ---- 終わらせた人（closedBy） ----
+
+    @Test
+    void closedByは解決は本人_見送りは担当者_期間は時間で入る() throws Exception {
+        String resolved = answeredByAi();
+        resolve(resolved, true).andExpect(status().isOk());
+        assertThat((String) JsonPath.read(view(resolved), "$.closedBy")).isEqualTo("ASKER");
+
+        String declined = filedNow("期限の仕様", "job-admin");
+        mvc.perform(post("/api/operator/inquiries/" + declined + "/decline")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json("reasonKind", "OUT_OF_SCOPE", "reason", "対象外です")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.closedBy").value("OPERATOR"));
+        assertThat((String) JsonPath.read(view(declined), "$.closedBy")).isEqualTo("OPERATOR");
+
+        String timed = answeredByAi();
+        backdate(timed, ORIGIN);
+        Instant remindAt = remindAfter(ORIGIN);
+        rules.run(remindAt);
+        rules.run(BusinessDays.plus(remindAt, 5, TOKYO));
+        assertThat((String) JsonPath.read(view(timed), "$.closedBy")).isEqualTo("TIME");
+        assertThat((String) JsonPath.read(view(timed), "$.ending")).isEqualTo("ANSWERED");
+
+        // 終わっていない件は null。開き直すと null に戻る
+        assertThat((Object) JsonPath.read(view(idOf(start())), "$.closedBy")).isNull();
+        mvc.perform(post("/api/inquiries/" + timed + "/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json("body", "追記")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.closedBy").doesNotExist());
+        assertThat((Object) JsonPath.read(view(timed), "$.closedBy")).isNull();
     }
 
     // ---- 追記による開き直し ----

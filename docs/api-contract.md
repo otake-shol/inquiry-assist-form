@@ -75,19 +75,26 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 
 ### 返事がないとき
 
-結果を本人が確かめている件（`awaiting: RESULT_CONFIRMATION`）は、返事がないまま期間が過ぎると、1度知らせたうえで `ANSWERED`（回答済み）で終わる。答えたのが AI でも担当者でも同じ。担当者も本人も動かなくてよいのに、件が「本人の番」に残り続けることを防ぐ。
+本人の返事を待っている件は、返事がないまま期間が過ぎると、1度知らせたうえで終わる。担当者も本人も動かなくてよいのに、件が「本人の番」に残り続けることを防ぐ。終わり方は、何を待っていたかで決まる。
+
+| 待っていること | 終わり方 | 理由 |
+| --- | --- | --- |
+| 結果を本人が確かめる（`RESULT_CONFIRMATION`）。答えたのが AI でも担当者でも同じ | `ANSWERED`（回答済み） | 結果は伝えた。不足が埋まったかは分からない |
+| 担当者の聞き返しへの返事（`ASKER_REPLY`） | `WITHDRAWN`（取り下げ） | 答えを返す前に、本人が離れた |
+
+知らせることと、終えることの決まりは、どちらも同じ。
 
 | 順 | 条件 | 起きること |
 | --- | --- | --- |
-| 1. 知らせる | 結果を確かめる状態になってから、知らせるまでの期間が過ぎた。まだ知らせていない | 知らせた時刻（`remindedAt`）を持つ。本人側の未読（`unreadReply`）を `true` にする。状態は変えない |
-| 2. 終える | 知らせてから、終えるまでの期間が過ぎた | 終わる（`phase: CLOSED`、`ending: ANSWERED`）。本人側の未読を `true` にする。担当者に渡したことのある件なら、担当者のストリームに `updated` を流す（担当者の側の未読は変えない） |
+| 1. 知らせる | 本人の返事を待つ状態になってから、知らせるまでの期間が過ぎた。まだ知らせていない | 知らせた時刻（`remindedAt`）を持つ。本人側の未読（`unreadReply`）を `true` にする。状態は変えない |
+| 2. 終える | 知らせてから、終えるまでの期間が過ぎた | 終わる（`phase: CLOSED`。`ending` は上の表のとおり）。終わらせたのが時間であることを持つ（`closedBy: TIME`）。本人側の未読を `true` にする。担当者に渡したことのある件なら、担当者のストリームに `updated` を流す（担当者の側の未読は変えない） |
 
-- 起点は、結果を確かめる状態になった時刻（`awaitingSince`）。本人が問い合わせを開いただけでは変わらない。本人が答える（7）か追記する（11）と状態が変わり、この決まりの対象から外れる。担当者がもう一度結果を伝えると、起点も、知らせたかどうかも、最初からになる。
+- 起点は、本人の返事を待つ状態になった時刻（`awaitingSince`）。本人が問い合わせを開いただけでは変わらない。本人が答える（7）か追記する（11）と状態が変わり、この決まりの対象から外れる。担当者がもう一度結果を伝える、または聞き返すと、起点も、知らせたかどうかも、最初からになる。
 - 終えるまでの期間は、実際に知らせた時刻から数える。1回の判定で、同じ件を知らせて続けて終えることはしない（サーバーが止まっていた後でも、知らせずに終えない）。
 - 期間は営業日で数える。営業日は月曜から金曜（`inquiry.rules.zone` の時間帯で判定する）。祝日は扱わない。N 営業日後は、起点の時刻から日を1日ずつ進め、進めた先が営業日のときだけ数えて、N 回数えた日の同じ時刻。
 - 知らせは、ツールの中だけで行う（本人のボードの未読と、問い合わせの画面の文言）。Slack には投稿しない。本人を特定して外から届ける経路（Slack の個人宛てなど）は、SSO の後に加える。
-- 聞き返しへの返事を待っている件（`ASKER_REPLY`）と、入口の途中の件は、この決まりの対象にしない（別の決まりとして後で加える）。
-- `ANSWERED` で終わった件は、本人が追記すれば開き直せる（11）。担当者に渡したことのない件（AI の答えに返事がなかった件）も同じで、追記すると担当者に初めて渡る。
+- 入口の途中の件は、この決まりの対象にしない（別の決まりとして後で加える）。
+- この決まりで終わった件は、本人が追記すれば開き直せる（11）。`ANSWERED` で終わった、担当者に渡したことのない件（AI の答えに返事がなかった件）は、追記すると担当者に初めて渡る。時間で `WITHDRAWN` になった件も開き直せる（本人が自分で取り下げた件は、開き直せない）。
 
 設定:
 
@@ -104,10 +111,11 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 InquiryView と担当者向けの詳細は、`noReply` を持つ。
 
 ```json
-"noReply": { "remindAt": "2026-11-27T03:00:00Z", "remindedAt": null, "closesAt": null }
+"noReply": { "endsAs": "ANSWERED", "remindAt": "2026-11-27T03:00:00Z", "remindedAt": null, "closesAt": null }
 ```
 
-- `awaiting` が `RESULT_CONFIRMATION` のときだけ非 null。それ以外は `null`。
+- `awaiting` が `RESULT_CONFIRMATION` か `ASKER_REPLY` のときだけ非 null。それ以外は `null`。
+- `endsAs` は、期間が過ぎたときの終わり方。`ANSWERED` か `WITHDRAWN`。
 - `remindAt` は、知らせる予定の時刻。`remindedAt` は、実際に知らせた時刻（まだなら `null`）。`closesAt` は、終わる予定の時刻（知らせた後だけ非 null）。
 
 ### 開発用: 決まりの判定を、時刻を指定して行う
@@ -131,6 +139,7 @@ InquiryView と担当者向けの詳細は、`noReply` を持つ。
   "turn": "ASKER",
   "awaiting": "INTAKE_ANSWER",
   "ending": null,
+  "closedBy": null,
   "declined": null,
   "urgency": "NORMAL",
   "type": { "id": "LOOKS_WRONG", "label": "おかしいかもしれない", "by": "ASKER" },
@@ -171,7 +180,8 @@ InquiryView と担当者向けの詳細は、`noReply` を持つ。
 - `structured` は、問いを組み立てた後（`awaiting` が `QUESTION_CONFIRMATION` になった時点）から非 null。項目は `summary`（本人に見せる言い直しの文章。必須）、`targetSystem`、`goal`、`whatHappened`、`expectedResult`。`urgency` は `structured` から外し、問い合わせの `urgency` に一本化する。
 - `answer` は、答えの完了後に非 null。形は従来どおり（`grounded`、`answered`、`askerExplanation`、`memo`、`citations`）。
 - `canSendNow` は、いま「答えを待たずに担当者へ送る」（8）を実行できるか。
-- `noReply` は、結果を本人が確かめている間だけ非 null（「返事がないとき」の節）。
+- `noReply` は、本人の返事を待っている間（結果の確かめ、聞き返しへの返事）だけ非 null（「返事がないとき」の節）。
+- `closedBy` は、問い合わせを終わらせた人。`ASKER`、`OPERATOR`、`TIME`（返事がないまま期間が過ぎた）のいずれか。終わっていない件は `null`。開き直すと `null` に戻る。
 - `revisionsLeft` は、言い直しを作り直せる残り回数（初期値2）。
 - 廃止した項目: `categoryByAi`、`category`、`questions`、`systemGuessed`、`submittedAnswers`、`incidentGuidance`。
 
@@ -577,7 +587,7 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 ### `GET /api/operator/inquiries/{id}`
 
-`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`declined`、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
+`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
 
 `followUps` は廃止し、`intake` に置き換える。入力を終える前に担当者へ送られることがなくなったため、「未回答」の状態は要らなくなった。
 
@@ -678,7 +688,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 | 操作 | エンドポイント | 実行できるとき | その後 |
 | --- | --- | --- | --- |
 | 結果を確かめる | 7 | `awaiting: RESULT_CONFIRMATION` | 「本人が結果を確かめる」の決まりのとおり |
-| 追記する | 11 | 担当者に渡したことがあり、取り下げていない。または、担当者に渡したことがなく、`ANSWERED` で終わっている | 下の表 |
+| 追記する | 11 | 担当者に渡したことがあり、本人が取り下げていない。または、担当者に渡したことがなく、`ANSWERED` で終わっている | 下の表 |
 | 取り下げる | 12 | 終わっていない | 終わる（`ending: WITHDRAWN`） |
 
 追記（11）の後は、追記したときの状態で決まる。
@@ -688,10 +698,10 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 | 担当者の番（`HANDLING`） | 番は変えない。担当者の側を未読に戻す |
 | 聞き返しへの返事を待っている（`ASKER_REPLY`） | 担当者の番にする（`HANDLING`） |
 | 担当者の結果を確かめている（`RESULT_CONFIRMATION`） | 担当者の番にする（「解決していない」と答えたのと同じ） |
-| 終わっている（`RESOLVED`、`ANSWERED`、`DECLINED`） | 開き直す。終わり方を消し、区間を終わる前に戻して、担当者の番にする |
+| 終わっている（`RESOLVED`、`ANSWERED`、`DECLINED`、時間で終わった `WITHDRAWN`） | 開き直す。終わり方を消し、区間を終わる前に戻して、担当者の番にする |
 | 担当者に渡したことがなく、`ANSWERED` で終わっている（AI の答えに返事がなかった） | 開き直して、担当者に渡す（「担当者に渡す」の決まりのとおり。区間は種類で決まり、初めて渡すので担当者に通知する）。履歴の出来事は `REOPENED` |
 
-担当者に渡したことのない問い合わせ（上の `ANSWERED` の場合を除く）、取り下げた問い合わせへの追記は `INVALID_STATE`。
+担当者に渡したことのない問い合わせ（上の `ANSWERED` の場合を除く）、本人が取り下げた問い合わせ（`ending: WITHDRAWN` で `closedBy: ASKER`）への追記は `INVALID_STATE`。
 
 ### 10. `GET /api/inquiries`
 
@@ -741,7 +751,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 | `RESULT_DELIVERED` | 担当者 | 結果を伝えた |
 | `RESOLVED` | 本人 | 解決を伝えた |
 | `DECLINED` | 担当者 | 見送った |
-| `WITHDRAWN` | 本人 | 取り下げた |
+| `WITHDRAWN` | 本人、時間 | 本人が取り下げた。または、聞き返しに返事がないまま期間が過ぎて、取り下げになった |
 | `REOPENED` | 本人 | 終わった件を、追記で開き直した |
 | `REMINDED` | 時間 | 返事がないことを、本人に知らせた（状態は変わらない） |
 | `ANSWERED` | 時間 | 返事がないまま期間が過ぎて、終わった |

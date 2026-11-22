@@ -1,4 +1,4 @@
-import type { Awaiting, Declined, Ending } from "../api/types.ts";
+import type { Awaiting, ClosedBy, Declined, Ending } from "../api/types.ts";
 import type { Messages } from "../i18n/messages.ts";
 
 /**
@@ -34,14 +34,19 @@ export interface EndingText {
  * @param ending 終わり方
  * @param declined 見送りの理由（見送りで終わった件だけ）
  * @param asker 辞書の、本人の画面の状態を表す言葉（`messages.asker`）
+ * @param closedBy 終わらせた人。時間で「取り下げ」になった件は、専用の文言にする
  */
 export function endingText(
   ending: Ending,
   declined: Declined | null,
   asker: Messages["asker"],
+  closedBy: ClosedBy | null = null,
 ): EndingText {
   return {
-    lead: asker.endingText[ending],
+    lead:
+      ending === "WITHDRAWN" && closedBy === "TIME"
+        ? asker.endingTextTimeWithdrawn
+        : asker.endingText[ending],
     reason: ending === "DECLINED" ? (declined?.reason ?? null) : null,
   };
 }

@@ -93,6 +93,8 @@ export const en: Messages = {
     unresolvedSend: "Send to the support team",
     noReplyNotice: (date) =>
       `There has been no reply, so this inquiry will be closed as “Answered” on ${date}. Please choose below whether it was resolved. You can still send a follow-up from this page after it is closed.`,
+    noReplyNoticeWithdrawn: (date) =>
+      `There has been no reply, so this inquiry will be closed as “Withdrawn” on ${date}. To continue, please answer the support team's question below. You can still send a follow-up from this page after it is closed.`,
     withdrawLink: "Withdraw this inquiry",
     withdrawConfirm:
       "Withdraw this inquiry? You cannot add anything after you withdraw it.",
@@ -156,6 +158,8 @@ export const en: Messages = {
       DECLINE: "Notice of decline",
       NOTE: null,
     },
+    endingTextTimeWithdrawn:
+      "This inquiry was closed as withdrawn because there was no reply. You can continue by sending a message from this page.",
     handover: {
       blocked:
         "I delivered this to the support team right away. I attached what you wrote as it is.",
@@ -322,6 +326,8 @@ export const en: Messages = {
       `If there is no reply, the requester will be reminded on ${remindDate}.`,
     noReplyReminded: (remindedDate, closeDate) =>
       `The requester was reminded on ${remindedDate}. If there is no reply, this will be closed as “Answered” on ${closeDate}.`,
+    noReplyRemindedWithdrawn: (remindedDate, closeDate) =>
+      `The requester was reminded on ${remindedDate}. If there is no reply, this will be closed as “Withdrawn” on ${closeDate}.`,
     waitingAskerReply: "Waiting for the requester's reply.",
     waitingResult: "Waiting for the requester to check the result.",
     waitingAi: "Waiting for the AI to finish.",

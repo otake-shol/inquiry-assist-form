@@ -379,22 +379,81 @@ class InquiryStateMachineTest {
         assertThat(InquiryStateMachine.answeredByTime(operatorResult).to()).isEqualTo(closed(Ending.ANSWERED));
     }
 
+    private static final InquiryState ASKED_BACK = new InquiryState(Phase.DECIDE, Turn.ASKER, Awaiting.ASKER_REPLY, null);
+
     @Test
-    void 時間の遷移は結果を確かめている状態以外では例外() {
+    void 聞き返しへの返事を待つ件も知らせる遷移は状態を変えない() {
+        Transition t = InquiryStateMachine.reminded(ASKED_BACK);
+
+        assertThat(t.to()).isEqualTo(ASKED_BACK);
+        assertThat(t.event()).isEqualTo(HistoryEvent.REMINDED);
+        assertThat(t.actor()).isEqualTo(Actor.TIME);
+    }
+
+    @Test
+    void 聞き返しへの返事がないまま期間が過ぎると取り下げで終わり_起こしたのは時間() {
+        Transition t = InquiryStateMachine.withdrawnByTime(ASKED_BACK);
+
+        assertThat(t.to()).isEqualTo(closed(Ending.WITHDRAWN));
+        assertThat(t.event()).isEqualTo(HistoryEvent.WITHDRAWN);
+        assertThat(t.actor()).isEqualTo(Actor.TIME);
+        assertThat(t.handsOver()).isFalse();
+    }
+
+    @Test
+    void 待っていることで終わり方が決まる() {
+        assertThat(InquiryStateMachine.timeEnding(Awaiting.RESULT_CONFIRMATION)).isEqualTo(Ending.ANSWERED);
+        assertThat(InquiryStateMachine.timeEnding(Awaiting.ASKER_REPLY)).isEqualTo(Ending.WITHDRAWN);
+        for (Awaiting other : List.of(Awaiting.INTAKE_ANSWER, Awaiting.QUESTION_CONFIRMATION, Awaiting.INVESTIGATION, Awaiting.HANDLING)) {
+            assertThat(InquiryStateMachine.timeEnding(other)).isNull();
+        }
+        assertThat(InquiryStateMachine.timeEnding(null)).isNull();
+        assertThat(InquiryStateMachine.closedByTime(RESULT).to()).isEqualTo(closed(Ending.ANSWERED));
+        assertThat(InquiryStateMachine.closedByTime(ASKED_BACK).to()).isEqualTo(closed(Ending.WITHDRAWN));
+    }
+
+    @Test
+    void 時間の遷移は本人の返事を待つ状態以外では例外() {
         List<InquiryState> others = List.of(
                 INTAKE,
                 CONFIRMING,
                 INVESTIGATING,
                 handling(Phase.KNOW),
-                new InquiryState(Phase.DECIDE, Turn.ASKER, Awaiting.ASKER_REPLY, null),
                 closed(Ending.ANSWERED),
                 closed(Ending.RESOLVED));
         for (InquiryState state : others) {
-            assertThatThrownBy(() -> InquiryStateMachine.reminded(state))
-                    .isInstanceOf(IllegalTransitionException.class);
+            assertThatThrownBy(() -> InquiryStateMachine.reminded(state)).isInstanceOf(IllegalTransitionException.class);
             assertThatThrownBy(() -> InquiryStateMachine.answeredByTime(state))
                     .isInstanceOf(IllegalTransitionException.class);
+            assertThatThrownBy(() -> InquiryStateMachine.withdrawnByTime(state))
+                    .isInstanceOf(IllegalTransitionException.class);
+            assertThatThrownBy(() -> InquiryStateMachine.closedByTime(state))
+                    .isInstanceOf(IllegalTransitionException.class);
         }
+        // 結果の確かめは取り下げで終わらず、聞き返しへの返事は回答済みで終わらない
+        assertThatThrownBy(() -> InquiryStateMachine.answeredByTime(ASKED_BACK)).isInstanceOf(IllegalTransitionException.class);
+        assertThatThrownBy(() -> InquiryStateMachine.withdrawnByTime(RESULT)).isInstanceOf(IllegalTransitionException.class);
+    }
+
+    @Test
+    void 時間で取り下げになった件への追記は開き直し_終わる前の区間に戻して担当者の番にする() {
+        Context byTime = new Context(InquiryType.HOW_TO, true, Phase.DECIDE, false, 2, Actor.TIME);
+        Transition t = InquiryStateMachine.noted(closed(Ending.WITHDRAWN), byTime);
+
+        assertThat(t.to()).isEqualTo(handling(Phase.DECIDE));
+        assertThat(t.event()).isEqualTo(HistoryEvent.REOPENED);
+        assertThat(t.actor()).isEqualTo(Actor.ASKER);
+        assertThat(t.handsOver()).isTrue();
+    }
+
+    @Test
+    void 本人が自分で取り下げた件への追記は開き直せない() {
+        Context byAsker = new Context(InquiryType.HOW_TO, true, Phase.DECIDE, false, 2, Actor.ASKER);
+        assertThatThrownBy(() -> InquiryStateMachine.noted(closed(Ending.WITHDRAWN), byAsker))
+                .isInstanceOf(IllegalTransitionException.class);
+        // 終わらせた人が分からない（null）場合も、これまでどおり開き直せない
+        assertThatThrownBy(() -> InquiryStateMachine.noted(closed(Ending.WITHDRAWN), handedOver(null)))
+                .isInstanceOf(IllegalTransitionException.class);
     }
 
     @Test
