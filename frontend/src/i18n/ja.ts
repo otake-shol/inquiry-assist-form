@@ -283,8 +283,6 @@ export const ja = {
     verified: "照合済み",
     unverified: "照合できず",
     loadFailed: "読み込めませんでした。時間をおいて開き直してください。",
-    phaseSwitchLabel: "区間を切り替える",
-    phaseSwitchHint: "区間を切り替えられるのは、担当者の番のときだけです。",
     placementSummary: "置き直す",
     placementType: "種類",
     placementSystem: "システム",
@@ -303,9 +301,6 @@ export const ja = {
     declineSubmit: "見送りとして終える",
     historySummary: "状態の履歴",
     historyEmpty: "履歴はまだありません。",
-    dropSend: "「本人に送る」の入力欄を開きました",
-    dropDecline: "「見送る」の入力欄を開きました",
-    dropConsult: "「相談する」の入力欄を開きました",
     exchange: "やり取り",
     noMessages: "やり取りはまだありません。",
     actionFailed:
@@ -417,9 +412,6 @@ export const ja = {
     },
     investigationUnconfirmed:
       "本人が確かめていない言い直しをもとに調べています。",
-    investigationStart: "AI に調べさせる",
-    investigationRetry: "調べ直す",
-    investigationHint: "番は変わりません。結果は、担当者だけに見えます。",
     /** AI の案（「調べた結果」のすぐ下の節） */
     adviceTitle: "AI の案",
     adviceMark: "案",
@@ -493,16 +485,11 @@ export const ja = {
     precedentsTitle: "同じ置き場所の先例",
     precedentsEmpty: "同じ置き場所の先例は、まだありません。",
     precedentsLink: "先例の一覧を見る",
-    precedentUnconfirmed: "決めた人が、まだ確かめていません",
     precedentFunction: (name: string) => `機能: ${name}`,
     /** 担当者のボードと持ち主の画面の上部の、先例の一覧へのリンク */
     precedentsNav: "先例",
     /** AI の案が基づく先例 */
     adviceBasedOnPrecedents: "基づく先例",
-    /** 決定を記録する（会議などで決まった場合） */
-    recordDecisionSummary: "決定を記録する（会議などで決まった場合）",
-    recordDecisionNote:
-      "決めた人が後から確かめられるように、仕様の持ち主の画面に出ます。",
   },
 
   /** 仕様の持ち主の画面の文言 */
@@ -533,11 +520,6 @@ export const ja = {
     note: "決定は先例として残り、次の同じ種類の問い合わせで、担当者と AI が参照します。本人への連絡は、担当者が行います。",
     recorded: "決定を記録しました。担当者の番に戻りました。",
     notWaiting: "この相談は、すでに決まったか、取り下げられています。",
-    unconfirmedTitle: "確かめてほしい先例",
-    confirm: "このとおりです",
-    edit: "直す",
-    save: "保存",
-    cancel: "やめる",
   },
 
   /** 先例の一覧の画面の文言 */

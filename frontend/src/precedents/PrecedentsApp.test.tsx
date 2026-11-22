@@ -50,7 +50,6 @@ const items = () => [
     inquiryId: "op-3",
     decision: "Old decision.",
     language: "en",
-    confirmed: false,
     function: { id: "posting", label: "求人の掲載" },
     decisionKind: "REJECT",
   }),
@@ -81,7 +80,7 @@ const listCalls = (calls: RecordedCall[]) =>
   );
 
 describe("先例の一覧の画面", () => {
-  it("/precedents で出る。見出し、先例のカード（新しい順）、置き場所、決定の種類、内容、状況、理由、決めた人と日付、確かめられていない印を出す", async () => {
+  it("/precedents で出る。見出し、先例のカード（新しい順）、置き場所、決定の種類、内容、状況、理由、決めた人と日付を出す", async () => {
     openPrecedents();
 
     expect(
@@ -100,10 +99,8 @@ describe("先例の一覧の画面", () => {
     expect(cards[0]).toHaveTextContent("意図どおり");
     expect(cards[0]).toHaveTextContent("仕様の持ち主（開発用）");
     expect(cards[0]).toHaveTextContent(/\d+\/\d+/);
-    expect(cards[0]).not.toHaveTextContent("まだ確かめていません");
     expect(cards[1]).toHaveTextContent("受けない");
     expect(cards[1]).toHaveTextContent("求人の掲載");
-    expect(cards[1]).toHaveTextContent("決めた人が、まだ確かめていません");
     // 状況と理由も出る
     expect(cards[0]).toHaveTextContent(
       "掲載期限の時刻ちょうどに、求人が一覧から消える。",
@@ -152,12 +149,13 @@ describe("先例の一覧の画面", () => {
     ).toBeInTheDocument();
   });
 
-  it("この画面では先例を直せない（直す、このとおりです、保存の操作は出さない）", async () => {
+  it("この画面では先例を直せない（入力欄も、直す操作も出さない）", async () => {
     openPrecedents();
 
     await screen.findByText("新しい決定。");
-    expect(screen.queryByRole("button", { name: "直す" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "このとおりです" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /直す|このとおりです|保存/ }),
+    ).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 

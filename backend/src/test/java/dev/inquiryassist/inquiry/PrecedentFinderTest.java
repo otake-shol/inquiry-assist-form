@@ -32,7 +32,6 @@ class PrecedentFinderTest {
                 decision,
                 "理由",
                 "持ち主",
-                RecordedBy.OWNER,
                 "ja",
                 Instant.now());
         return p;

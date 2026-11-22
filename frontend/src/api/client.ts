@@ -12,11 +12,8 @@ import type {
   OperatorDetail,
   OperatorList,
   OwnerList,
-  Phase,
-  Precedent,
   PrecedentFilter,
   PrecedentList,
-  PrecedentUpdate,
   Translation,
   Urgency,
 } from "./types.ts";
@@ -325,18 +322,6 @@ export function createClient(language: Language) {
   }
 
   /**
-   * `POST /api/operator/inquiries/{id}/investigation`。AI に調べさせる（調べ直す）。番は変わらず、
-   * 結果は担当者だけに見える。
-   * @param id 問い合わせ ID
-   */
-  function investigate(id: string): Promise<OperatorDetail> {
-    return request<OperatorDetail>(
-      "POST",
-      `/api/operator/inquiries/${id}/investigation`,
-    );
-  }
-
-  /**
    * `POST /api/operator/inquiries/{id}/draft`。本人に送る文章の下書きを AI に作らせる。
    * 状態は変えず、何も送らない（下書きは担当者が確かめ、直してから送る）。
    * @param id 問い合わせ ID
@@ -418,63 +403,18 @@ export function createClient(language: Language) {
   }
 
   /**
-   * `POST /api/operator/inquiries/{id}/decision`。担当者が、会議などで決まった決定を記録する。
-   * 先例が1つできる（確かめられていない状態）。相談している間なら、担当者の番に戻る。応答は担当者向けの詳細。
-   * @param id 問い合わせ ID
-   * @param decision 決定の内容（`decidedBy` は決めた人の名前）
-   */
-  function recordDecision(
-    id: string,
-    decision: DecisionRequest,
-  ): Promise<OperatorDetail> {
-    return request<OperatorDetail>(
-      "POST",
-      `/api/operator/inquiries/${id}/decision`,
-      decision,
-    );
-  }
-
-  /**
    * `GET /api/precedents`。先例の一覧（新しい順、最大100件）。
-   * @param filter 置き場所の絞り込みと、確かめられていないものだけ
+   * @param filter 置き場所の絞り込み
    */
   function getPrecedents(filter: PrecedentFilter = {}): Promise<PrecedentList> {
     const query = new URLSearchParams();
     if (filter.systemId) query.set("systemId", filter.systemId);
     if (filter.functionId) query.set("functionId", filter.functionId);
     if (filter.type) query.set("type", filter.type);
-    if (filter.unconfirmedOnly) query.set("unconfirmedOnly", "true");
     const text = query.toString();
     return request<PrecedentList>(
       "GET",
       text === "" ? "/api/precedents" : `/api/precedents?${text}`,
-    );
-  }
-
-  /**
-   * `PUT /api/precedents/{id}`。先例を直す（直すと、確かめたことになる）。
-   * @param id 先例の id
-   * @param update 直した内容
-   */
-  function updatePrecedent(
-    id: string,
-    update: PrecedentUpdate,
-  ): Promise<Precedent> {
-    return request<Precedent>(
-      "PUT",
-      `/api/precedents/${encodeURIComponent(id)}`,
-      update,
-    );
-  }
-
-  /**
-   * `POST /api/precedents/{id}/confirm`。先例を確かめた（本文なし）。
-   * @param id 先例の id
-   */
-  function confirmPrecedent(id: string): Promise<Precedent> {
-    return request<Precedent>(
-      "POST",
-      `/api/precedents/${encodeURIComponent(id)}/confirm`,
     );
   }
 
@@ -487,21 +427,6 @@ export function createClient(language: Language) {
     return request<Translation>(
       "POST",
       `/api/operator/inquiries/${id}/translation`,
-    );
-  }
-
-  /**
-   * `PUT /api/operator/inquiries/{id}/phase`。区間を変える（分かる、決まる、行われる）。
-   * @param id 問い合わせ ID
-   * @param phase 新しい区間
-   */
-  function setPhase(id: string, phase: Phase): Promise<OperatorDetail> {
-    return request<OperatorDetail>(
-      "PUT",
-      `/api/operator/inquiries/${id}/phase`,
-      {
-        phase,
-      },
     );
   }
 
@@ -543,7 +468,6 @@ export function createClient(language: Language) {
     markRead,
     postReply,
     declineInquiry,
-    investigate,
     draft,
     translate,
     consult,
@@ -551,11 +475,7 @@ export function createClient(language: Language) {
     getOwnerList,
     getOwnerDetail,
     decide,
-    recordDecision,
     getPrecedents,
-    updatePrecedent,
-    confirmPrecedent,
-    setPhase,
     setPlacement,
   };
 }

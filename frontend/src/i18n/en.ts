@@ -241,8 +241,6 @@ export const en: Messages = {
     verified: "Verified",
     unverified: "Not verified",
     loadFailed: "Could not load this. Please wait a moment and open it again.",
-    phaseSwitchLabel: "Switch stage",
-    phaseSwitchHint: "You can switch the stage only on staff's turn.",
     placementSummary: "Reclassify",
     placementType: "Type",
     placementSystem: "System",
@@ -261,9 +259,6 @@ export const en: Messages = {
     declineSubmit: "Close as declined",
     historySummary: "Status history",
     historyEmpty: "No history yet.",
-    dropSend: 'The "Send to the requester" field is open',
-    dropDecline: 'The "Decline" field is open',
-    dropConsult: 'The "Consult" field is open',
     exchange: "Conversation",
     noMessages: "No messages yet.",
     actionFailed: "Something went wrong. Please try again in a moment.",
@@ -366,10 +361,6 @@ export const en: Messages = {
     },
     investigationUnconfirmed:
       "This is based on a restatement the requester has not confirmed.",
-    investigationStart: "Have AI look into it",
-    investigationRetry: "Look into it again",
-    investigationHint:
-      "The turn does not change. Only staff can see the result.",
     adviceTitle: "AI's suggestion",
     adviceMark: "Suggestion",
     adviceIntro:
@@ -434,13 +425,9 @@ export const en: Messages = {
     precedentsTitle: "Precedents for the same place",
     precedentsEmpty: "There are no precedents for the same place yet.",
     precedentsLink: "See all precedents",
-    precedentUnconfirmed: "Not yet confirmed by the person who decided",
     precedentFunction: (name) => `Function: ${name}`,
     precedentsNav: "Precedents",
     adviceBasedOnPrecedents: "Based on precedents",
-    recordDecisionSummary: "Record a decision (made in a meeting or elsewhere)",
-    recordDecisionNote:
-      "It will appear on the spec owner's screen so that the person who decided can confirm it.",
   },
 
   owner: {
@@ -470,11 +457,6 @@ export const en: Messages = {
     note: "The decision is kept as a precedent that staff and AI refer to for similar inquiries. Staff will tell the requester.",
     recorded: "The decision was recorded. It is staff's turn again.",
     notWaiting: "This consultation has already been decided or was withdrawn.",
-    unconfirmedTitle: "Precedents to confirm",
-    confirm: "This is correct",
-    edit: "Edit",
-    save: "Save",
-    cancel: "Cancel",
   },
 
   precedents: {

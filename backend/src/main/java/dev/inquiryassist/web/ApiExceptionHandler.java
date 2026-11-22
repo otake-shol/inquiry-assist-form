@@ -6,7 +6,6 @@ import dev.inquiryassist.core.lifecycle.IllegalTransitionException;
 import dev.inquiryassist.inquiry.ComposeFailedException;
 import dev.inquiryassist.inquiry.InquiryNotFoundException;
 import dev.inquiryassist.inquiry.InvalidStateException;
-import dev.inquiryassist.inquiry.PrecedentNotFoundException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,8 +50,8 @@ public class ApiExceptionHandler {
      * @param e 例外
      * @return 404 の応答
      */
-    @ExceptionHandler({InquiryNotFoundException.class, PrecedentNotFoundException.class})
-    public ResponseEntity<ErrorBody> notFound(RuntimeException e) {
+    @ExceptionHandler(InquiryNotFoundException.class)
+    public ResponseEntity<ErrorBody> notFound(InquiryNotFoundException e) {
         return json(HttpStatus.NOT_FOUND, "NOT_FOUND", e.getMessage());
     }
 

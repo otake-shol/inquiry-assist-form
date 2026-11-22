@@ -13,7 +13,6 @@ import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.DeclineReason;
 import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
-import dev.inquiryassist.core.lifecycle.Phase;
 import dev.inquiryassist.core.lifecycle.ReplyKind;
 import dev.inquiryassist.core.lifecycle.Transition;
 import dev.inquiryassist.core.skill.Draft;
@@ -32,7 +31,7 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 
 /**
- * オペレータ向けの一覧・詳細・既読化と、担当者の操作（聞き返す・結果を伝える、見送る、区間を変える、置き直す）、
+ * オペレータ向けの一覧・詳細・既読化と、担当者の操作（聞き返す・結果を伝える、見送る、置き直す）、
  * 通知結果の記録。担当者に渡したことのある問い合わせだけを扱う。状態の遷移の規則は、{@link InquiryStateMachine} が決める。
  */
 @Service
@@ -51,7 +50,6 @@ public class OperatorService {
     private final InquiryPresenter presenter;
     private final IntakeLocales locales;
     private final ApplicationEventPublisher events;
-    private final InvestigationRunner runner;
     private final DrafterSkill drafter;
     private final InquiryCommitter committer;
     private final PrecedentRepository precedents;
@@ -64,7 +62,6 @@ public class OperatorService {
      * @param presenter 一覧と詳細の項目を作る
      * @param locales 置き直しの入力を確かめる、システムと機能の一覧（言語ごと）
      * @param events 更新の確定後にイベントを発行する
-     * @param runner 調べ直しの実行
      * @param drafter 返信の下書き
      * @param committer 下書きの利用量の保存
      * @param precedents 先例（詳細の {@code decisions}）
@@ -77,7 +74,6 @@ public class OperatorService {
             InquiryPresenter presenter,
             IntakeLocales locales,
             ApplicationEventPublisher events,
-            InvestigationRunner runner,
             DrafterSkill drafter,
             InquiryCommitter committer,
             PrecedentRepository precedents,
@@ -88,7 +84,6 @@ public class OperatorService {
         this.presenter = presenter;
         this.locales = locales;
         this.events = events;
-        this.runner = runner;
         this.drafter = drafter;
         this.committer = committer;
         this.precedents = precedents;
@@ -189,22 +184,6 @@ public class OperatorService {
     }
 
     /**
-     * 担当者が区間を変える。番は変えない。
-     *
-     * @param id 問い合わせの識別子
-     * @param phase 変更後の区間（{@code KNOW}、{@code DECIDE}、{@code ACT}）
-     * @return 変更後の全内容
-     * @throws IllegalArgumentException 区間が範囲外の場合
-     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
-     * @throws InvalidStateException 担当者の番でない場合
-     */
-    public OperatorDetail changePhase(UUID id, Phase phase, String lang) {
-        InquiryEntity inquiry = loadHandedOver(id);
-        inquiry.apply(InquiryStateMachine.phaseChanged(inquiry.state(), phase), Instant.now());
-        return toDetail(saveAndPublish(inquiry), lang);
-    }
-
-    /**
      * 担当者が置き直す。置いた人は担当者になる。種類が変わったら、区間を新しい種類の決まりに合わせる。番は変えない。
      * 入口で本人が選んだ答えは、そのまま残す。変える前と後は、状態の履歴に残す。
      *
@@ -231,32 +210,6 @@ public class OperatorService {
                 Instant.now(),
                 java.util.Map.of("before", namesOf(before), "after", namesOf(after)));
         return toDetail(saveAndPublish(inquiry), lang);
-    }
-
-    /**
-     * 担当者が、調べ直すように頼む。AI の調査を裏で始める（番は変えない）。種類が {@code CHANGE_REQUEST} でも、頼まれれば調べる。
-     * 結果は担当者だけに見せる。前の結果は、新しい結果が出た時点で置き換わる（失敗した場合は残る）。
-     *
-     * @param id 問い合わせの識別子
-     * @return 調査を始めた後の全内容（{@code investigation.status} は {@code RUNNING}）
-     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
-     * @throws InvalidStateException 終わっている、言い直しがない、またはいま調べている場合
-     */
-    public OperatorDetail reinvestigate(UUID id, String lang) {
-        InquiryEntity inquiry = loadHandedOver(id);
-        if (inquiry.state().closed()) {
-            throw new InvalidStateException("終わった問い合わせは調べ直せません");
-        }
-        if (inquiry.structured() == null) {
-            throw new InvalidStateException("言い直しがないため、調べ直せません");
-        }
-        if (inquiry.investigationStatus == InvestigationStatus.RUNNING) {
-            throw new InvalidStateException("いま調べている最中です");
-        }
-        if (!runner.startBackground(id)) {
-            throw new InvalidStateException("調べ直せません。最新の状態を取得し直してください");
-        }
-        return toDetail(loadHandedOver(id), lang);
     }
 
     /**
@@ -311,9 +264,14 @@ public class OperatorService {
         return toDetail(saveAndPublish(inquiry), lang);
     }
 
+    /** 既定の相談先。全体で1つの一覧（設定 {@code inquiry.consultants}）。なければ空。 */
+    private List<String> defaultConsultants() {
+        return properties.consultants() == null ? List.of() : properties.consultants();
+    }
+
     /** 相談先を決める。省くか空なら既定の相談先。1〜5人、名前は前後の空白を除いて1〜100文字。 */
     private List<String> consultants(List<String> to, InquiryEntity inquiry) {
-        List<String> chosen = to == null || to.isEmpty() ? properties.consultantsFor(inquiry.placement()) : to;
+        List<String> chosen = to == null || to.isEmpty() ? defaultConsultants() : to;
         List<String> names = new ArrayList<>();
         for (String name : chosen) {
             String trimmed = name == null ? "" : name.strip();
@@ -540,7 +498,7 @@ public class OperatorService {
                 e.handoverReason,
                 presenter.investigationOf(e),
                 presenter.adviceOf(e),
-                properties.consultantsFor(e.placement()),
+                defaultConsultants(),
                 List.copyOf(e.consultations),
                 precedents.findByInquiryIdOrderByDecidedAtAsc(e.id).stream()
                         .map(p -> presenter.precedentOf(p, lang))

@@ -2,7 +2,6 @@ package dev.inquiryassist.inquiry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
@@ -93,40 +92,16 @@ class AnswerStepsApiTest extends ApiSupport {
     }
 
     @Test
-    void 調べ直すと手順が置き換わる() throws Exception {
-        String id = toAnswering(HOW_TO, null);
+    void 説明だけが失敗した場合は手順も空で保存され_担当者向けにも空() throws Exception {
+        String id = toAnswering("[説明エラー] " + HOW_TO, null);
         stream(id);
-        sendNow(id).andExpect(status().isOk());
         assertThat(jdbc.queryForObject(
                         "select jsonb_array_length(answer_steps) from inquiries where id = ?::uuid", Integer.class, id))
-                .isEqualTo(2);
-        // 調べ直しの前に、古い手順を、見分けられる別の手順にしておく
-        jdbc.update("update inquiries set answer_steps = '[{\"action\":\"古い手順\",\"check\":null}]'::jsonb where id = ?::uuid", id);
-        assertThat((List<String>) JsonPath.read(operatorDetail(id), "$.answer.steps[*].action")).containsExactly("古い手順");
+                .isZero();
 
-        mvc.perform(post("/api/operator/inquiries/" + id + "/investigation")).andExpect(status().isOk());
-        awaitInvestigationIdle(id);
-
-        assertThat((List<String>) JsonPath.read(operatorDetail(id), "$.answer.steps[*].action"))
-                .containsExactly("求人管理画面で、対象の求人の編集を開く", "掲載期限を変えて、保存する");
-    }
-
-    @Test
-    void 説明だけが失敗した場合は古い手順を残さない() throws Exception {
-        String id = toAnswering(HOW_TO, null);
-        stream(id);
         sendNow(id).andExpect(status().isOk());
-        jdbc.update("update inquiries set answer_steps = '[{\"action\":\"古い手順\",\"check\":null}]'::jsonb where id = ?::uuid", id);
-        // 調べ直しの結果で説明だけが失敗するよう、確定した言い直しにタグを付ける（モックは言い直した問いの goal から読む。調査には確定した言い直しを渡す）
-        jdbc.update(
-                "update inquiries set structured_confirmed = jsonb_set(structured_confirmed, '{goal}', '\"[説明エラー] 使い方を教えて\"') where id = ?::uuid",
-                id);
-
-        mvc.perform(post("/api/operator/inquiries/" + id + "/investigation")).andExpect(status().isOk());
-        awaitInvestigationIdle(id);
 
         String detail = operatorDetail(id);
-        assertThat((String) JsonPath.read(detail, "$.investigation.status")).isEqualTo("DONE");
         assertThat((Boolean) JsonPath.read(detail, "$.answer.grounded")).isFalse();
         assertThat((List<Object>) JsonPath.read(detail, "$.answer.steps")).isEmpty();
     }

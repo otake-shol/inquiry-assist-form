@@ -516,7 +516,7 @@ export interface OperatorDetail extends StateFields {
   investigation: Investigation;
   /** AI の案（判断の案、手順の案） */
   advice: Advice;
-  /** 既定の相談先の名前（なければ空。古い API では欠ける） */
+  /** 相談先の名前（設定の一覧。なければ空。古い API では欠ける） */
   defaultConsultants?: string[];
   /** 仕様の持ち主への相談（古い順。古い API では欠ける） */
   consultations?: Consultation[];
@@ -627,10 +627,6 @@ export interface Precedent {
   decision: string;
   reason: string;
   decidedBy: string;
-  /** 記録した人（`OWNER`：仕様の持ち主、`OPERATOR`：担当者が代わりに） */
-  recordedBy: string;
-  /** 決めた人が内容を確かめたか */
-  confirmed: boolean;
   /** 文章が書かれた言語 */
   language: string;
   decidedAt: string;
@@ -667,23 +663,12 @@ export interface DecisionRequest {
   decidedBy: string;
 }
 
-/** `PUT /api/precedents/{id}` のリクエスト（すべて必須）。直すと、確かめたことになる。 */
-export interface PrecedentUpdate {
-  situation: string;
-  decisionKind: DecisionKind;
-  decision: string;
-  reason: string;
-  decidedBy: string;
-}
-
 /** `GET /api/precedents` の絞り込み。指定した項目が一致するものだけが返る。 */
 export interface PrecedentFilter {
   systemId?: string;
   functionId?: string;
   /** 種類の id */
   type?: string;
-  /** 確かめられていない先例だけ */
-  unconfirmedOnly?: boolean;
 }
 
 /** `GET /api/precedents` の応答。新しい順、最大100件。 */

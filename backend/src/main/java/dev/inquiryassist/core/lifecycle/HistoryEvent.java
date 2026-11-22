@@ -38,7 +38,7 @@ public enum HistoryEvent {
     DECIDED,
     /** 担当者が相談を取り下げた。 */
     CONSULTATION_CANCELED,
-    /** 担当者が区間を変えた。 */
+    /** 担当者が区間を変えた（区間を手で変える操作は、なくした。以前の履歴を読むために残す）。 */
     PHASE_CHANGED,
     /** 担当者が置き直した。 */
     PLACEMENT_CHANGED

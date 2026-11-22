@@ -16,7 +16,6 @@ import dev.inquiryassist.core.skill.Translation;
 import dev.inquiryassist.core.skill.TranslatorSkill;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
@@ -42,7 +41,7 @@ class TranslationServiceTest {
     }
 
     @Test
-    void 返ってきた文章の数が合わなければAI_UNAVAILABLEとして扱い_訳は保存しない() {
+    void 返ってきた文章の数が合わなければAI_UNAVAILABLEとして扱い_失敗した呼び出しの利用量だけを保存する() {
         InquiryEntity e = inquiry("The posting disappeared.");
         // 1件渡したのに、2件返す偽のスキル
         when(translator.translate(any(), any(), any()))
@@ -50,13 +49,12 @@ class TranslationServiceTest {
 
         assertThatThrownBy(() -> service.translate(e.id, "ja")).isInstanceOf(AiUnavailableException.class);
 
-        // 失敗した呼び出しの利用量だけを保存する。訳は保存しない
+        // 失敗した呼び出しの利用量を保存する
         InquiryEntity saved = new InquiryEntity("u", Urgency.NORMAL, Instant.now());
         org.mockito.ArgumentCaptor<Function<InquiryEntity, InquiryCommitter.Update>> captor =
                 org.mockito.ArgumentCaptor.forClass(Function.class);
         verify(committer).update(any(), captor.capture());
         captor.getValue().apply(saved);
-        assertThat(saved.translations).isEmpty();
         assertThat(saved.usages).singleElement().satisfies(u -> {
             assertThat(u.step()).isEqualTo("translator");
             assertThat(u.failed()).isTrue();
@@ -73,17 +71,27 @@ class TranslationServiceTest {
     }
 
     @Test
-    void すべて保存済みならスキルを呼ばず_利用量も保存しない() {
+    void 訳は保存せず_頼まれるたびにその時点の文章を訳す() {
         InquiryEntity e = inquiry("The posting disappeared.");
-        e.translations.put("ja", Map.of(TranslationService.hashOf("The posting disappeared."), "求人が消えました。"));
+        when(translator.translate(any(), any(), any()))
+                .thenReturn(new AiResult<>(new Translation(List.of("求人が消えました。")), Usage.ofMock()));
 
-        TranslationResult result = service.translate(e.id, "ja");
+        service.translate(e.id, "ja");
+        service.translate(e.id, "ja");
 
-        assertThat(result.items()).singleElement().satisfies(item -> {
-            assertThat(item.key()).isEqualTo("utterance");
-            assertThat(item.original()).isEqualTo("The posting disappeared.");
-            assertThat(item.translated()).isEqualTo("求人が消えました。");
-        });
+        // 2度目も、スキルを呼ぶ。利用量は、そのたびに記録する
+        verify(translator, org.mockito.Mockito.times(2)).translate(List.of("The posting disappeared."), "en", "ja");
+        verify(committer, org.mockito.Mockito.times(2)).update(any(), any());
+    }
+
+    @Test
+    void 訳す文章がなければスキルを呼ばない() {
+        InquiryEntity e = new InquiryEntity("u", Urgency.NORMAL, Instant.now());
+        e.language = "en";
+        e.handedOverAt = Instant.now();
+        when(repository.findById(e.id)).thenReturn(Optional.of(e));
+
+        assertThat(service.translate(e.id, "ja").items()).isEmpty();
         verify(translator, never()).translate(any(), any(), any());
         verify(committer, never()).update(any(), any());
     }
@@ -103,20 +111,18 @@ class TranslationServiceTest {
     }
 
     @Test
-    void 同じ文章は1度だけ訳す_足りない分だけをスキルに渡す() {
+    void 同じ文章は1度だけスキルに渡し_担当者の発言は訳さない() {
         InquiryEntity e = inquiry("同じ");
         e.addMessage(MessageAuthor.ASKER, MessageKind.NOTE, "利用者", "同じ", Instant.now());
         e.addMessage(MessageAuthor.OPERATOR, MessageKind.ASK, "担当者", "担当者の発言", Instant.now());
         e.addMessage(MessageAuthor.ASKER, MessageKind.NOTE, "利用者", "新しい発言", Instant.now());
-        e.translations.put("ja", Map.of(TranslationService.hashOf("同じ"), "same"));
         when(translator.translate(any(), any(), any()))
-                .thenReturn(new AiResult<>(new Translation(List.of("new")), Usage.ofMock()));
+                .thenReturn(new AiResult<>(new Translation(List.of("same", "new")), Usage.ofMock()));
 
         TranslationResult result = service.translate(e.id, "ja");
 
-        verify(translator).translate(List.of("新しい発言"), "en", "ja");
+        verify(translator).translate(List.of("同じ", "新しい発言"), "en", "ja");
         assertThat(result.items()).extracting(TranslationResult.Item::translated).containsExactly("same", "same", "new");
-        // 担当者の発言は訳さない
         assertThat(result.items()).extracting(TranslationResult.Item::original).doesNotContain("担当者の発言");
     }
 }

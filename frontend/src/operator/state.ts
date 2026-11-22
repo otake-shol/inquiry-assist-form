@@ -18,9 +18,6 @@ export const OPERATOR_COLUMNS: OperatorColumn[] = [
   "CLOSED",
 ];
 
-/** カードを落としたときに始める操作。「本人に送る」「相談する」「見送る」のどれかの入力欄を開く。 */
-export type DropIntent = "send" | "consult" | "decline";
-
 /** オペレータ画面の状態。 */
 export interface OperatorState {
   items: OperatorItem[];
@@ -139,31 +136,6 @@ export function arrangeOperatorBoard(
     );
   }
   return board;
-}
-
-/**
- * カードを別の列に落とせるか。落とせるのは「担当者の番」から「相談中」「本人の番」「終わり」へだけ。
- * 番を戻すのは本人か仕様の持ち主の操作なので、「相談中」「本人の番」「終わり」から動かす操作は受け付けない。
- * @param from 掴んだカードがある列
- * @param to 落とす先の列
- */
-export function canDropOnColumn(
-  from: OperatorColumn,
-  to: OperatorColumn,
-): boolean {
-  return from === "OPERATOR" && to !== "OPERATOR";
-}
-
-/**
- * 落とした列に対応する、始める操作。「本人の番」なら「本人に送る」、「相談中」なら「相談する」、
- * 「終わり」なら「見送る」。
- * @param to 落とす先の列
- */
-export function dropIntentOf(to: OperatorColumn): DropIntent | null {
-  if (to === "ASKER") return "send";
-  if (to === "CONSULTING") return "consult";
-  if (to === "CLOSED") return "decline";
-  return null;
 }
 
 /**

@@ -4,15 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Root from "../Root.tsx";
 import { LANGUAGE_STORAGE_KEY } from "../i18n/language.ts";
 import {
-  CONSULTATION_STATE,
   FakeOperatorStream,
   installFakeFetch,
   makeConfig,
-  makeConsultation,
   makeDetail,
   makeItem,
   makePrecedent,
-  type RecordedCall,
   type RouteResult,
 } from "../test/fakes.ts";
 
@@ -25,8 +22,6 @@ afterEach(() => {
   window.history.replaceState({}, "", "/");
   document.title = "";
 });
-
-const DECISION_PATH = "/api/operator/inquiries/op-1/decision";
 
 type Route =
   RouteResult | ((b: unknown, h: Record<string, string>) => RouteResult);
@@ -67,15 +62,6 @@ async function openPanel(
   await within(panel).findByText(detail.utterance!);
   return { calls, user, panel };
 }
-
-const callsTo = (calls: RecordedCall[], path: string) =>
-  calls.filter((c) => c.method === "POST" && c.path === path);
-
-/** 記録する決定の入力欄を、決定を記録するフォームの中から取る。 */
-const recordFold = (panel: HTMLElement) =>
-  within(panel)
-    .getByText("決定を記録する（会議などで決まった場合）")
-    .closest("details")!;
 
 describe("担当者のパネル: 同じ置き場所の先例", () => {
   it("「調べた結果」と「AI の案」の間に、見出し「同じ置き場所の先例」の節を置く。先例ごとに、種類、内容、理由、状況、決めた人と日付を、実線の枠で出す", async () => {
@@ -179,31 +165,6 @@ describe("担当者のパネル: 同じ置き場所の先例", () => {
     expect(card("別の機能の決定。")).toHaveTextContent("機能: 応募者の一覧");
     expect(card("同じ機能の決定。")).not.toHaveTextContent("機能:");
     expect(card("機能なしの決定。")).not.toHaveTextContent("機能:");
-  });
-
-  it("決めた人が確かめていない先例には、「決めた人が、まだ確かめていません」の印を付ける。確かめた先例には付けない", async () => {
-    const { panel } = await openPanel(
-      handlingDetail({
-        precedents: [
-          makePrecedent({
-            id: "u",
-            decision: "確かめていない決定。",
-            confirmed: false,
-            recordedBy: "OPERATOR",
-          }),
-          makePrecedent({ id: "c", decision: "確かめた決定。" }),
-        ],
-      }),
-    );
-
-    const card = (text: string) =>
-      within(panel).getByText(text).closest(".op-decision") as HTMLElement;
-    expect(card("確かめていない決定。")).toHaveTextContent(
-      "決めた人が、まだ確かめていません",
-    );
-    expect(card("確かめた決定。")).not.toHaveTextContent(
-      "まだ確かめていません",
-    );
   });
 
   it("節の末尾に、先例の一覧へのリンクを置く。この置き場所（システム、種類。機能が決まっていれば機能）で絞ってある", async () => {
@@ -346,196 +307,9 @@ describe("担当者のパネル: AI の案の「基づく先例」", () => {
   });
 });
 
-describe("担当者のパネル: 決定を記録する", () => {
-  it("担当者の番のとき、「相談する」の下に、折りたたみ「決定を記録する（会議などで決まった場合）」を置く。説明を添える", async () => {
-    const { panel } = await openPanel(handlingDetail());
-
-    const fold = recordFold(panel);
-    expect(fold).not.toHaveAttribute("open");
-    const consult = within(panel)
-      .getByText("相談する", { selector: "summary" })
-      .closest("details")!;
-    const decline = within(panel)
-      .getByText("見送る", { selector: "summary" })
-      .closest("details")!;
-    const follows = (a: Node, b: Node) =>
-      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(follows(consult, fold)).toBe(true);
-    expect(follows(fold, decline)).toBe(true);
-    expect(
-      within(fold).getByText(
-        "決めた人が後から確かめられるように、仕様の持ち主の画面に出ます。",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(fold).getByRole("button", { name: "決定を記録する" }),
-    ).toBeDisabled();
-  });
-
-  it("持ち主の「決める」と同じ項目。状況の初期値は言い直し。決めた人は名前を書く欄で、相談先の名前を候補に出す", async () => {
-    const { panel } = await openPanel(
-      handlingDetail({
-        defaultConsultants: ["仕様の持ち主（開発用）", "システムAの持ち主"],
-      }),
-    );
-
-    const fold = within(recordFold(panel));
-    expect(fold.getByLabelText("状況")).toHaveValue(
-      "求人が一覧に出なくなった理由を知りたい。",
-    );
-    const kind = fold.getByLabelText("決定の種類");
-    expect(
-      within(kind)
-        .getAllByRole("option")
-        .map((o) => o.textContent),
-    ).toEqual([
-      "選んでください",
-      "意図どおり",
-      "不具合",
-      "受ける",
-      "受けない",
-      "採用する",
-      "見送る",
-      "その他",
-    ]);
-    const by = fold.getByLabelText("決めた人");
-    expect(by.tagName).toBe("INPUT");
-    expect(by).toHaveValue("");
-    const listId = by.getAttribute("list")!;
-    const options = Array.from(
-      document.getElementById(listId)!.querySelectorAll("option"),
-    ).map((o) => o.getAttribute("value"));
-    expect(options).toEqual(["仕様の持ち主（開発用）", "システムAの持ち主"]);
-  });
-
-  it("入力が足りないと押せない。埋めて押すと、POST …/decision に決定を送り、決定の節に出る（状態は担当者の番のまま）", async () => {
-    const recorded = makePrecedent({
-      decision: "会議で、意図した仕様と決まった。",
-      decidedBy: "経理の担当",
-      confirmed: false,
-      recordedBy: "OPERATOR",
-    });
-    const { calls, user, panel } = await openPanel(handlingDetail(), {
-      [`POST ${DECISION_PATH}`]: {
-        body: handlingDetail({ decisions: [recorded] }),
-      },
-    });
-    await user.click(
-      within(panel).getByText("決定を記録する（会議などで決まった場合）"),
-    );
-    const fold = within(recordFold(panel));
-    const submit = fold.getByRole("button", { name: "決定を記録する" });
-
-    await user.selectOptions(fold.getByLabelText("決定の種類"), "意図どおり");
-    await user.type(fold.getByLabelText("決定の内容"), "意図した仕様です。");
-    expect(submit).toBeDisabled();
-    await user.type(fold.getByLabelText("理由"), "会議で決まったため。");
-    expect(submit).toBeDisabled();
-    await user.type(fold.getByLabelText("決めた人"), "経理の担当");
-    expect(submit).toBeEnabled();
-
-    await user.click(submit);
-
-    expect(
-      await within(panel).findByRole("heading", {
-        name: "仕様の持ち主の決定",
-      }),
-    ).toBeInTheDocument();
-    expect(callsTo(calls, DECISION_PATH)).toHaveLength(1);
-    expect(callsTo(calls, DECISION_PATH)[0].body).toEqual({
-      decisionKind: "AS_INTENDED",
-      decision: "意図した仕様です。",
-      reason: "会議で決まったため。",
-      situation: "求人が一覧に出なくなった理由を知りたい。",
-      decidedBy: "経理の担当",
-    });
-    // 担当者の番のまま。確かめられていない印が付く
-    expect(within(panel).getByLabelText("本人に送る")).toBeInTheDocument();
-    expect(
-      within(panel)
-        .getByText("会議で、意図した仕様と決まった。")
-        .closest(".op-decision"),
-    ).toHaveTextContent("決めた人が、まだ確かめていません");
-    // 記録できたら、入力は空に戻る
-    expect(within(recordFold(panel)).getByLabelText("決定の内容")).toHaveValue(
-      "",
-    );
-  });
-
-  it("相談している間も出る。記録すると、相談が決まり、担当者の番に戻る", async () => {
-    const consulting = handlingDetail({
-      ...CONSULTATION_STATE,
-      consultations: [makeConsultation({ to: ["持ち主A", "持ち主B"] })],
-    });
-    const { calls, user, panel } = await openPanel(consulting, {
-      [`POST ${DECISION_PATH}`]: {
-        body: handlingDetail({
-          handoverReason: "DECIDED",
-          decisions: [makePrecedent()],
-          consultations: [makeConsultation({ status: "DECIDED" })],
-        }),
-      },
-    });
-
-    // 相談している間の表示と並んで、折りたたみがある
-    expect(
-      within(panel).getByRole("button", { name: "相談を取り下げる" }),
-    ).toBeInTheDocument();
-    const fold = within(recordFold(panel));
-    // 候補には、相談先の名前も出る
-    const listId = fold.getByLabelText("決めた人").getAttribute("list")!;
-    expect(
-      Array.from(
-        document.getElementById(listId)!.querySelectorAll("option"),
-      ).map((o) => o.getAttribute("value")),
-    ).toEqual(["仕様の持ち主（開発用）", "持ち主A", "持ち主B"]);
-    await user.click(
-      within(panel).getByText("決定を記録する（会議などで決まった場合）"),
-    );
-    await user.selectOptions(fold.getByLabelText("決定の種類"), "不具合");
-    await user.type(fold.getByLabelText("決定の内容"), "直します。");
-    await user.type(fold.getByLabelText("理由"), "不具合のため。");
-    await user.type(fold.getByLabelText("決めた人"), "持ち主A");
-    await user.click(fold.getByRole("button", { name: "決定を記録する" }));
-
-    await within(panel).findByLabelText("本人に送る");
-    expect(callsTo(calls, DECISION_PATH)).toHaveLength(1);
-    expect(
-      within(panel).queryByRole("button", { name: "相談を取り下げる" }),
-    ).toBeNull();
-    expect(
-      within(panel).getByText("渡った理由: 仕様の持ち主が決めた"),
-    ).toBeInTheDocument();
-  });
-
-  it("失敗したら、既存のエラーを出し、入力は残る", async () => {
-    const { user, panel } = await openPanel(handlingDetail(), {
-      [`POST ${DECISION_PATH}`]: {
-        status: 409,
-        body: { code: "INVALID_STATE", message: "他の操作と競合しました" },
-      },
-    });
-    await user.click(
-      within(panel).getByText("決定を記録する（会議などで決まった場合）"),
-    );
-    const fold = within(recordFold(panel));
-    await user.selectOptions(fold.getByLabelText("決定の種類"), "不具合");
-    await user.type(fold.getByLabelText("決定の内容"), "直します。");
-    await user.type(fold.getByLabelText("理由"), "不具合のため。");
-    await user.type(fold.getByLabelText("決めた人"), "経理の担当");
-
-    await user.click(fold.getByRole("button", { name: "決定を記録する" }));
-
-    expect(await within(panel).findByRole("alert")).toHaveTextContent(
-      "うまく処理できませんでした",
-    );
-    expect(fold.getByLabelText("決定の内容")).toHaveValue("直します。");
-  });
-});
-
 describe("英語の担当者の画面: 先例", () => {
-  it("節の見出し、空の文言、リンク、印、基づく先例、決定を記録するが英語で出る", async () => {
-    const { user, panel } = await openPanel(
+  it("節の見出し、リンク、機能の名前、基づく先例が英語で出る", async () => {
+    const { panel } = await openPanel(
       handlingDetail({
         function: { id: "posting", label: "Posting", by: "ASKER" },
         advice: {
@@ -560,7 +334,6 @@ describe("英語の担当者の画面: 先例", () => {
           makePrecedent({
             decision: "Treat it as expired.",
             language: "en",
-            confirmed: false,
             function: { id: "applicants", label: "Applicants" },
           }),
         ],
@@ -578,9 +351,6 @@ describe("英語の担当者の画面: 先例", () => {
       .getAllByText("Treat it as expired.")
       .map((el) => el.closest(".op-decision"))
       .find((el) => el !== null) as HTMLElement;
-    expect(card).toHaveTextContent(
-      "Not yet confirmed by the person who decided",
-    );
     expect(card).toHaveTextContent("Function: Applicants");
     expect(
       within(panel).getByRole("link", { name: "See all precedents" }),
@@ -595,16 +365,6 @@ describe("英語の担当者の画面: 先例", () => {
       "href",
       "/precedents",
     );
-    await user.click(
-      within(panel).getByText(
-        "Record a decision (made in a meeting or elsewhere)",
-      ),
-    );
-    expect(
-      within(panel).getByText(
-        "It will appear on the spec owner's screen so that the person who decided can confirm it.",
-      ),
-    ).toBeInTheDocument();
   });
 
   it("先例がないときの文言が英語で出る", async () => {

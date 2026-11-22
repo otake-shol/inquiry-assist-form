@@ -1,7 +1,6 @@
 package dev.inquiryassist.inquiry;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mockingDetails;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -98,32 +97,31 @@ class TranslationApiTest extends ApiSupport {
     }
 
     @Test
-    void 二度目はスキルを呼ばず_利用量も増えない_増えた発言の分だけを訳す() throws Exception {
+    void 訳は保存せず_頼まれるたびにその時点の文章を訳す_発言が増えれば増えた分も訳す() throws Exception {
         String id = englishFiled(HOW_TO);
-        translate(id, "ja").andExpect(status().isOk());
+        String first = text(translate(id, "ja").andExpect(status().isOk()));
         assertThat(translateCalls()).isEqualTo(1);
         int usagesAfterFirst = usageCount(id);
         assertThat(usageSteps(id)).endsWith("translator");
 
+        // 2度目も、スキルを呼ぶ（利用量も、そのたびに記録する）
         String second = text(translate(id, "ja").andExpect(status().isOk()));
-
-        assertThat(translateCalls()).isEqualTo(1);
-        assertThat(usageCount(id)).isEqualTo(usagesAfterFirst);
-        assertThat((List<String>) JsonPath.read(second, "$.items[*].translated")).allSatisfy(t -> assertThat(t).startsWith(MARK));
-
-        // 本人の発言が増えた後は、増えた分だけを訳す
-        String messageId = askerReplies(id, "One more thing.");
-        String third = text(translate(id, "ja").andExpect(status().isOk()));
 
         assertThat(translateCalls()).isEqualTo(2);
         assertThat(usageCount(id)).isEqualTo(usagesAfterFirst + 1);
+        assertThat((List<String>) JsonPath.read(second, "$.items[*].translated"))
+                .isEqualTo(JsonPath.<List<String>>read(first, "$.items[*].translated"));
+
+        // 本人の発言が増えた後は、その発言も含めて訳す
+        String messageId = askerReplies(id, "One more thing.");
+        String third = text(translate(id, "ja").andExpect(status().isOk()));
+
         assertThat((List<String>) JsonPath.read(third, "$.items[*].key")).endsWith("message:" + messageId);
         assertThat((List<String>) JsonPath.read(third, "$.items[-1:].translated")).containsExactly(MARK + "One more thing.");
-        org.mockito.Mockito.verify(translator).translate(List.of("One more thing."), "en", "ja");
     }
 
     @Test
-    void 訳す先の言語ごとに別に保存する() throws Exception {
+    void 訳す先の言語ごとの印で訳す() throws Exception {
         String id = idOf(create(HOW_TO));
         finishIntake(id, null);
         confirm(id).andExpect(status().isOk());
@@ -136,8 +134,6 @@ class TranslationApiTest extends ApiSupport {
         assertThat((String) JsonPath.read(toJa, "$.items[0].translated")).startsWith(MARK);
         assertThat((String) JsonPath.read(toEn, "$.items[0].translated")).startsWith("[Sample translation] ");
         assertThat(translateCalls()).isEqualTo(2);
-        assertThat(jdbc.queryForObject("select count(*) from inquiries, jsonb_object_keys(translations) k where id = ?::uuid", Integer.class, id))
-                .isEqualTo(2);
     }
 
     @Test
@@ -158,12 +154,11 @@ class TranslationApiTest extends ApiSupport {
     }
 
     @Test
-    void 訳が失敗するとAI_UNAVAILABLE_訳は保存されず_失敗した呼び出しが利用量に残る() throws Exception {
+    void 訳が失敗するとAI_UNAVAILABLE_失敗した呼び出しが利用量に残る() throws Exception {
         String id = englishFiled("[訳エラー] " + HOW_TO);
 
         translate(id, "ja").andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("AI_UNAVAILABLE"));
 
-        assertThat(row(id).get("translations").toString()).isEqualTo("{}");
         assertThat((List<Boolean>) JsonPath.read(detail(id), "$.trace[?(@.skill=='translator')].failed")).containsExactly(true);
     }
 
@@ -193,7 +188,7 @@ class TranslationApiTest extends ApiSupport {
         assertThat(asker).doesNotContain("translat").doesNotContain(MARK);
         assertThat((List<String>) JsonPath.read(asker, "$.trace[*].skill")).doesNotContain("translator");
         // 担当者向けの詳細は、原文だけ。訳は、この口の応答にだけ含める。実行記録には訳の呼び出しが入る
-        assertThat(operator).doesNotContain("\"translations\"").doesNotContain(MARK);
+        assertThat(operator).doesNotContain(MARK);
         assertThat((List<String>) JsonPath.read(operator, "$.trace[*].skill")).contains("translator");
         mvc.perform(get("/api/inquiries")).andExpect(status().isOk());
     }

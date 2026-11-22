@@ -1,7 +1,6 @@
 package dev.inquiryassist.inquiry;
 
 import dev.inquiryassist.core.InquiryType;
-import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.intake.Choice;
 import dev.inquiryassist.core.intake.IntakeCatalog;
@@ -32,7 +31,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param dev 認証を加えるまでの、利用者と担当者の表示名の仮の設定
  * @param filedGuidance 担当者に渡した後に画面が見せる案内文。言語ごと
  * @param rules 時間で動く決まり（返事がないときの知らせと回答済み）の設定
- * @param consultants 全体の相談先（仕様の持ち主への相談）。名前の一覧。既定は空
+ * @param consultants 相談先（仕様の持ち主への相談）。名前の一覧。全体で1つ。既定は空
  */
 @ConfigurationProperties("inquiry")
 public record InquiryProperties(
@@ -108,37 +107,6 @@ public record InquiryProperties(
      */
     public record Dev(
             @DefaultValue("開発用ユーザー") String userName, @DefaultValue("担当者（開発用）") String operatorName) {}
-
-    /**
-     * 置き場所の相談先を返す。当てはまるマスの設定（詳しい質問と同じ選び方: 指定した項目が最も多いもの。同数なら、書かれた順で先のもの）の
-     * {@code consultants}。なければ、システムの {@code consultants}。なければ、全体の {@code consultants}。
-     *
-     * @param placement 置き場所
-     * @return 相談先の名前。どれも設定がなければ空
-     */
-    public List<String> consultantsFor(Placement placement) {
-        CellEntry best = null;
-        for (CellEntry cell : cells) {
-            if (cell.appliesTo(placement) && (best == null || cell.specificity() > best.specificity())) {
-                best = cell;
-            }
-        }
-        if (best != null && !best.consultants().isEmpty()) {
-            return best.consultants();
-        }
-        if (placement.systemId() != null) {
-            List<String> system = systems.stream()
-                    .filter(s -> s.id().equals(placement.systemId()))
-                    .map(SystemEntry::consultants)
-                    .filter(c -> !c.isEmpty())
-                    .findFirst()
-                    .orElse(List.of());
-            if (!system.isEmpty()) {
-                return system;
-            }
-        }
-        return consultants == null ? List.of() : consultants;
-    }
 
     /**
      * スキルの設定を返す。書かれていなければ、既定（モック）の設定を返す。
@@ -371,19 +339,12 @@ public record InquiryProperties(
      * @param label 言語ごとの名前
      * @param functions このシステムの機能。機能の設定がなければ空（機能は聞かない）
      * @param slackWebhookUrl このシステムの問い合わせを投稿する Incoming Webhook の URL。未設定なら既定の投稿先
-     * @param consultants このシステムの相談先。省くと、全体の相談先
      */
     public record SystemEntry(
             String id,
             @DefaultValue Map<String, String> label,
             @DefaultValue List<FunctionEntry> functions,
-            String slackWebhookUrl,
-            @DefaultValue List<String> consultants) {
-
-        public SystemEntry {
-            consultants = consultants == null ? List.of() : List.copyOf(consultants);
-        }
-    }
+            String slackWebhookUrl) {}
 
     /**
      * 機能1件。
@@ -400,35 +361,9 @@ public record InquiryProperties(
      * @param function 機能の識別子。省くと、すべての機能
      * @param type 種類。省くと、すべての種類
      * @param questions 詳しい質問（設定の順。3問を超える分は使わない）
-     * @param consultants このマスの相談先。省くと、システムの相談先
      */
     public record CellEntry(
-            String system,
-            String function,
-            InquiryType type,
-            @DefaultValue List<QuestionEntry> questions,
-            @DefaultValue List<String> consultants) {
-
-        public CellEntry {
-            questions = questions == null ? List.of() : questions;
-            consultants = consultants == null ? List.of() : List.copyOf(consultants);
-        }
-
-        /**
-         * 指定した項目の数。多いほど具体的な設定として優先する。
-         *
-         * @return 指定した項目の数
-         */
-        int specificity() {
-            return (system != null ? 1 : 0) + (function != null ? 1 : 0) + (type != null ? 1 : 0);
-        }
-
-        boolean appliesTo(Placement placement) {
-            return (system == null || system.equals(placement.systemId()))
-                    && (function == null || function.equals(placement.functionId()))
-                    && (type == null || type == placement.type());
-        }
-    }
+            String system, String function, InquiryType type, @DefaultValue List<QuestionEntry> questions) {}
 
     /**
      * 詳しい質問1問。

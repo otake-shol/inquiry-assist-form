@@ -48,7 +48,6 @@ class ConsultantsMissingTest {
                 mock(InquiryPresenter.class),
                 new IntakeLocales(properties),
                 mock(ApplicationEventPublisher.class),
-                mock(InvestigationRunner.class),
                 mock(dev.inquiryassist.core.skill.DrafterSkill.class),
                 mock(InquiryCommitter.class),
                 mock(PrecedentRepository.class),

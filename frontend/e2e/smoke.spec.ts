@@ -490,14 +490,12 @@ test("担当者と本人が番を受け渡しながら、解決まで進めら�
 });
 
 /**
- * 担当者のボード: カードを別の列に落としても状態は変わらず、
- * パネルが開いて、その列に対応する入力欄に移る。見送ると「終わり」に入る。
+ * 担当者は、応じないと決めた件を、理由を添えて見送りで終えられる。
+ * 操作は、カードを押して開く詳細のパネルで行う（カードを別の列に動かすことはできない）。
  */
-test("カードを落とすと対応する入力欄が開き、見送りで終えられる", async ({
-  page,
-}) => {
+test("担当者がパネルから見送りで終えられる", async ({ page }) => {
   const { pageErrors } = watchErrors(page);
-  const mark = `ボード確認 ${Date.now()}`;
+  const mark = `見送り確認 ${Date.now()}`;
   const reason = `見送りの理由 ${Date.now()}`;
 
   await fileByText(page, `${mark} 請求書の宛名を知りたい`);
@@ -506,33 +504,22 @@ test("カードを落とすと対応する入力欄が開き、見送りで終�
   await page.goto("/operator");
   const board = page.getByRole("region", { name: "受付一覧" });
   const operatorTurn = board.getByRole("region", { name: /^担当者の番/ });
-  const askerTurn = board.getByRole("region", { name: /^本人の番/ });
   const closed = board.getByRole("region", { name: /^終わり/ });
   const detail = page.getByRole("region", { name: "問い合わせの詳細" });
-  const card = board.getByRole("listitem").filter({ hasText: mark });
-  await expect(
-    operatorTurn.getByRole("listitem").filter({ hasText: mark }),
-  ).toBeVisible();
+  const cardIn = (column: typeof operatorTurn) =>
+    column.getByRole("listitem").filter({ hasText: mark });
 
-  // 「本人の番」に落とす: 本人へのメッセージが要るので、状態は変わらず、入力欄に移る
-  await card.dragTo(askerTurn);
-  await expect(detail.getByLabel("本人に送る")).toBeFocused();
-  await expect(
-    operatorTurn.getByRole("listitem").filter({ hasText: mark }),
-  ).toBeVisible();
+  // カードは、キーボードでも開ける
+  const card = cardIn(operatorTurn).getByRole("button");
+  await card.focus();
+  await page.keyboard.press("Enter");
+  await expect(detail.getByLabel("本人に送る")).toBeVisible();
 
-  // 「終わり」に落とす: 見送りの入力欄が開く。理由を書いて終える
-  await card.dragTo(closed);
-  // 「理由」の欄は「決定を記録する」にもあるので、「見送る」の折りたたみの中で探す
-  await detail
-    .locator("details")
-    .filter({ hasText: "見送りとして終える" })
-    .getByLabel("理由", { exact: true })
-    .fill(reason);
+  // 見送る: 理由を書いて終える
+  await detail.getByText("見送る", { exact: true }).click();
+  await detail.getByLabel("理由", { exact: true }).fill(reason);
   await detail.getByRole("button", { name: "見送りとして終える" }).click();
-  await expect(
-    closed.getByRole("listitem").filter({ hasText: mark }),
-  ).toContainText("見送り");
+  await expect(cardIn(closed)).toContainText("見送り");
 
   // 本人のページに、見送りの連絡と理由が出る
   await page.goto(askerUrl);
@@ -827,7 +814,7 @@ test("聞き返しに返事がないまま期間が過ぎると取り下げで�
 
 /**
  * 調査が時間内に終わらないと、打ち切らずに担当者へ引き継ぎ、調査は裏で続ける。
- * 結果は担当者だけに届き、本人のページには出ない。担当者は、調べ直しを頼める。
+ * 結果は担当者だけに届き、本人のページには出ない。
  *
  * `[遅延]` の調査は6秒かかる。スモークの API は、引き継ぐまでの時間を3秒にして起動する
  * （`playwright.config.ts` の `INQUIRY_RULES_ANSWER_TIMEOUT`）。手元で起動済みの API を使い回す場合も、
@@ -870,11 +857,7 @@ test("調査が時間切れになると担当者に引き継ぎ、裏で調べ�
   ).toBeVisible({ timeout: 30_000 });
   await expect(detail.getByText("分かったこと")).toBeVisible();
 
-  // 担当者は、調べ直しを頼める。番は変わらない
-  await detail.getByRole("button", { name: "調べ直す" }).click();
-  await expect(
-    detail.getByText("この結果は、本人には見せていません。"),
-  ).toBeVisible({ timeout: 30_000 });
+  // 番は担当者のまま
   await expect(detail.getByLabel("本人に送る")).toBeVisible();
 
   // 本人のページには、裏で調べた結果を出さない

@@ -1149,7 +1149,7 @@ describe("英語の引き継ぎと調査の状況", () => {
     },
   );
 
-  it("担当者のパネル: 注記、ボタンの2通りの名前、説明が英語で出る", async () => {
+  it("担当者のパネル: 注記が英語で出る。調査をやり直すボタンは出ない", async () => {
     const panel = await openOperatorWith({
       investigation: {
         status: "NOT_RUN",
@@ -1165,28 +1165,10 @@ describe("英語の引き継ぎと調査の状況", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      within(panel).getByRole("button", { name: "Have AI look into it" }),
-    ).toBeInTheDocument();
-    expect(
-      within(panel).getByText(
-        "The turn does not change. Only staff can see the result.",
-      ),
-    ).toBeInTheDocument();
-    cleanup();
-    vi.unstubAllGlobals();
-
-    const again = await openOperatorWith({
-      investigation: {
-        status: "DONE",
-        audience: "OPERATOR",
-        startedAt: null,
-        finishedAt: null,
-        unconfirmedQuestion: false,
-      },
-    });
-    expect(
-      await within(again).findByRole("button", { name: "Look into it again" }),
-    ).toBeInTheDocument();
+      within(panel).queryByRole("button", {
+        name: /Have AI look into it|Look into it again/,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -1578,14 +1560,15 @@ describe("英語の担当者の画面", () => {
     expect(
       within(panel).getByText("Staff's turn (Staff is handling it)"),
     ).toBeInTheDocument();
+    const stages = within(panel).getByRole("list", { name: "Stage" });
     expect(
-      within(panel).getByRole("group", { name: "Switch stage" }),
-    ).toBeInTheDocument();
-    expect(
-      within(panel)
-        .getAllByRole("button", { name: /Understand|Decide|Carry out/ })
-        .map((b) => b.textContent),
+      within(stages)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
     ).toEqual(["Understand", "Decide", "Carry out"]);
+    expect(
+      within(stages).getByText("Decide", { selector: "li" }),
+    ).toHaveAttribute("aria-current", "step");
     expect(
       within(panel).getByLabelText("Send to the requester"),
     ).toBeInTheDocument();

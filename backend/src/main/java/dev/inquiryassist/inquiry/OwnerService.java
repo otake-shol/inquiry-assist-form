@@ -25,26 +25,26 @@ public class OwnerService {
     private final PrecedentRepository precedents;
     private final InquiryPresenter presenter;
     private final OperatorService operators;
-    private final DecisionService decisions;
+    private final InquiryCommitter committer;
 
     /**
      * @param repository 問い合わせ記録の保存先
      * @param precedents 先例の保存先
      * @param presenter 一覧の項目を作る
      * @param operators 全内容の組み立て（担当者向けと同じ形を返す）
-     * @param decisions 決定の記録（先例の作成と状態の変更を、同じトランザクションで行う）
+     * @param committer 決定の保存（先例と同じトランザクション）と、確定後のイベント
      */
     OwnerService(
             InquiryRepository repository,
             PrecedentRepository precedents,
             InquiryPresenter presenter,
             OperatorService operators,
-            DecisionService decisions) {
+            InquiryCommitter committer) {
         this.repository = repository;
         this.precedents = precedents;
         this.presenter = presenter;
         this.operators = operators;
-        this.decisions = decisions;
+        this.committer = committer;
     }
 
     /**
@@ -112,7 +112,70 @@ public class OwnerService {
      */
     public OperatorDetail decide(
             UUID id, DecisionKind kind, String decision, String reason, String situation, String decidedBy, String lang) {
-        return decisions.decide(id, RecordedBy.OWNER, kind, decision, reason, situation, decidedBy, lang);
+        String decisionText = required(decision, 4000, "decision");
+        String reasonText = required(reason, 4000, "reason");
+        String decidedByText = required(decidedBy, 100, "decidedBy");
+        String situationText = situation == null ? null : required(situation, 4000, "situation");
+        InquiryEntity saved;
+        try {
+            saved = committer.update(id, inquiry -> {
+                if (inquiry.consultations.isEmpty()) {
+                    throw new InquiryNotFoundException(id);
+                }
+                Transition transition = InquiryStateMachine.decided(inquiry.state());
+                Consultation open = inquiry.openConsultation();
+                if (open == null) {
+                    throw new InvalidStateException("決定を待っている相談がありません");
+                }
+                Instant now = Instant.now();
+                // 先例のマスは、決めた時点の置き場所。後から問い合わせを置き直しても変えない
+                Placement placement = inquiry.placement();
+                PrecedentEntity precedent = new PrecedentEntity(
+                        inquiry.id,
+                        placement.type(),
+                        placement.systemId(),
+                        placement.functionId(),
+                        situationText != null ? situationText : defaultSituation(inquiry, open),
+                        kind,
+                        decisionText,
+                        reasonText,
+                        decidedByText,
+                        lang,
+                        now);
+                precedents.save(precedent);
+                inquiry.consultations = inquiry.consultations.stream()
+                        .map(c -> c.id().equals(open.id()) ? c.decided(now, precedent.id) : c)
+                        .toList();
+                inquiry.apply(transition, now);
+                return new InquiryCommitter.Update(null, InquiryCommitter.Publish.UPDATED_IF_HANDED_OVER);
+            });
+        } catch (OptimisticLockingFailureException e) {
+            throw new InvalidStateException("他の操作と競合しました。最新の状態を取得し直してください");
+        }
+        if (saved == null) {
+            throw new InquiryNotFoundException(id);
+        }
+        return operators.toDetail(saved, lang);
+    }
+
+    /** 状況の既定。言い直しの文章。なければ、本人が書いた文章の先頭200文字。それもなければ、相談の文章。 */
+    private static String defaultSituation(InquiryEntity inquiry, Consultation open) {
+        if (inquiry.structured() != null && !inquiry.structured().summary().isBlank()) {
+            return inquiry.structured().summary();
+        }
+        String utterance = inquiry.utterance();
+        if (utterance != null && !utterance.isBlank()) {
+            return utterance.substring(0, Math.min(utterance.length(), SITUATION_FALLBACK_LENGTH));
+        }
+        return open.question();
+    }
+
+    private static String required(String value, int max, String name) {
+        String trimmed = value == null ? "" : value.strip();
+        if (trimmed.isEmpty() || trimmed.length() > max) {
+            throw new IllegalArgumentException(name + " は前後の空白を除いて1〜" + max + "文字");
+        }
+        return trimmed;
     }
 
     private static OperatorItem.Ref ref(InquiryView.PlacedView placed) {

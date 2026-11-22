@@ -251,8 +251,6 @@ class InquiryStateMachineTest {
             assertThatThrownBy(() -> InquiryStateMachine.operatorReplied(s, ReplyKind.ASK))
                     .isInstanceOf(IllegalTransitionException.class);
             assertThatThrownBy(() -> InquiryStateMachine.declined(s)).isInstanceOf(IllegalTransitionException.class);
-            assertThatThrownBy(() -> InquiryStateMachine.phaseChanged(s, Phase.ACT))
-                    .isInstanceOf(IllegalTransitionException.class);
         }
     }
 
@@ -263,20 +261,6 @@ class InquiryStateMachineTest {
         assertThat(t.to()).isEqualTo(closed(Ending.DECLINED));
         assertThat(t.event()).isEqualTo(HistoryEvent.DECLINED);
         assertThat(t.actor()).isEqualTo(Actor.OPERATOR);
-    }
-
-    @Test
-    void 区間を変えても番は変わらず_範囲外の区間は入力の誤り_同じ区間は何も変わらない() {
-        Transition t = InquiryStateMachine.phaseChanged(handling(Phase.KNOW), Phase.ACT);
-        assertThat(t.to()).isEqualTo(handling(Phase.ACT));
-        assertThat(t.event()).isEqualTo(HistoryEvent.PHASE_CHANGED);
-        assertThat(t.handsOver()).isFalse();
-
-        assertThat(InquiryStateMachine.phaseChanged(handling(Phase.KNOW), Phase.KNOW).event()).isNull();
-        assertThatThrownBy(() -> InquiryStateMachine.phaseChanged(handling(Phase.KNOW), Phase.INTAKE))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> InquiryStateMachine.phaseChanged(handling(Phase.KNOW), Phase.CLOSED))
-                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -612,8 +596,6 @@ class InquiryStateMachineTest {
         assertThatThrownBy(() -> InquiryStateMachine.operatorReplied(consulting, ReplyKind.RESULT))
                 .isInstanceOf(IllegalTransitionException.class);
         assertThatThrownBy(() -> InquiryStateMachine.declined(consulting)).isInstanceOf(IllegalTransitionException.class);
-        assertThatThrownBy(() -> InquiryStateMachine.phaseChanged(consulting, Phase.ACT))
-                .isInstanceOf(IllegalTransitionException.class);
         assertThatThrownBy(() -> InquiryStateMachine.sentNow(consulting, handedOver(null)))
                 .isInstanceOf(IllegalTransitionException.class);
         assertThat(InquiryStateMachine.canSendNow(consulting, handedOver(null))).isFalse();

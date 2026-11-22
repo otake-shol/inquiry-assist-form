@@ -700,235 +700,6 @@ describe("仕様の持ち主の画面: 英語と、画面の行き来", () => {
   });
 });
 
-const UNCONFIRMED = "GET /api/precedents?unconfirmedOnly=true";
-
-/** 確かめられていない先例を2件返す応答。 */
-const twoUnconfirmed = () => ({
-  [UNCONFIRMED]: {
-    body: {
-      items: [
-        makePrecedent({
-          id: "p1",
-          decision: "会議で決まった1つ目。",
-          decidedBy: "経理の担当",
-          confirmed: false,
-          recordedBy: "OPERATOR",
-        }),
-        makePrecedent({
-          id: "p2",
-          decision: "会議で決まった2つ目。",
-          decisionKind: "DEFECT",
-          confirmed: false,
-          recordedBy: "OPERATOR",
-          function: { id: "posting", label: "求人の掲載" },
-        }),
-      ],
-    },
-  },
-});
-
-/** 確かめてほしい先例の節の中の、1件のカード。 */
-const unconfirmedCard = (text: string, region = "確かめてほしい先例") =>
-  within(screen.getByRole("region", { name: region }))
-    .getByText(text)
-    .closest(".op-decision") as HTMLElement;
-
-describe("仕様の持ち主の画面: 確かめてほしい先例", () => {
-  it("相談の一覧の下に、確かめられていない先例を並べる。置き場所、内容、決めた人、「まだ確かめていません」の印、操作を出す", async () => {
-    openOwner("/owner", twoUnconfirmed());
-
-    const section = await screen.findByRole("region", {
-      name: "確かめてほしい先例",
-    });
-    expect(
-      within(section).getByRole("heading", { name: "確かめてほしい先例" }),
-    ).toBeInTheDocument();
-    // 相談の一覧のカードより後ろ（下）にある
-    expect(
-      screen
-        .getByRole("button", { name: /期限ちょうどの時刻の扱い/ })
-        .compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    const first = unconfirmedCard("会議で決まった1つ目。");
-    expect(first).toHaveTextContent("おかしいかもしれない");
-    expect(first).toHaveTextContent("求人管理画面");
-    expect(first).toHaveTextContent("経理の担当");
-    expect(first).toHaveTextContent("決めた人が、まだ確かめていません");
-    expect(
-      within(first).getByRole("button", { name: "このとおりです" }),
-    ).toBeEnabled();
-    expect(within(first).getByRole("button", { name: "直す" })).toBeEnabled();
-    expect(unconfirmedCard("会議で決まった2つ目。")).toHaveTextContent(
-      "不具合",
-    );
-    expect(unconfirmedCard("会議で決まった2つ目。")).toHaveTextContent(
-      "求人の掲載",
-    );
-  });
-
-  it("確かめられていない先例がなければ、節を出さない。先例を取れなくても、相談の一覧は出す", async () => {
-    openOwner("/owner", { [UNCONFIRMED]: { body: { items: [] } } });
-    await screen.findByRole("button", { name: /期限ちょうどの時刻の扱い/ });
-    expect(
-      screen.queryByRole("region", { name: "確かめてほしい先例" }),
-    ).toBeNull();
-    expect(screen.queryByText("確かめてほしい先例")).toBeNull();
-  });
-
-  it("先例の取得に失敗しても、節を出さず、相談の一覧は出る", async () => {
-    openOwner("/owner", {
-      [UNCONFIRMED]: { status: 500, body: { code: "INTERNAL", message: "x" } },
-    });
-
-    await screen.findByRole("button", { name: /期限ちょうどの時刻の扱い/ });
-    expect(screen.queryByText("確かめてほしい先例")).toBeNull();
-  });
-
-  it("「このとおりです」を押すと、POST …/confirm（本文なし）を呼び、その先例が節から消える。最後の1件が消えると、節も消える", async () => {
-    const calls = openOwner("/owner", {
-      ...twoUnconfirmed(),
-      "POST /api/precedents/p1/confirm": {
-        body: makePrecedent({ id: "p1", confirmed: true }),
-      },
-      "POST /api/precedents/p2/confirm": {
-        body: makePrecedent({ id: "p2", confirmed: true }),
-      },
-    });
-    const user = userEvent.setup();
-    await screen.findByRole("region", { name: "確かめてほしい先例" });
-
-    await user.click(
-      within(unconfirmedCard("会議で決まった1つ目。")).getByRole("button", {
-        name: "このとおりです",
-      }),
-    );
-
-    await waitFor(() =>
-      expect(screen.queryByText("会議で決まった1つ目。")).toBeNull(),
-    );
-    const confirm = callsTo(calls, "POST", "/api/precedents/p1/confirm");
-    expect(confirm).toHaveLength(1);
-    expect(confirm[0].body).toBeUndefined();
-    expect(screen.getByText("会議で決まった2つ目。")).toBeInTheDocument();
-
-    await user.click(
-      within(unconfirmedCard("会議で決まった2つ目。")).getByRole("button", {
-        name: "このとおりです",
-      }),
-    );
-    await waitFor(() =>
-      expect(screen.queryByText("確かめてほしい先例")).toBeNull(),
-    );
-  });
-
-  it("「直す」を押すと、その場で項目（状況、決定の種類、内容、理由、決めた人）を直せる。保存すると、PUT で送り、節から消える", async () => {
-    const calls = openOwner("/owner", {
-      ...twoUnconfirmed(),
-      "PUT /api/precedents/p1": {
-        body: makePrecedent({ id: "p1", confirmed: true }),
-      },
-    });
-    const user = userEvent.setup();
-    await screen.findByRole("region", { name: "確かめてほしい先例" });
-    const card = within(unconfirmedCard("会議で決まった1つ目。"));
-
-    await user.click(card.getByRole("button", { name: "直す" }));
-
-    expect(card.getByLabelText("決定の内容")).toHaveValue(
-      "会議で決まった1つ目。",
-    );
-    expect(card.getByLabelText("決定の種類")).toHaveValue("AS_INTENDED");
-    expect(card.getByLabelText("決めた人")).toHaveValue("経理の担当");
-    expect(card.getByLabelText("状況")).toHaveValue(
-      "掲載期限の時刻ちょうどに、求人が一覧から消える。",
-    );
-    // 直している間は、「このとおりです」は出さない
-    expect(card.queryByRole("button", { name: "このとおりです" })).toBeNull();
-
-    await user.selectOptions(card.getByLabelText("決定の種類"), "不具合");
-    await user.clear(card.getByLabelText("決定の内容"));
-    await user.type(card.getByLabelText("決定の内容"), "不具合として直す。");
-    await user.clear(card.getByLabelText("決めた人"));
-    await user.type(card.getByLabelText("決めた人"), "仕様の持ち主（開発用）");
-    await user.click(card.getByRole("button", { name: "保存" }));
-
-    await waitFor(() =>
-      expect(screen.queryByText("会議で決まった1つ目。")).toBeNull(),
-    );
-    const put = calls.filter(
-      (c) => c.method === "PUT" && c.path === "/api/precedents/p1",
-    );
-    expect(put).toHaveLength(1);
-    expect(put[0].body).toEqual({
-      situation: "掲載期限の時刻ちょうどに、求人が一覧から消える。",
-      decisionKind: "DEFECT",
-      decision: "不具合として直す。",
-      reason: "締め切りの時刻を過ぎた応募を受け付けないため。",
-      decidedBy: "仕様の持ち主（開発用）",
-    });
-  });
-
-  it("直す途中で、空の項目があると保存できない。「やめる」で元の表示に戻り、API は呼ばない", async () => {
-    const calls = openOwner("/owner", twoUnconfirmed());
-    const user = userEvent.setup();
-    await screen.findByRole("region", { name: "確かめてほしい先例" });
-    const card = within(unconfirmedCard("会議で決まった1つ目。"));
-    await user.click(card.getByRole("button", { name: "直す" }));
-
-    await user.clear(card.getByLabelText("理由"));
-    expect(card.getByRole("button", { name: "保存" })).toBeDisabled();
-    await user.click(card.getByRole("button", { name: "やめる" }));
-
-    expect(card.getByRole("button", { name: "このとおりです" })).toBeEnabled();
-    expect(card.queryByLabelText("決定の内容")).toBeNull();
-    expect(calls.filter((c) => c.method !== "GET")).toHaveLength(0);
-  });
-
-  it("確かめるのに失敗したら、エラーを出し、その先例は残る", async () => {
-    openOwner("/owner", {
-      ...twoUnconfirmed(),
-      "POST /api/precedents/p1/confirm": {
-        status: 500,
-        body: { code: "INTERNAL", message: "x" },
-      },
-    });
-    const user = userEvent.setup();
-    await screen.findByRole("region", { name: "確かめてほしい先例" });
-    const card = within(unconfirmedCard("会議で決まった1つ目。"));
-
-    await user.click(card.getByRole("button", { name: "このとおりです" }));
-
-    expect(await card.findByRole("alert")).toHaveTextContent(
-      "うまく処理できませんでした",
-    );
-    expect(card.getByRole("button", { name: "このとおりです" })).toBeEnabled();
-  });
-
-  it("「更新」で、確かめてほしい先例も取り直す", async () => {
-    let items: unknown[] = [];
-    const calls = openOwner("/owner", {
-      [UNCONFIRMED]: () => ({ body: { items } }),
-    });
-    const user = userEvent.setup();
-    await screen.findByRole("button", { name: /期限ちょうどの時刻の扱い/ });
-    expect(screen.queryByText("確かめてほしい先例")).toBeNull();
-
-    items = [
-      makePrecedent({
-        id: "p9",
-        decision: "後から来た先例。",
-        confirmed: false,
-      }),
-    ];
-    await user.click(screen.getByRole("button", { name: "更新" }));
-
-    expect(await screen.findByText("後から来た先例。")).toBeInTheDocument();
-    expect(
-      callsTo(calls, "GET", "/api/precedents?unconfirmedOnly=true"),
-    ).toHaveLength(2);
-  });
-});
-
 describe("仕様の持ち主の画面: 材料の中の先例と、先例へのリンク", () => {
   it("材料の「調べた結果」と「AI の案」の間に、同じ置き場所の先例を出す（決める人が過去の決定を見られる）", async () => {
     const { panel } = await openDetail({
@@ -969,21 +740,22 @@ describe("仕様の持ち主の画面: 材料の中の先例と、先例への�
     );
   });
 
-  it("英語では、確かめてほしい先例の見出しとボタンが英語で出る", async () => {
+  it("英語では、材料の中の先例の見出しと、「先例」のリンクが英語で出る", async () => {
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
-    openOwner("/owner", twoUnconfirmed());
+    openOwner("/owner");
     const user = userEvent.setup();
 
-    await screen.findByRole("region", { name: "Precedents to confirm" });
-    const card = within(
-      unconfirmedCard("会議で決まった1つ目。", "Precedents to confirm"),
+    await user.click(
+      await screen.findByRole("button", { name: /期限ちょうどの時刻の扱い/ }),
     );
+    const panel = await screen.findByRole("region", {
+      name: "Inquiry details",
+    });
     expect(
-      card.getByRole("button", { name: "This is correct" }),
+      await within(panel).findByRole("heading", {
+        name: "Precedents for the same place",
+      }),
     ).toBeInTheDocument();
-    await user.click(card.getByRole("button", { name: "Edit" }));
-    expect(card.getByRole("button", { name: "Save" })).toBeEnabled();
-    expect(card.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Precedents" }),
     ).toBeInTheDocument();

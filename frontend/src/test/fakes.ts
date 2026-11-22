@@ -556,8 +556,6 @@ export function makePrecedent(overrides: Partial<Precedent> = {}): Precedent {
     decision: "期限ちょうどから期限切れとして扱うのは、意図した仕様です。",
     reason: "締め切りの時刻を過ぎた応募を受け付けないため。",
     decidedBy: "仕様の持ち主（開発用）",
-    recordedBy: "OWNER",
-    confirmed: true,
     language: "ja",
     decidedAt: "2026-11-22T04:00:00Z",
     ...overrides,

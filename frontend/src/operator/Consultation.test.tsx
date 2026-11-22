@@ -1,6 +1,5 @@
 import {
   cleanup,
-  fireEvent,
   render,
   screen,
   waitFor,
@@ -88,9 +87,6 @@ async function openPanel(
   return { calls, stream, user, panel };
 }
 
-const writes = (calls: RecordedCall[]) =>
-  calls.filter((c) => c.method !== "GET");
-
 const callsTo = (calls: RecordedCall[], path: string) =>
   calls.filter((c) => c.method === "POST" && c.path === path);
 
@@ -165,83 +161,6 @@ describe("担当者のボード: 相談中の列", () => {
       await screen.findByRole("region", { name: "相談中 1件" }),
     ).findByRole("button", { name: /求人が一覧に出なくなった/ });
     expect(await screen.findByText(/を相談中に移しました/)).toBeInTheDocument();
-  });
-});
-
-describe("担当者のボード: 「相談中」へ落とす", () => {
-  /** カードを掴んで、列に落とす。 */
-  function dragTo(card: HTMLElement, title: string) {
-    const item = card.closest("li")!;
-    const column = screen.getByRole("region", {
-      name: new RegExp(`^${title} \\d+件$`),
-    });
-    fireEvent.dragStart(item);
-    fireEvent.dragOver(column);
-    fireEvent.drop(column);
-    fireEvent.dragEnd(item);
-  }
-
-  it("「担当者の番」から落とすと、状態は変えずにパネルを開き、「相談する」を開いて相談したいことの入力欄にフォーカスを移す", async () => {
-    const calls = installFakeFetch({
-      "GET /api/operator/inquiries": {
-        body: {
-          unreadCount: 0,
-          items: [makeItem({ id: "op-1", read: true })],
-        },
-      },
-      "GET /api/operator/inquiries/op-1": { body: handlingDetail() },
-    });
-    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
-    const card = await screen.findByRole("button", {
-      name: /求人が一覧に出なくなった/,
-    });
-
-    dragTo(card, "相談中");
-
-    const panel = await screen.findByRole("region", {
-      name: "問い合わせの詳細",
-    });
-    await waitFor(() =>
-      expect(within(panel).getByLabelText("相談したいこと")).toHaveFocus(),
-    );
-    expect(
-      within(panel).getByText("相談する").closest("details"),
-    ).toHaveAttribute("open");
-    expect(window.location.pathname).toBe("/operator/op-1");
-    expect(writes(calls)).toHaveLength(0);
-    // カードは、まだ「担当者の番」にある
-    expect(
-      within(screen.getByRole("region", { name: "担当者の番 1件" })).getByRole(
-        "button",
-        { name: /求人が一覧に出なくなった/ },
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("「相談する」の入力欄を開きました"),
-    ).toBeInTheDocument();
-  });
-
-  it("「相談中」のカードを掴んでも、どの列も落とせる列にならない（番を戻すのは持ち主の操作）", async () => {
-    installFakeFetch({
-      "GET /api/operator/inquiries": {
-        body: {
-          unreadCount: 0,
-          items: [makeItem({ read: true, ...CONSULTATION_STATE })],
-        },
-      },
-    });
-    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
-    const card = await screen.findByRole("button", {
-      name: /求人が一覧に出なくなった/,
-    });
-
-    fireEvent.dragStart(card.closest("li")!);
-
-    for (const title of ["担当者の番", "相談中", "本人の番", "終わり"]) {
-      expect(
-        screen.getByRole("region", { name: new RegExp(`^${title} \\d+件$`) }),
-      ).not.toHaveClass("droppable");
-    }
   });
 });
 
@@ -442,10 +361,6 @@ describe("担当者のパネル: 相談している間", () => {
     expect(
       within(panel).getByText("仕様の持ち主の番（仕様の持ち主の決定待ち）"),
     ).toBeInTheDocument();
-    // 区間の切り替えは、担当者の番でないので押せない
-    expect(
-      within(panel).getByRole("button", { name: "分かる" }),
-    ).toBeDisabled();
   });
 
   it("取り下げると、本文なしで POST し、担当者の番に戻って、「相談する」と「本人に送る」が出る", async () => {

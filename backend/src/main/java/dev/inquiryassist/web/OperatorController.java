@@ -2,9 +2,7 @@ package dev.inquiryassist.web;
 
 import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.lifecycle.DeclineReason;
-import dev.inquiryassist.core.lifecycle.Phase;
 import dev.inquiryassist.core.lifecycle.ReplyKind;
-import dev.inquiryassist.inquiry.DecisionService;
 import dev.inquiryassist.inquiry.DraftResult;
 import dev.inquiryassist.inquiry.OperatorDetail;
 import dev.inquiryassist.inquiry.OperatorList;
@@ -43,32 +41,25 @@ public class OperatorController {
     /** 見送り。理由の長さの検証は、前後の空白を除いてから行うためサービスで行う。 */
     public record DeclineRequest(@NotNull DeclineReason reasonKind, @NotNull String reason) {}
 
-    /** 区間の変更。範囲外の区間（{@code INTAKE}、{@code CLOSED}）はサービスが検証する。 */
-    public record PhaseRequest(@NotNull Phase phase) {}
-
     /** 置き直し。どの項目も {@code null}（決まっていない）にできる。 */
     public record PlacementRequest(InquiryType type, String systemId, String functionId) {}
 
     private final OperatorService operators;
     private final OperatorStreamHub hub;
-    private final TranslationService translations;
-    private final DecisionService decisions;
+    private final TranslationService translationService;
 
     /**
      * @param operators 一覧・詳細・既読化
      * @param hub ツール内の通知の配信
-     * @param translations 訳
-     * @param decisions 決定の記録
+     * @param translationService 訳
      */
     public OperatorController(
             OperatorService operators,
             OperatorStreamHub hub,
-            TranslationService translations,
-            DecisionService decisions) {
+            TranslationService translationService) {
         this.operators = operators;
         this.hub = hub;
-        this.translations = translations;
-        this.decisions = decisions;
+        this.translationService = translationService;
     }
 
     /**
@@ -149,7 +140,7 @@ public class OperatorController {
      */
     @PostMapping("/inquiries/{id}/translation")
     public TranslationResult translation(@PathVariable UUID id, @ViewerLang String lang) {
-        return translations.translate(id, lang);
+        return translationService.translate(id, lang);
     }
 
     /**
@@ -174,50 +165,6 @@ public class OperatorController {
     @PostMapping("/inquiries/{id}/consultations/cancel")
     public OperatorDetail cancelConsultation(@PathVariable UUID id, @ViewerLang String lang) {
         return operators.cancelConsultation(id, lang);
-    }
-
-    /**
-     * 担当者が、仕様の持ち主の代わりに決定を記録する（担当者の番か、相談している間）。
-     *
-     * @param id 問い合わせの識別子
-     * @param request 決定（持ち主の「決める」と同じ本文。{@code decidedBy} は、決めた人の名前）
-     * @param lang 見る人の言語
-     * @return 記録後の全内容
-     */
-    @PostMapping("/inquiries/{id}/decision")
-    public OperatorDetail recordDecision(
-            @PathVariable UUID id, @Valid @RequestBody OwnerController.DecisionRequest request, @ViewerLang String lang) {
-        return decisions.recordByOperator(
-                id,
-                request.decisionKind(),
-                request.decision(),
-                request.reason(),
-                request.situation(),
-                request.decidedBy(),
-                lang);
-    }
-
-    /**
-     * 担当者が、調べ直すように頼む。
-     *
-     * @param id 問い合わせの識別子
-     * @return 調査を始めた後の全内容
-     */
-    @PostMapping("/inquiries/{id}/investigation")
-    public OperatorDetail reinvestigate(@PathVariable UUID id, @ViewerLang String lang) {
-        return operators.reinvestigate(id, lang);
-    }
-
-    /**
-     * 担当者が区間を変える。
-     *
-     * @param id 問い合わせの識別子
-     * @param request 変更後の区間
-     * @return 変更後の全内容
-     */
-    @PutMapping("/inquiries/{id}/phase")
-    public OperatorDetail changePhase(@PathVariable UUID id, @Valid @RequestBody PhaseRequest request, @ViewerLang String lang) {
-        return operators.changePhase(id, request.phase(), lang);
     }
 
     /**

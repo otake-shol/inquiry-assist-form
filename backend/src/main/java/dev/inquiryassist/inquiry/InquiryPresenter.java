@@ -340,8 +340,6 @@ class InquiryPresenter {
                 p.decision,
                 p.reason,
                 p.decidedBy,
-                p.recordedBy,
-                p.confirmed,
                 p.language,
                 p.decidedAt);
     }

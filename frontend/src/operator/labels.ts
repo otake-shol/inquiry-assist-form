@@ -15,8 +15,8 @@ import type { Messages } from "../i18n/messages.ts";
  * 内部の言葉（出典・技術メモ）を使ってよい。このファイルには、辞書から文言を選ぶ純粋関数を置く。
  */
 
-/** 担当者が切り替えられる区間（左から）。 */
-export const SWITCHABLE_PHASES: Phase[] = ["KNOW", "DECIDE", "ACT"];
+/** 区間の表示に並べる区間（左から）。受付と終わりは並べない。 */
+export const SHOWN_PHASES: Phase[] = ["KNOW", "DECIDE", "ACT"];
 
 /**
  * 種類の呼び名。API が返す表示名をそのまま使い、決まっていなければ「種類未定」と示す。

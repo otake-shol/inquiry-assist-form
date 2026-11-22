@@ -23,7 +23,7 @@ import org.springframework.test.web.servlet.ResultActions;
 
 /**
  * 仕様の持ち主への相談と、決定の記録（契約書「仕様の持ち主への相談」）を API から確かめる。相談は担当者が始め、持ち主の決定が
- * 先例として残る。テスト用の設定の相談先は、マス（求人の掲載×使い方）、システム（求人管理画面）、全体の3段。
+ * 先例として残る。テスト用の設定の相談先は、全体の1つの一覧。
  */
 class ConsultationApiTest extends ApiSupport {
 
@@ -87,15 +87,12 @@ class ConsultationApiTest extends ApiSupport {
     // ---- 相談先の引き継ぎ ----
 
     @Test
-    void 既定の相談先は置き場所のマス_システム_全体の順に決まる() throws Exception {
-        String cell = filedNow("求人管理画面の求人の掲載の使い方を教えて", null);
+    void 既定の相談先は置き場所によらず全体の一覧() throws Exception {
         String system = filedNow("求人管理画面の応募者の一覧の仕様を教えて", null);
-        String global = filedNow("請求管理の期限の仕様を教えて", null);
+        String other = filedNow("請求管理の期限の仕様を教えて", null);
 
-        assertThat((List<String>) JsonPath.read(detail(cell), "$.defaultConsultants"))
-                .containsExactly("掲載の仕様の持ち主", "掲載の副担当");
-        assertThat((List<String>) JsonPath.read(detail(system), "$.defaultConsultants")).containsExactly("求人の仕様の持ち主");
-        assertThat((List<String>) JsonPath.read(detail(global), "$.defaultConsultants")).containsExactly("全体の仕様の持ち主");
+        assertThat((List<String>) JsonPath.read(detail(system), "$.defaultConsultants")).containsExactly("全体の仕様の持ち主");
+        assertThat((List<String>) JsonPath.read(detail(other), "$.defaultConsultants")).containsExactly("全体の仕様の持ち主");
     }
 
     @Test
@@ -105,7 +102,7 @@ class ConsultationApiTest extends ApiSupport {
 
         consult(byDefault, json("question", QUESTION))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.consultations[0].to[0]").value("求人の仕様の持ち主"))
+                .andExpect(jsonPath("$.consultations[0].to[0]").value("全体の仕様の持ち主"))
                 .andExpect(jsonPath("$.consultations[0].to.length()").value(1));
         consult(changed, "{\"question\":\"" + QUESTION + "\",\"to\":[\"  別の人  \",\"別の人\",\"もう一人\"]}")
                 .andExpect(status().isOk())
@@ -204,8 +201,7 @@ class ConsultationApiTest extends ApiSupport {
         assertThat((String) JsonPath.read(decided, "$.decisions[0].decision")).startsWith("期限ちょうどの時刻から");
         assertThat((String) JsonPath.read(decided, "$.decisions[0].reason")).startsWith("締め切りの時刻");
         assertThat((String) JsonPath.read(decided, "$.decisions[0].decidedBy")).isEqualTo(OWNER);
-        assertThat((String) JsonPath.read(decided, "$.decisions[0].recordedBy")).isEqualTo("OWNER");
-        assertThat((Boolean) JsonPath.read(decided, "$.decisions[0].confirmed")).isTrue();
+        assertThat(decided).doesNotContain("recordedBy").doesNotContain("\"confirmed\"");
         assertThat((String) JsonPath.read(decided, "$.decisions[0].language")).isEqualTo("ja");
         assertThat((Object) JsonPath.read(decided, "$.decisions[0].decidedAt")).isNotNull();
         assertThat(events(decided)).endsWith("CONSULTED", "DECIDED");
@@ -364,7 +360,7 @@ class ConsultationApiTest extends ApiSupport {
     // ---- 相談している間のほかの操作 ----
 
     @Test
-    void 相談している間は聞き返す_結果_見送る_区間_下書きができず_置き直す_調べ直す_訳はできる() throws Exception {
+    void 相談している間は聞き返す_結果_見送る_下書きができず_置き直す_訳はできる() throws Exception {
         String id = consulting();
 
         mvc.perform(post("/api/operator/inquiries/" + id + "/replies")
@@ -380,10 +376,6 @@ class ConsultationApiTest extends ApiSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json("reasonKind", "OUT_OF_SCOPE", "reason", "対象外")))
                 .andExpect(status().isConflict());
-        mvc.perform(put("/api/operator/inquiries/" + id + "/phase")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json("phase", "ACT")))
-                .andExpect(status().isConflict());
         mvc.perform(post("/api/operator/inquiries/" + id + "/draft")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json("kind", "ASK")))
@@ -398,10 +390,6 @@ class ConsultationApiTest extends ApiSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.turn").value("OWNER"))
                 .andExpect(jsonPath("$.awaiting").value("CONSULTATION"));
-        // 調べ直す
-        mvc.perform(post("/api/operator/inquiries/" + id + "/investigation")).andExpect(status().isOk());
-        awaitInvestigationIdle(id);
-        assertThat((String) JsonPath.read(detail(id), "$.awaiting")).isEqualTo("CONSULTATION");
         // 訳す
         jdbc.update("update inquiries set language = 'en' where id = ?::uuid", id);
         mvc.perform(post("/api/operator/inquiries/" + id + "/translation").header("Accept-Language", "ja"))
@@ -615,7 +603,7 @@ class ConsultationApiTest extends ApiSupport {
 
         // もう一度相談して、決定の後も空（既定の相談先で相談する）
         consult(id, json("question", "もう一度")).andExpect(status().isOk());
-        assertThat(operatorListConsultants(id)).containsExactly("求人の仕様の持ち主");
+        assertThat(operatorListConsultants(id)).containsExactly("全体の仕様の持ち主");
         decide(id, decisionBody()).andExpect(status().isOk());
         assertThat(operatorListConsultants(id)).isEmpty();
         assertThat(waitFor(() -> lastOf(streamConsultants(stream, id)).isEmpty(), 5000)).isTrue();

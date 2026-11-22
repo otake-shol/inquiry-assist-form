@@ -671,11 +671,6 @@ public class InquiryService {
         return locales.catalog(inquiry.language);
     }
 
-    /** 担当者への通知（Slack など）は、既定の言語で書く。 */
-    private IntakeCatalog defaultCatalog() {
-        return locales.catalog(locales.defaultLanguage());
-    }
-
     /**
      * 文章を検証して、前後の空白を除いて返す。
      *

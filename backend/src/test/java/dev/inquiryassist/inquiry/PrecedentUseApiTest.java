@@ -3,7 +3,6 @@ package dev.inquiryassist.inquiry;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -51,12 +50,6 @@ class PrecedentUseApiTest extends ApiSupport {
                 .content(body(decision)));
     }
 
-    private ResultActions operatorRecord(String id, String body) throws Exception {
-        return mvc.perform(post("/api/operator/inquiries/" + id + "/decision")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body));
-    }
-
     private static String uniqueSystem() {
         return "sys-" + UUID.randomUUID().toString().substring(0, 8);
     }
@@ -73,21 +66,19 @@ class PrecedentUseApiTest extends ApiSupport {
 
     /** 先例を直接入れる。決めた時刻は、いまから秒数だけ前。 */
     private String insertPrecedent(
-            String inquiryId, String type, String systemId, String functionId, boolean confirmed, long secondsAgo, String language) {
+            String inquiryId, String type, String systemId, String functionId, long secondsAgo, String language) {
         UUID id = UUID.randomUUID();
         Timestamp at = Timestamp.from(Instant.now().minusSeconds(secondsAgo));
         jdbc.update(
                 "insert into precedents (id, inquiry_id, type, system_id, function_id, situation, decision_kind, decision, reason,"
-                        + " decided_by, recorded_by, confirmed, language, decided_at, updated_at)"
-                        + " values (?::uuid, ?::uuid, ?, ?, ?, '状況', 'ACCEPT', ?, '理由', '決めた人', ?, ?, ?, ?, ?)",
+                        + " decided_by, language, decided_at, updated_at)"
+                        + " values (?::uuid, ?::uuid, ?, ?, ?, '状況', 'ACCEPT', ?, '理由', '決めた人', ?, ?, ?)",
                 id.toString(),
                 inquiryId,
                 type,
                 systemId,
                 functionId,
                 "決定-" + id,
-                confirmed ? "OWNER" : "OPERATOR",
-                confirmed,
                 language,
                 at,
                 at);
@@ -106,13 +97,13 @@ class PrecedentUseApiTest extends ApiSupport {
         String inquiry = handling("使い方を教えて");
         placeAt(inquiry, "HOW_TO", system, "f1");
         String other = handling("使い方を教えて");
-        String sameOld = insertPrecedent(other, "HOW_TO", system, "f1", true, 500, "ja");
-        String sameNew = insertPrecedent(other, "HOW_TO", system, "f1", false, 100, "en");
-        String otherFunction = insertPrecedent(other, "HOW_TO", system, "f2", true, 10, "ja");
-        String noFunction = insertPrecedent(other, "HOW_TO", system, null, true, 20, "ja");
-        String differentType = insertPrecedent(other, "LOOKS_WRONG", system, "f1", true, 5, "ja");
-        String differentSystem = insertPrecedent(other, "HOW_TO", uniqueSystem(), "f1", true, 5, "ja");
-        String own = insertPrecedent(inquiry, "HOW_TO", system, "f1", true, 1, "ja");
+        String sameOld = insertPrecedent(other, "HOW_TO", system, "f1", 500, "ja");
+        String sameNew = insertPrecedent(other, "HOW_TO", system, "f1", 100, "en");
+        String otherFunction = insertPrecedent(other, "HOW_TO", system, "f2", 10, "ja");
+        String noFunction = insertPrecedent(other, "HOW_TO", system, null, 20, "ja");
+        String differentType = insertPrecedent(other, "LOOKS_WRONG", system, "f1", 5, "ja");
+        String differentSystem = insertPrecedent(other, "HOW_TO", uniqueSystem(), "f1", 5, "ja");
+        String own = insertPrecedent(inquiry, "HOW_TO", system, "f1", 1, "ja");
 
         String detail = detail(inquiry);
 
@@ -121,8 +112,6 @@ class PrecedentUseApiTest extends ApiSupport {
         assertThat(precedentIds(detail)).doesNotContain(differentType, differentSystem, own);
         // 言語は問わない。書かれた言語のまま返す
         assertThat((List<String>) JsonPath.read(detail, "$.precedents[*].language")).containsExactly("en", "ja", "ja", "ja");
-        // 確かめられていない先例も含める
-        assertThat((List<Boolean>) JsonPath.read(detail, "$.precedents[*].confirmed")).containsExactly(false, true, true, true);
         // 持ち主向けの詳細も同じ
         assertThat(text(mvc.perform(get("/api/owner/inquiries/" + inquiry)).andExpect(status().isNotFound())))
                 .contains("NOT_FOUND");
@@ -135,7 +124,7 @@ class PrecedentUseApiTest extends ApiSupport {
         String other = handling("使い方を教えて");
         List<String> ids = new java.util.ArrayList<>();
         for (int i = 0; i < 8; i++) {
-            ids.add(insertPrecedent(other, "HOW_TO", system, "f", true, 100 - i, "ja"));
+            ids.add(insertPrecedent(other, "HOW_TO", system, "f", 100 - i, "ja"));
         }
         placeAt(inquiry, "HOW_TO", system, "f");
 
@@ -154,7 +143,7 @@ class PrecedentUseApiTest extends ApiSupport {
         String inquiry = handling("使い方を教えて");
         placeAt(inquiry, "HOW_TO", system, null);
         String other = handling("使い方を教えて");
-        String precedent = insertPrecedent(other, "HOW_TO", system, null, true, 10, "ja");
+        String precedent = insertPrecedent(other, "HOW_TO", system, null, 10, "ja");
         consult(inquiry).andExpect(status().isOk());
 
         String owner = text(mvc.perform(get("/api/owner/inquiries/" + inquiry)).andExpect(status().isOk()));
@@ -199,27 +188,22 @@ class PrecedentUseApiTest extends ApiSupport {
     }
 
     @Test
-    void 案を作った後に新しい先例ができても作り直さず_調べ直すと作り直す() throws Exception {
+    void 案を作った後に新しい先例ができても作り直さない() throws Exception {
         String system = uniqueSystem();
+        // 先例がない間に、案ができる（置き場所が決まっていないので、先例は引かれない）
         String inquiry = handling("使い方を教えて");
-        placeAt(inquiry, "HOW_TO", system, null);
-        String other = handling("使い方を教えて");
-        mvc.perform(post("/api/operator/inquiries/" + inquiry + "/investigation")).andExpect(status().isOk());
-        awaitInvestigationIdle(inquiry);
-        // 先例がない間の案
+        assertThat((String) JsonPath.read(detail(inquiry), "$.advice.status")).isEqualTo("DONE");
         assertThat((List<Object>) JsonPath.read(detail(inquiry), "$.advice.judgment.basedOnPrecedents")).isEmpty();
         long advisorCalls = usageSteps(inquiry).stream().filter("advisor"::equals).count();
+        String other = handling("使い方を教えて");
 
-        String precedent = insertPrecedent(other, "HOW_TO", system, null, true, 1, "ja");
+        insertPrecedent(other, "HOW_TO", system, null, 1, "ja");
+        placeAt(inquiry, "HOW_TO", system, null);
 
-        // 作り直さない
+        // 新しい先例ができて、同じ置き場所の先例として出ても、案は作り直さない
+        assertThat(precedentIds(detail(inquiry))).hasSize(1);
         assertThat(usageSteps(inquiry).stream().filter("advisor"::equals).count()).isEqualTo(advisorCalls);
         assertThat((List<Object>) JsonPath.read(detail(inquiry), "$.advice.judgment.basedOnPrecedents")).isEmpty();
-        // 調べ直すと、その時点の先例で作り直す
-        mvc.perform(post("/api/operator/inquiries/" + inquiry + "/investigation")).andExpect(status().isOk());
-        awaitInvestigationIdle(inquiry);
-        assertThat((List<String>) JsonPath.read(detail(inquiry), "$.advice.judgment.basedOnPrecedents[*].id"))
-                .containsExactly(precedent);
     }
 
     @Test
@@ -233,7 +217,7 @@ class PrecedentUseApiTest extends ApiSupport {
 
         // 先例がある置き場所の件は、事実がなくても案ができる
         String other = handling("使い方を教えて");
-        String precedent = insertPrecedent(other, "CHANGE_REQUEST", "reports", null, true, 1, "ja");
+        String precedent = insertPrecedent(other, "CHANGE_REQUEST", "reports", null, 1, "ja");
         String with = toStructured("要望です レポート", null);
         assertThat((String) JsonPath.read(view(with), "$.system.id")).isEqualTo("reports");
         confirm(with).andExpect(status().isOk());
@@ -295,100 +279,21 @@ class PrecedentUseApiTest extends ApiSupport {
 
     // ---- 担当者が決定を記録する ----
 
-    @Test
-    void 担当者の番で記録すると先例だけができ_状態も履歴も変わらない() throws Exception {
-        String id = handling("使い方を教えて");
-        mvc.perform(post("/api/operator/inquiries/" + id + "/read")).andExpect(status().isOk());
-        var before = row(id);
-        List<String> historyBefore = JsonPath.read(detail(id), "$.history[*].event");
-
-        String recorded = text(operatorRecord(id, body(DECISION)).andExpect(status().isOk()));
-
-        assertThat((List<String>) JsonPath.read(recorded, "$.decisions[*].decision")).containsExactly(DECISION);
-        assertThat((String) JsonPath.read(recorded, "$.decisions[0].recordedBy")).isEqualTo("OPERATOR");
-        assertThat((Boolean) JsonPath.read(recorded, "$.decisions[0].confirmed")).isFalse();
-        assertThat((String) JsonPath.read(recorded, "$.decisions[0].decidedBy")).isEqualTo("決めた人");
-        assertThat((String) JsonPath.read(recorded, "$.awaiting")).isEqualTo("HANDLING");
-        assertThat((List<String>) JsonPath.read(recorded, "$.history[*].event")).isEqualTo(historyBefore);
-        var after = row(id);
-        for (String column : List.of("phase", "turn", "awaiting", "ending", "handover_reason", "read_at", "asker_unread_reply", "history")) {
-            assertThat(String.valueOf(after.get(column))).as(column).isEqualTo(String.valueOf(before.get(column)));
-        }
-        assertThat((List<Object>) JsonPath.read(recorded, "$.consultations")).isEmpty();
-    }
-
-    @Test
-    void 相談している間に記録すると相談がDECIDEDになり担当者の番に戻り_履歴の起こした人は担当者で_未読に戻さない() throws Exception {
-        String id = handling("使い方を教えて");
-        String reasonBefore = JsonPath.read(detail(id), "$.handoverReason");
-        consult(id).andExpect(status().isOk());
-        mvc.perform(post("/api/operator/inquiries/" + id + "/read")).andExpect(status().isOk());
-
-        String recorded = text(operatorRecord(id, body(DECISION)).andExpect(status().isOk()));
-
-        assertThat((String) JsonPath.read(recorded, "$.turn")).isEqualTo("OPERATOR");
-        assertThat((String) JsonPath.read(recorded, "$.awaiting")).isEqualTo("HANDLING");
-        assertThat((String) JsonPath.read(recorded, "$.handoverReason")).isEqualTo("DECIDED");
-        assertThat(reasonBefore).isNotEqualTo("DECIDED");
-        assertThat((Boolean) JsonPath.read(recorded, "$.read")).isTrue();
-        assertThat((String) JsonPath.read(recorded, "$.consultations[0].status")).isEqualTo("DECIDED");
-        String precedentId = JsonPath.read(recorded, "$.decisions[0].id");
-        assertThat((String) JsonPath.read(recorded, "$.consultations[0].precedentId")).isEqualTo(precedentId);
-        assertThat((List<String>) JsonPath.read(recorded, "$.history[-2:].event")).containsExactly("CONSULTED", "DECIDED");
-        assertThat((List<String>) JsonPath.read(recorded, "$.history[-2:].actor")).containsExactly("OPERATOR", "OPERATOR");
-        assertThat((String) JsonPath.read(recorded, "$.decisions[0].recordedBy")).isEqualTo("OPERATOR");
-        assertThat((Boolean) JsonPath.read(recorded, "$.decisions[0].confirmed")).isFalse();
-        // 持ち主の一覧から消える
-        String list = text(mvc.perform(get("/api/owner/consultations")).andExpect(status().isOk()));
-        assertThat((List<String>) JsonPath.read(list, "$.items[*].inquiryId")).doesNotContain(id);
-    }
-
-    @Test
-    void ほかの状態では記録できず_入力の誤りはVALIDATION() throws Exception {
-        String asked = handling("使い方を教えて");
-        mvc.perform(post("/api/operator/inquiries/" + asked + "/replies")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json("kind", "ASK", "body", "詳しく")))
-                .andExpect(status().isOk());
-        operatorRecord(asked, body(DECISION)).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_STATE"));
-        String declined = handling("使い方を教えて");
-        mvc.perform(post("/api/operator/inquiries/" + declined + "/decline")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json("reasonKind", "OUT_OF_SCOPE", "reason", "対象外")))
-                .andExpect(status().isOk());
-        operatorRecord(declined, body(DECISION)).andExpect(status().isConflict());
-        operatorRecord(idOf(start()), body(DECISION)).andExpect(status().isNotFound());
-        assertThat(jdbc.queryForObject("select count(*) from precedents where inquiry_id = ?::uuid", Integer.class, asked)).isZero();
-
-        String id = handling("使い方を教えて");
-        operatorRecord(id, json("decisionKind", "MAYBE", "decision", "d", "reason", "r", "decidedBy", "x"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION"));
-        operatorRecord(id, json("decisionKind", "ACCEPT", "decision", " ", "reason", "r", "decidedBy", "x")).andExpect(status().isBadRequest());
-        operatorRecord(id, json("decisionKind", "ACCEPT", "decision", "d", "reason", "", "decidedBy", "x")).andExpect(status().isBadRequest());
-        operatorRecord(id, json("decisionKind", "ACCEPT", "decision", "d", "reason", "r", "decidedBy", "")).andExpect(status().isBadRequest());
-        operatorRecord(id, json("decision", "d", "reason", "r", "decidedBy", "x")).andExpect(status().isBadRequest());
-        assertThat(jdbc.queryForObject("select count(*) from precedents where inquiry_id = ?::uuid", Integer.class, id)).isZero();
-    }
-
     // ---- 先例の API ----
 
     @Test
-    void 一覧は置き場所で絞れ_確かめられていない先例だけも絞れ_新しい順() throws Exception {
+    void 一覧は置き場所で絞れ_新しい順() throws Exception {
         String system = uniqueSystem();
         String other = handling("使い方を教えて");
-        String a = insertPrecedent(other, "HOW_TO", system, "f1", true, 300, "ja");
-        String b = insertPrecedent(other, "LOOKS_WRONG", system, "f1", false, 200, "ja");
-        String c = insertPrecedent(other, "HOW_TO", system, "f2", false, 100, "ja");
-        String d = insertPrecedent(other, "HOW_TO", uniqueSystem(), "f1", true, 50, "ja");
+        String a = insertPrecedent(other, "HOW_TO", system, "f1", 300, "ja");
+        String b = insertPrecedent(other, "LOOKS_WRONG", system, "f1", 200, "ja");
+        String c = insertPrecedent(other, "HOW_TO", system, "f2", 100, "ja");
+        String d = insertPrecedent(other, "HOW_TO", uniqueSystem(), "f1", 50, "ja");
 
         assertThat(listIds("?systemId=" + system)).containsExactly(c, b, a);
         assertThat(listIds("?systemId=" + system + "&functionId=f1")).containsExactly(b, a);
         assertThat(listIds("?systemId=" + system + "&type=HOW_TO")).containsExactly(c, a);
         assertThat(listIds("?systemId=" + system + "&functionId=f1&type=HOW_TO")).containsExactly(a);
-        assertThat(listIds("?systemId=" + system + "&unconfirmedOnly=true")).containsExactly(c, b);
-        assertThat(listIds("?systemId=" + system + "&type=HOW_TO&unconfirmedOnly=true")).containsExactly(c);
-        assertThat(listIds("?systemId=" + system + "&unconfirmedOnly=false")).containsExactly(c, b, a);
         assertThat(listIds("?systemId=zzz-none")).isEmpty();
         assertThat(listIds("?type=HOW_TO")).contains(a, c, d);
         // 種類の誤りは VALIDATION
@@ -400,7 +305,7 @@ class PrecedentUseApiTest extends ApiSupport {
         String system = uniqueSystem();
         String other = handling("使い方を教えて");
         for (int i = 0; i < 105; i++) {
-            insertPrecedent(other, "HOW_TO", system, null, true, 1000 + i, "ja");
+            insertPrecedent(other, "HOW_TO", system, null, 1000 + i, "ja");
         }
 
         List<String> ids = listIds("?systemId=" + system);
@@ -411,7 +316,7 @@ class PrecedentUseApiTest extends ApiSupport {
     @Test
     void 一覧の名前は見る人の言語で返る() throws Exception {
         String other = handling("使い方を教えて");
-        String id = insertPrecedent(other, "HOW_TO", "job-admin", "posting", true, 1, "ja");
+        String id = insertPrecedent(other, "HOW_TO", "job-admin", "posting", 1, "ja");
 
         String ja = text(mvc.perform(get("/api/precedents?systemId=job-admin&functionId=posting&type=HOW_TO")).andExpect(status().isOk()));
         String en = text(mvc.perform(get("/api/precedents?systemId=job-admin&functionId=posting&type=HOW_TO")
@@ -421,88 +326,6 @@ class PrecedentUseApiTest extends ApiSupport {
         assertThat((List<String>) JsonPath.read(ja, "$.items[?(@.id=='" + id + "')].system.label")).containsExactly("求人管理画面");
         assertThat((List<String>) JsonPath.read(en, "$.items[?(@.id=='" + id + "')].system.label")).containsExactly("Job admin");
         assertThat((List<String>) JsonPath.read(en, "$.items[?(@.id=='" + id + "')].function.label")).containsExactly("Posting");
-    }
-
-    @Test
-    void 直すと確かめられた先例になり_置き場所と元の問い合わせは変わらない() throws Exception {
-        String inquiry = handling("使い方を教えて");
-        String id = insertPrecedent(inquiry, "HOW_TO", "reports", "f", false, 10, "ja");
-        var before = jdbc.queryForMap("select * from precedents where id = ?::uuid", id);
-
-        String edited = text(mvc.perform(put("/api/precedents/" + id)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(
-                                "situation", "  直した状況  ",
-                                "decisionKind", "DEFECT",
-                                "decision", "直した決定",
-                                "reason", "直した理由",
-                                "decidedBy", "確かめた人")))
-                .andExpect(status().isOk()));
-
-        assertThat((String) JsonPath.read(edited, "$.id")).isEqualTo(id);
-        assertThat((String) JsonPath.read(edited, "$.situation")).isEqualTo("直した状況");
-        assertThat((String) JsonPath.read(edited, "$.decisionKind")).isEqualTo("DEFECT");
-        assertThat((String) JsonPath.read(edited, "$.decision")).isEqualTo("直した決定");
-        assertThat((String) JsonPath.read(edited, "$.reason")).isEqualTo("直した理由");
-        assertThat((String) JsonPath.read(edited, "$.decidedBy")).isEqualTo("確かめた人");
-        assertThat((Boolean) JsonPath.read(edited, "$.confirmed")).isTrue();
-        // 置き場所、元の問い合わせ、記録した人、決めた時刻は変わらない
-        assertThat((String) JsonPath.read(edited, "$.inquiryId")).isEqualTo(inquiry);
-        assertThat((String) JsonPath.read(edited, "$.type.id")).isEqualTo("HOW_TO");
-        assertThat((String) JsonPath.read(edited, "$.system.id")).isEqualTo("reports");
-        assertThat((String) JsonPath.read(edited, "$.function.id")).isEqualTo("f");
-        assertThat((String) JsonPath.read(edited, "$.recordedBy")).isEqualTo("OPERATOR");
-        var after = jdbc.queryForMap("select * from precedents where id = ?::uuid", id);
-        for (String column : List.of("inquiry_id", "type", "system_id", "function_id", "recorded_by", "language", "decided_at")) {
-            assertThat(String.valueOf(after.get(column))).as(column).isEqualTo(String.valueOf(before.get(column)));
-        }
-        assertThat(((Timestamp) after.get("updated_at")).toInstant()).isAfter(((Timestamp) before.get("updated_at")).toInstant());
-        // 一覧の「確かめられていない」から外れる
-        assertThat(listIds("?systemId=reports&unconfirmedOnly=true")).doesNotContain(id);
-    }
-
-    @Test
-    void 確かめたと伝えると確かめられた先例になる() throws Exception {
-        String inquiry = handling("使い方を教えて");
-        String id = insertPrecedent(inquiry, "HOW_TO", "reports", null, false, 10, "ja");
-
-        mvc.perform(post("/api/precedents/" + id + "/confirm"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id))
-                .andExpect(jsonPath("$.confirmed").value(true))
-                .andExpect(jsonPath("$.decision").value(org.hamcrest.Matchers.startsWith("決定-")));
-        // もう一度確かめても、そのまま
-        mvc.perform(post("/api/precedents/" + id + "/confirm")).andExpect(status().isOk()).andExpect(jsonPath("$.confirmed").value(true));
-        assertThat(jdbc.queryForObject("select confirmed from precedents where id = ?::uuid", Boolean.class, id)).isTrue();
-    }
-
-    @Test
-    void 存在しない先例はNOT_FOUND_入力の誤りはVALIDATION() throws Exception {
-        String unknown = "00000000-0000-0000-0000-000000000000";
-        String valid = json("situation", "s", "decisionKind", "ACCEPT", "decision", "d", "reason", "r", "decidedBy", "x");
-        mvc.perform(put("/api/precedents/" + unknown).contentType(MediaType.APPLICATION_JSON).content(valid))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
-        mvc.perform(post("/api/precedents/" + unknown + "/confirm")).andExpect(status().isNotFound());
-
-        String inquiry = handling("使い方を教えて");
-        String id = insertPrecedent(inquiry, "HOW_TO", "reports", null, false, 10, "ja");
-        for (String invalid : List.of(
-                json("decisionKind", "ACCEPT", "decision", "d", "reason", "r", "decidedBy", "x"),
-                json("situation", " ", "decisionKind", "ACCEPT", "decision", "d", "reason", "r", "decidedBy", "x"),
-                json("situation", "s", "decisionKind", "MAYBE", "decision", "d", "reason", "r", "decidedBy", "x"),
-                json("situation", "s", "decisionKind", "ACCEPT", "decision", "", "reason", "r", "decidedBy", "x"),
-                json("situation", "s", "decisionKind", "ACCEPT", "decision", "d", "reason", "  ", "decidedBy", "x"),
-                json("situation", "s", "decisionKind", "ACCEPT", "decision", "d", "reason", "r", "decidedBy", ""),
-                json("situation", "s", "decisionKind", "ACCEPT", "decision", "d", "reason", "r", "decidedBy", "あ".repeat(101)),
-                json("situation", "あ".repeat(4001), "decisionKind", "ACCEPT", "decision", "d", "reason", "r", "decidedBy", "x"))) {
-            mvc.perform(put("/api/precedents/" + id).contentType(MediaType.APPLICATION_JSON).content(invalid))
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("VALIDATION"));
-        }
-        // 失敗した入力では、先例は変わらない
-        assertThat(jdbc.queryForObject("select confirmed from precedents where id = ?::uuid", Boolean.class, id)).isFalse();
-        mvc.perform(get("/api/precedents?x=1")).andExpect(status().isOk());
     }
 
     private List<String> listIds(String query) throws Exception {

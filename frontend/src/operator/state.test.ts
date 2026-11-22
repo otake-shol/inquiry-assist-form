@@ -13,10 +13,8 @@ import {
 } from "../test/fakes.ts";
 import {
   arrangeOperatorBoard,
-  canDropOnColumn,
   cardNoteOf,
   cardPhaseOf,
-  dropIntentOf,
   initialOperatorState,
   movedMessageOf,
   OPERATOR_COLUMNS,
@@ -155,33 +153,6 @@ describe("担当者のボードの列と並び順", () => {
       "y",
     ]);
     expect(input).toEqual([first, second]);
-  });
-
-  it("カードを落とせるのは、「担当者の番」から「本人の番」「終わり」へだけ", () => {
-    const columns = ["OPERATOR", "ASKER", "CLOSED"] as const;
-    const allowed: [string, string][] = [];
-    for (const from of columns) {
-      for (const to of columns) {
-        if (canDropOnColumn(from, to)) allowed.push([from, to]);
-      }
-    }
-    expect(allowed).toEqual([
-      ["OPERATOR", "ASKER"],
-      ["OPERATOR", "CLOSED"],
-    ]);
-    // 「相談中」へも、「担当者の番」からだけ落とせる。「相談中」から動かす操作は受け付けない
-    expect(canDropOnColumn("OPERATOR", "CONSULTING")).toBe(true);
-    for (const to of ["OPERATOR", "CONSULTING", "ASKER", "CLOSED"] as const) {
-      expect(canDropOnColumn("CONSULTING", to)).toBe(false);
-    }
-    expect(canDropOnColumn("ASKER", "CONSULTING")).toBe(false);
-  });
-
-  it("落とした列で始める操作が決まる。「本人の番」は本人に送る、「終わり」は見送る", () => {
-    expect(dropIntentOf("ASKER")).toBe("send");
-    expect(dropIntentOf("CLOSED")).toBe("decline");
-    expect(dropIntentOf("CONSULTING")).toBe("consult");
-    expect(dropIntentOf("OPERATOR")).toBeNull();
   });
 
   it("カードに添える言葉は、本人の番の列では待っていること、終わりの列では終わり方、担当者の番の列には無い", () => {

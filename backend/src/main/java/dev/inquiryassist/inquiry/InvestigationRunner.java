@@ -95,7 +95,7 @@ class InvestigationRunner {
     InquiryEntity runForAsker(UUID id, ProgressListener progress) {
         InquiryEntity started = start(id, true);
         AccessScope scope = users.scopeOf(started.askerId);
-        StructuredInquiry structured = inputOf(started);
+        StructuredInquiry structured = started.structured();
         String language = started.language;
         CompletableFuture<Outcome> future = new CompletableFuture<>();
         Thread.ofVirtual().name("investigation-" + id).start(() -> {
@@ -140,7 +140,7 @@ class InvestigationRunner {
             return false;
         }
         AccessScope scope = users.scopeOf(started.askerId);
-        StructuredInquiry structured = inputOf(started);
+        StructuredInquiry structured = started.structured();
         String language = started.language;
         Thread.ofVirtual().name("investigation-" + id).start(() -> {
             try {
@@ -186,24 +186,6 @@ class InvestigationRunner {
             throw new InvalidStateException("0次回答を生成中です");
         }
         return inquiry;
-    }
-
-    /**
-     * 調査に渡す問い。調べない種類（{@code CHANGE_REQUEST}）は、担当者が頼んだときだけ調べるので、種類が決まっていない問いとして渡す
-     * （スキルは、調べない種類の問いを受け付けない）。
-     */
-    private static StructuredInquiry inputOf(InquiryEntity inquiry) {
-        StructuredInquiry structured = inquiry.structured();
-        if (structured.type() == null || structured.type().investigates()) {
-            return structured;
-        }
-        return new StructuredInquiry(
-                structured.summary(),
-                null,
-                structured.targetSystem(),
-                structured.goal(),
-                structured.whatHappened(),
-                structured.expectedResult());
     }
 
     // ---- 実行して反映する ----
@@ -311,7 +293,10 @@ class InvestigationRunner {
         return new InquiryCommitter.Update(null, InquiryCommitter.Publish.UPDATED_IF_HANDED_OVER);
     }
 
-    /** 調査の結果が置き換わったので、前の結果への案を消す（担当者の番なら、新しい結果への案が作り直される）。 */
+    /**
+     * 調査の結果が置き換わったので、前の結果への案を消す（担当者の番なら、新しい結果への案が作り直される）。
+     * 置き換わるのは、説明が失敗して残った結果を、答えを待たずに送った後の裏での調査が置き換える場合。
+     */
     private static void discardAdvice(InquiryEntity inquiry) {
         inquiry.adviceStatus = AdviceStatus.NOT_RUN;
         inquiry.advice = null;

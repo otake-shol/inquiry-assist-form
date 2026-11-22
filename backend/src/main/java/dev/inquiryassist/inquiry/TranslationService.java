@@ -8,18 +8,13 @@ import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.core.skill.SkillUsage;
 import dev.inquiryassist.core.skill.Translation;
 import dev.inquiryassist.core.skill.TranslatorSkill;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -29,20 +24,15 @@ import org.springframework.stereotype.Service;
  * 担当者のための訳（契約書「訳」、{@code docs/skill-architecture.md}「訳のスキル」）。本人の言語で書かれた文章を、見る人の言語に訳す。
  * 担当者が頼んだときだけ、同期で呼ぶ。状態は変えず、何も送らない。
  *
- * <p>訳は問い合わせに保存し、同じ文章を2度訳さない（訳す先の言語と、原文が同じなら、保存した訳を返す）。足りない分だけをスキルに渡し、
- * すべて保存済みなら、スキルを呼ばない（利用量も記録しない）。返ってきた文章の数が、渡した数と同じかは、ここで確かめる
- * （スキルの実装によらず、同じ確かめを通すため）。違えば、{@code AI_UNAVAILABLE} として扱う。
- *
- * <p>保存（訳と利用量）が、ほかの操作と競合しても、訳は返す。
+ * <p>訳は保存しない。頼まれるたびに、その時点の文章を訳す（同じ文章が複数あれば、1度だけスキルに渡す）。返ってきた文章の数が、
+ * 渡した数と同じかは、ここで確かめる（スキルの実装によらず、同じ確かめを通すため）。違えば、{@code AI_UNAVAILABLE} として扱う。
+ * 利用量は、成功も失敗も記録する。記録の保存が、ほかの操作と競合しても、訳は返す。
  */
 @Service
 public class TranslationService {
 
     private static final Logger log = LoggerFactory.getLogger(TranslationService.class);
     private static final int SAVE_ATTEMPTS = 3;
-
-    /** スキルが返した訳（原文のキーから訳への対応）と、その利用量。 */
-    private record Fresh(Map<String, String> translated, Usage usage, long millis) {}
 
     private final InquiryRepository repository;
     private final TranslatorSkill translator;
@@ -52,7 +42,7 @@ public class TranslationService {
     /**
      * @param repository 問い合わせ記録の保存先
      * @param translator 訳
-     * @param committer 訳と利用量の保存
+     * @param committer 利用量の保存
      * @param implementations スキルごとの実装（失敗した呼び出しの利用量の補完に使う）
      */
     TranslationService(
@@ -98,53 +88,42 @@ public class TranslationService {
                 put(originals, "message:" + m.id(), m.body());
             }
         }
+        if (originals.isEmpty()) {
+            return new TranslationResult(from, to, List.of());
+        }
 
-        Map<String, String> stored = new HashMap<>(inquiry.translations.getOrDefault(to, Map.of()));
-        List<String> missing = new ArrayList<>(new LinkedHashSet<>(originals.values().stream()
-                .filter(text -> !stored.containsKey(hashOf(text)))
-                .toList()));
-        if (!missing.isEmpty()) {
-            Fresh result = translateMissing(id, missing, from, to);
-            Map<String, String> fresh = result.translated();
-            stored.putAll(fresh);
-            // 訳と利用量を、1回の保存でまとめて保存する
-            saveQuietly(id, entity -> {
-                entity.addUsage(Skill.TRANSLATOR, result.usage(), result.millis());
-                Map<String, Map<String, String>> all = new LinkedHashMap<>(entity.translations);
-                Map<String, String> forLanguage = new LinkedHashMap<>(all.getOrDefault(to, Map.of()));
-                forLanguage.putAll(fresh);
-                all.put(to, forLanguage);
-                entity.translations = all;
-            });
+        // 同じ文章は1度だけ訳す
+        List<String> distinct = new ArrayList<>(new LinkedHashSet<>(originals.values()));
+        List<String> translated = translate(id, distinct, from, to);
+        Map<String, String> byOriginal = new HashMap<>();
+        for (int i = 0; i < distinct.size(); i++) {
+            byOriginal.put(distinct.get(i), translated.get(i));
         }
         List<TranslationResult.Item> items = originals.entrySet().stream()
-                .map(e -> new TranslationResult.Item(e.getKey(), e.getValue(), stored.get(hashOf(e.getValue()))))
+                .map(e -> new TranslationResult.Item(e.getKey(), e.getValue(), byOriginal.get(e.getValue())))
                 .toList();
         return new TranslationResult(from, to, items);
     }
 
-    /** 足りない文章をスキルで訳す。数が合わなければ失敗として扱う。利用量は、成功も失敗も記録する。 */
-    private Fresh translateMissing(UUID id, List<String> missing, String from, String to) {
+    /** 文章をスキルで訳す。数が合わなければ失敗として扱う。利用量は、成功も失敗も記録する。 */
+    private List<String> translate(UUID id, List<String> texts, String from, String to) {
         long start = System.nanoTime();
         AiResult<Translation> result;
         try {
-            result = translator.translate(List.copyOf(missing), from, to);
+            result = translator.translate(List.copyOf(texts), from, to);
         } catch (AiRefusalException | AiUnavailableException e) {
             Usage usage = e instanceof AiUnavailableException u ? u.usage() : ((AiRefusalException) e).usage();
-            saveQuietly(id, entity -> entity.addUsage(new SkillUsage(Skill.TRANSLATOR, orUnknown(usage), true, millisSince(start))));
+            recordUsage(id, new SkillUsage(Skill.TRANSLATOR, orUnknown(usage), true, millisSince(start)));
             throw e;
         }
         long millis = millisSince(start);
-        if (result.value().texts().size() != missing.size()) {
+        if (result.value().texts().size() != texts.size()) {
             // どの訳がどの原文のものか分からなくなるので、使わない
-            saveQuietly(id, entity -> entity.addUsage(new SkillUsage(Skill.TRANSLATOR, result.usage(), true, millis)));
+            recordUsage(id, new SkillUsage(Skill.TRANSLATOR, result.usage(), true, millis));
             throw new AiUnavailableException("訳の数が、渡した文章の数と合いません", null, result.usage());
         }
-        Map<String, String> fresh = new LinkedHashMap<>();
-        for (int i = 0; i < missing.size(); i++) {
-            fresh.put(hashOf(missing.get(i)), result.value().texts().get(i));
-        }
-        return new Fresh(fresh, result.usage(), millis);
+        recordUsage(id, new SkillUsage(Skill.TRANSLATOR, result.usage(), false, millis));
+        return result.value().texts();
     }
 
     private Usage orUnknown(Usage usage) {
@@ -161,29 +140,19 @@ public class TranslationService {
         }
     }
 
-    /** 原文のキー（SHA-256 の16進数）。原文そのものをキーにすると長くなるため。 */
-    static String hashOf(String original) {
-        try {
-            return HexFormat.of()
-                    .formatHex(MessageDigest.getInstance("SHA-256").digest(original.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    /** 保存する。ほかの操作と競合したら、最大3回やり直し、それでも競合する場合は諦める（訳は返す）。 */
-    private void saveQuietly(UUID id, Consumer<InquiryEntity> change) {
+    /** 利用量を記録する。ほかの操作と競合したら、最大3回やり直し、それでも競合する場合は諦める（訳は返す）。 */
+    private void recordUsage(UUID id, SkillUsage usage) {
         for (int attempt = 1; attempt <= SAVE_ATTEMPTS; attempt++) {
             try {
                 committer.update(id, entity -> {
-                    change.accept(entity);
+                    entity.addUsage(usage);
                     return new InquiryCommitter.Update(null, InquiryCommitter.Publish.NONE);
                 });
                 return;
             } catch (OptimisticLockingFailureException e) {
-                log.info("訳の保存が競合しました attempt={} id={}", attempt, id);
+                log.info("訳の利用量の保存が競合しました attempt={} id={}", attempt, id);
             } catch (RuntimeException e) {
-                log.warn("訳を保存できませんでした id={} cause={}", id, e.getClass().getSimpleName());
+                log.warn("訳の利用量を保存できませんでした id={} cause={}", id, e.getClass().getSimpleName());
                 return;
             }
         }

@@ -1,7 +1,6 @@
 import {
   act,
   cleanup,
-  fireEvent,
   render,
   screen,
   waitFor,
@@ -87,15 +86,6 @@ const column = (title: string) =>
 const cardIn = (title: string, text: RegExp) =>
   within(column(title)).queryByRole("button", { name: text });
 
-/** カードをドラッグして、指定の列に落とす。 */
-function dragTo(card: HTMLElement, title: string) {
-  const item = card.closest("li")!;
-  fireEvent.dragStart(item);
-  fireEvent.dragOver(column(title));
-  fireEvent.drop(column(title));
-  fireEvent.dragEnd(item);
-}
-
 /** 一覧と詳細の API を登録する。 */
 function routes(extra: Parameters<typeof installFakeFetch>[0] = {}) {
   return {
@@ -145,14 +135,6 @@ async function openPanel(
   await within(panel).findByText("元の発話");
   return panel;
 }
-
-/** 「見送る」の折りたたみの中の、理由の入力欄（「決定を記録する」にも「理由」がある）。 */
-const declineReason = (panel: HTMLElement) =>
-  within(
-    within(panel)
-      .getByText("見送る", { selector: "summary" })
-      .closest("details")!,
-  ).getByLabelText("理由");
 
 const callsTo = (calls: RecordedCall[], method: string, path: string) =>
   calls.filter((c) => c.method === method && c.path === path);
@@ -352,166 +334,35 @@ describe("担当者のボード: 列とカード", () => {
   });
 });
 
-describe("担当者のボード: ドラッグは操作を始める合図", () => {
-  it("「本人の番」に落とすと、状態は変えずにパネルを開き、「本人に送る」の入力欄にフォーカスを移す", async () => {
-    const { calls, card } = await renderBoard();
-
-    dragTo(card, "本人の番");
-
-    const panel = await screen.findByRole("region", {
-      name: "問い合わせの詳細",
-    });
-    await waitFor(() =>
-      expect(within(panel).getByLabelText("本人に送る")).toHaveFocus(),
-    );
-    expect(window.location.pathname).toBe("/operator/op-1");
-    // 状態を変える API は呼ばない。カードも動かない
-    expect(writes(calls)).toHaveLength(0);
-    expect(
-      cardIn("担当者の番", /求人が一覧に出なくなった/),
-    ).toBeInTheDocument();
-    expect(cardIn("本人の番", /求人が一覧に出なくなった/)).toBeNull();
-    // 読み上げにも伝える
-    expect(
-      screen.getByText("「本人に送る」の入力欄を開きました"),
-    ).toBeInTheDocument();
-  });
-
-  it("「終わり」に落とすと、「見送る」を開いて、理由の入力欄にフォーカスを移す。API は呼ばない", async () => {
-    const { calls, card } = await renderBoard();
-
-    dragTo(card, "終わり");
-
-    const panel = await screen.findByRole("region", {
-      name: "問い合わせの詳細",
-    });
-    await within(panel).findByText("見送る", { selector: "summary" });
-    const reason = declineReason(panel);
-    await waitFor(() => expect(reason).toHaveFocus());
-    expect(reason.closest("details")).toHaveAttribute("open");
-    expect(writes(calls)).toHaveLength(0);
-    expect(cardIn("終わり", /求人が一覧に出なくなった/)).toBeNull();
-    expect(
-      screen.getByText("「見送る」の入力欄を開きました"),
-    ).toBeInTheDocument();
-  });
-
-  it("すでにパネルが開いているカードをもう一度落としても、入力欄にフォーカスが移る", async () => {
-    const user = userEvent.setup();
-    const { calls, card } = await renderBoard();
-    const panel = await openPanel(user, card);
-    const box = within(panel).getByLabelText("本人に送る");
-    expect(box).not.toHaveFocus();
-
-    dragTo(card, "本人の番");
-
-    await waitFor(() => expect(box).toHaveFocus());
-    expect(writes(calls)).toHaveLength(0);
-  });
-
-  it("別の件のパネルが開いているときに落とすと、落とした件の詳細を開いて入力欄に移る", async () => {
-    const user = userEvent.setup();
-    const { card } = await renderBoard();
-    await user.click(screen.getByRole("button", { name: /返事待ちの件/ }));
-    await screen.findByText("いつからですか。");
-
-    dragTo(card, "本人の番");
-
-    const box = await screen.findByLabelText("本人に送る");
-    await waitFor(() => expect(box).toHaveFocus());
-    expect(window.location.pathname).toBe("/operator/op-1");
-  });
-
-  it("掴んでいる間は、落とせる列（本人の番、終わり）だけを示し、掴んだ列自身は示さない。離したら戻る", async () => {
-    const { card } = await renderBoard();
-    const item = card.closest("li")!;
-    expect(item).toHaveAttribute("draggable", "true");
-
-    fireEvent.dragStart(item);
-    expect(item).toHaveClass("dragging");
-    expect(column("担当者の番")).not.toHaveClass("droppable");
-    expect(column("本人の番")).toHaveClass("droppable");
-    expect(column("終わり")).toHaveClass("droppable");
-
-    fireEvent.dragOver(column("終わり"));
-    expect(column("終わり")).toHaveClass("over");
-    expect(column("本人の番")).not.toHaveClass("over");
-
-    fireEvent.dragEnd(item);
-    expect(item).not.toHaveClass("dragging");
-    expect(column("終わり")).not.toHaveClass("droppable");
-    expect(column("終わり")).not.toHaveClass("over");
-  });
-
-  it("落とせない動かし方（本人の番や終わりのカード、同じ列）では、何も強調せず、何も起きない", async () => {
-    const { calls, card } = await renderBoard();
-
-    // 本人の番のカードは、どの列にも落とせない
-    const waiting = screen.getByRole("button", { name: /返事待ちの件/ });
-    fireEvent.dragStart(waiting.closest("li")!);
-    for (const title of ["担当者の番", "本人の番", "終わり"]) {
-      expect(column(title)).not.toHaveClass("droppable");
-    }
-    fireEvent.dragEnd(waiting.closest("li")!);
-    dragTo(waiting, "担当者の番");
-    dragTo(waiting, "終わり");
-    // 終わりのカードも同じ
-    dragTo(screen.getByRole("button", { name: /完了した件/ }), "担当者の番");
-    // 担当者の番のカードを、同じ列に落とす
-    dragTo(card, "担当者の番");
-
-    expect(
-      screen.queryByRole("region", { name: "問い合わせの詳細" }),
-    ).not.toBeInTheDocument();
-    expect(window.location.pathname).toBe("/operator");
-    expect(writes(calls)).toHaveLength(0);
-    expect(callsTo(calls, "GET", "/api/operator/inquiries/op-1")).toHaveLength(
-      0,
-    );
-  });
-});
-
 describe("担当者のパネル", () => {
-  it("いまの状態と区間を出し、担当者の番なら区間を切り替えられる。切り替えるとカードにも区間が出る", async () => {
+  it("いまの状態と区間を出す。区間は見るだけで、押せない（区間を手で変える操作はない）", async () => {
     const user = userEvent.setup();
-    const { calls, card } = await renderBoard({
-      "PUT /api/operator/inquiries/op-1/phase": {
-        body: makeDetail({ read: true, messages: [], phase: "ACT" }),
-      },
-    });
+    const { calls, card } = await renderBoard();
     const panel = await openPanel(user, card);
 
     expect(
       within(panel).getByText("担当者の番（担当者が受けている）"),
     ).toBeInTheDocument();
-    const group = within(panel).getByRole("group", {
-      name: "区間を切り替える",
-    });
+    const phases = within(panel).getByRole("list", { name: "区間" });
     expect(
-      within(group)
-        .getAllByRole("button")
-        .map((b) => b.textContent),
+      within(phases)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
     ).toEqual(["分かる", "決まる", "行われる"]);
     expect(
-      within(group).getByRole("button", { name: "決まる" }),
-    ).toHaveAttribute("aria-pressed", "true");
-
-    await user.click(within(group).getByRole("button", { name: "行われる" }));
-
-    await waitFor(() =>
-      expect(
-        within(group).getByRole("button", { name: "行われる" }),
-      ).toHaveAttribute("aria-pressed", "true"),
+      within(phases).getByText("決まる", { selector: "li" }),
+    ).toHaveAttribute("aria-current", "step");
+    expect(within(phases).getByText("分かる")).not.toHaveAttribute(
+      "aria-current",
     );
+    expect(within(phases).queryByRole("button")).toBeNull();
     expect(
-      callsTo(calls, "PUT", "/api/operator/inquiries/op-1/phase")[0].body,
-    ).toEqual({ phase: "ACT" });
-    expect(cardIn("担当者の番", /求人が一覧に出なくなった/)).toHaveTextContent(
-      "区間 行われる",
-    );
+      within(panel).queryByRole("group", { name: "区間を切り替える" }),
+    ).toBeNull();
+    expect(writes(calls)).toHaveLength(0);
   });
 
-  it("担当者の番でないときは、区間を切り替えられず、入力欄の代わりに待っていることを示す", async () => {
+  it("担当者の番でないときは、入力欄の代わりに待っていることを示す。区間は、いまの区間を示したまま", async () => {
     const user = userEvent.setup();
     await renderBoard();
     await user.click(screen.getByRole("button", { name: /返事待ちの件/ }));
@@ -525,15 +376,11 @@ describe("担当者のパネル", () => {
     expect(within(panel).getByText("本人の番（返事待ち）")).toBeInTheDocument();
     expect(within(panel).queryByLabelText("本人に送る")).toBeNull();
     expect(within(panel).queryByText("見送る")).not.toBeInTheDocument();
-    const group = within(panel).getByRole("group", {
-      name: "区間を切り替える",
-    });
-    for (const button of within(group).getAllByRole("button")) {
-      expect(button).toBeDisabled();
-    }
     expect(
-      within(panel).getByText(/区間を切り替えられるのは、担当者の番のときだけ/),
-    ).toBeInTheDocument();
+      within(within(panel).getByRole("list", { name: "区間" })).getByText(
+        "決まる",
+      ),
+    ).toHaveAttribute("aria-current", "step");
   });
 
   it("終わった件は、終わり方を示し、置き直しもできない", async () => {
@@ -695,7 +542,7 @@ describe("担当者のパネル", () => {
     });
     const panel = await openPanel(user, card);
 
-    const reason = declineReason(panel);
+    const reason = within(panel).getByLabelText("理由");
     const details = reason.closest("details")!;
     expect(details).not.toHaveAttribute("open");
     await user.click(within(details).getByText("見送る"));
@@ -1202,7 +1049,7 @@ describe("担当者のパネル: 渡った理由", () => {
   });
 });
 
-describe("担当者のパネル: 調査の状況と調べ直す", () => {
+describe("担当者のパネル: 調査の状況", () => {
   const investigation = (overrides: object = {}) => ({
     status: "NOT_RUN",
     audience: null,
@@ -1301,180 +1148,22 @@ describe("担当者のパネル: 調査の状況と調べ直す", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("調べたことがなければ「AI に調べさせる」、あれば「調べ直す」。ボタンの下に説明を添える", async () => {
-    const { panel } = await openWith(investigation({ status: "NOT_RUN" }));
-    expect(
-      within(panel).getByRole("button", { name: "AI に調べさせる" }),
-    ).toBeEnabled();
-    expect(
-      within(panel).queryByRole("button", { name: "調べ直す" }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(panel).getByText(
-        "番は変わりません。結果は、担当者だけに見えます。",
-      ),
-    ).toBeInTheDocument();
-    cleanup();
-    vi.unstubAllGlobals();
-
-    for (const status of ["DONE", "FAILED"]) {
-      const next = await openWith(
-        investigation({ status, audience: status === "DONE" ? "ASKER" : null }),
-      );
+  it("調査の状況の行だけで、調査をやり直すボタンは出さない（調べていない、調べている、終わった、失敗した、どの状況でも）", async () => {
+    for (const inv of [
+      investigation({ status: "NOT_RUN" }),
+      investigation({ status: "RUNNING" }),
+      investigation({ status: "DONE", audience: "ASKER" }),
+      investigation({ status: "FAILED" }),
+    ]) {
+      const { panel } = await openWith(inv);
       expect(
-        within(next.panel).getByRole("button", { name: "調べ直す" }),
-      ).toBeEnabled();
-      expect(
-        within(next.panel).queryByRole("button", { name: "AI に調べさせる" }),
-      ).not.toBeInTheDocument();
+        within(panel).queryByRole("button", {
+          name: /調べ直す|AI に調べさせる/,
+        }),
+      ).toBeNull();
       cleanup();
       vi.unstubAllGlobals();
     }
-  });
-
-  it("調べている最中、言い直しが無い件、終わった件には、ボタンを出さない", async () => {
-    const running = await openWith(investigation({ status: "RUNNING" }));
-    expect(
-      within(running.panel).queryByRole("button", {
-        name: /調べ直す|AI に調べさせる/,
-      }),
-    ).not.toBeInTheDocument();
-    cleanup();
-    vi.unstubAllGlobals();
-
-    const noRestatement = await openWith(investigation(), { structured: null });
-    expect(
-      within(noRestatement.panel).queryByRole("button", {
-        name: /調べ直す|AI に調べさせる/,
-      }),
-    ).not.toBeInTheDocument();
-    // 状況の行は出す
-    expect(
-      line(noRestatement.panel, "AI は調べていません。"),
-    ).toBeInTheDocument();
-    cleanup();
-    vi.unstubAllGlobals();
-
-    const ended = await openWith(
-      investigation({ status: "DONE", audience: "ASKER" }),
-      {
-        ...closedState("RESOLVED"),
-      },
-    );
-    expect(
-      within(ended.panel).queryByRole("button", {
-        name: /調べ直す|AI に調べさせる/,
-      }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("押すと POST …/investigation を呼び、返ってきた詳細で状況が変わる。番は変わらない", async () => {
-    const { calls, user, panel } = await openWith(
-      investigation({ status: "DONE", audience: "ASKER" }),
-      {},
-      {
-        "POST /api/operator/inquiries/op-1/investigation": {
-          body: makeDetail({
-            read: true,
-            messages: [],
-            investigation: investigation({
-              status: "RUNNING",
-              startedAt: "2026-11-22T03:00:00Z",
-            }) as never,
-          }),
-        },
-      },
-    );
-
-    await user.click(within(panel).getByRole("button", { name: "調べ直す" }));
-
-    const post = callsTo(
-      calls,
-      "POST",
-      "/api/operator/inquiries/op-1/investigation",
-    );
-    expect(post).toHaveLength(1);
-    expect(post[0].body).toBeUndefined();
-    expect(
-      await within(panel).findByText(
-        "AI が調べています。終わると、ここに結果が出ます。",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(panel).queryByRole("button", { name: "調べ直す" }),
-    ).not.toBeInTheDocument();
-    // 番は変わらず、担当者の番のまま
-    expect(
-      cardIn("担当者の番", /求人が一覧に出なくなった/),
-    ).toBeInTheDocument();
-  });
-
-  it("押している間は二重に押せない", async () => {
-    let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    const { calls, user, panel } = await openWith(investigation());
-    const fake = vi.mocked(fetch);
-    const base = fake.getMockImplementation()!;
-    fake.mockImplementation(async (input, init) => {
-      if (String(input).endsWith("/investigation") && init?.method === "POST") {
-        calls.push({
-          method: "POST",
-          path: String(input),
-          body: undefined,
-          headers: {},
-        });
-        await gate;
-        return new Response(
-          JSON.stringify(
-            makeDetail({
-              read: true,
-              messages: [],
-              investigation: investigation({ status: "RUNNING" }) as never,
-            }),
-          ),
-          { status: 200 },
-        );
-      }
-      return base(input, init);
-    });
-
-    const button = within(panel).getByRole("button", {
-      name: "AI に調べさせる",
-    });
-    await user.click(button);
-    expect(button).toBeDisabled();
-    await user.click(button);
-    release();
-
-    await within(panel).findByText(
-      "AI が調べています。終わると、ここに結果が出ます。",
-    );
-    expect(
-      callsTo(calls, "POST", "/api/operator/inquiries/op-1/investigation"),
-    ).toHaveLength(1);
-  });
-
-  it("失敗（INVALID_STATE など）は、既存のエラーの出し方で出す", async () => {
-    const { user, panel } = await openWith(
-      investigation({ status: "DONE", audience: "ASKER" }),
-      {},
-      {
-        "POST /api/operator/inquiries/op-1/investigation": {
-          status: 409,
-          body: { code: "INVALID_STATE", message: "x" },
-        },
-      },
-    );
-
-    await user.click(within(panel).getByRole("button", { name: "調べ直す" }));
-
-    expect(await within(panel).findByRole("alert")).toHaveTextContent(
-      "うまく処理できませんでした",
-    );
-    // 状況はそのまま、ボタンはまた押せる
-    expect(
-      within(panel).getByRole("button", { name: "調べ直す" }),
-    ).toBeEnabled();
   });
 
   it("開いているパネルの件に updated が届いたら、詳細を取り直して結果を出す。入力の途中の文章は消えない", async () => {
@@ -1507,7 +1196,7 @@ describe("担当者のパネル: 調査の状況と調べ直す", () => {
     await user.click(
       within(panel).getByText("見送る", { selector: "summary" }),
     );
-    await user.type(declineReason(panel), "仕様です");
+    await user.type(within(panel).getByLabelText("理由"), "仕様です");
 
     act(() => stream.latest.handlers.onUpdated({ ...mine1 }));
 
@@ -1520,7 +1209,7 @@ describe("担当者のパネル: 調査の状況と調べ直す", () => {
     expect(within(panel).getByLabelText("本人に送る")).toHaveValue(
       "確認中です",
     );
-    expect(declineReason(panel)).toHaveValue("仕様です");
+    expect(within(panel).getByLabelText("理由")).toHaveValue("仕様です");
   });
 });
 

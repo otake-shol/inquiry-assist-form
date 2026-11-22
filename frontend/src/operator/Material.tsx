@@ -17,7 +17,7 @@ import { formatFiledAt, opAnswerLabel, opUrgencyLabel } from "./labels.ts";
 /**
  * 担当者の詳細のパネルと、仕様の持ち主の画面が共有する、読み取りだけの部品。
  * 材料（置き場所、本人が書いた文章、入口の質問と答え、言い直し、調べた結果、AI の案、やり取り）を、
- * 操作のボタンなしで描く。操作は、使う側が差し込み口（`resultAction`、`children`）に渡す。
+ * 操作のボタンなしで描く。操作は、使う側が差し込み口（`children`）に渡す。
  */
 
 /**
@@ -271,8 +271,6 @@ interface MaterialSectionsProps {
   adviceLanguage?: string;
   /** 訳があれば、`key` の文章のすぐ下に添える（担当者の画面だけ） */
   noteOf?: (key: string) => ReactNode;
-  /** 「調べた結果」の、調査の状況の下に差し込む操作（担当者の画面だけ。「調べ直す」など） */
-  resultAction?: ReactNode;
 }
 
 /**
@@ -284,7 +282,6 @@ export function MaterialSections({
   detail,
   adviceLanguage,
   noteOf = () => null,
-  resultAction = null,
 }: MaterialSectionsProps) {
   const dict = useMessages();
   const OP_TEXT = dict.op;
@@ -362,7 +359,6 @@ export function MaterialSections({
         {detail.investigation.unconfirmedQuestion && (
           <p className="op-muted">{OP_TEXT.investigationUnconfirmed}</p>
         )}
-        {resultAction}
         {answer === null ? (
           <p className="op-muted">{OP_TEXT.noResult}</p>
         ) : (

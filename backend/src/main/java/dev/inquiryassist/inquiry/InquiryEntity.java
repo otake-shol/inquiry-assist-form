@@ -281,14 +281,6 @@ class InquiryEntity {
     @Column(name = "investigation_unconfirmed_question", nullable = false)
     boolean investigationUnconfirmedQuestion;
 
-    /**
-     * 担当者のための訳。訳す先の言語ごとに、原文から訳への対応を持つ（原文の SHA-256 を16進数にしたものをキーにする）。
-     * 同じ文章を2度訳さないために保存する。本人向けの応答には含めない。
-     */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "translations", nullable = false)
-    java.util.Map<String, java.util.Map<String, String>> translations = new java.util.LinkedHashMap<>();
-
     /** 仕様の持ち主への相談（古い順）。決定を待っている（{@code OPEN}）ものは、同時に1つだけ。 */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "consultations", nullable = false)

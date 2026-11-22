@@ -200,21 +200,6 @@ class AdviceApiTest extends ApiSupport {
         assertThat((List<String>) JsonPath.read(view(id), "$.trace[*].skill")).doesNotContain("advisor", "drafter");
     }
 
-    // ---- 調べ直し ----
-
-    @Test
-    void 調べ直すと前の案を消して作り直す() throws Exception {
-        String id = filedNow(HOW_TO, null);
-        assertThat(usageSteps(id)).filteredOn("advisor"::equals).hasSize(1);
-
-        mvc.perform(post("/api/operator/inquiries/" + id + "/investigation")).andExpect(status().isOk());
-        awaitInvestigationIdle(id);
-
-        assertThat(adviceStatus(id)).isEqualTo("DONE");
-        assertThat(usageSteps(id)).filteredOn("advisor"::equals).hasSize(2);
-        assertThat((String) JsonPath.read(detail(id), "$.advice.status")).isEqualTo("DONE");
-    }
-
     // ---- 担当者側の未読 ----
 
     @Test

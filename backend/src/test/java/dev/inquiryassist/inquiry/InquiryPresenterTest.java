@@ -2,12 +2,9 @@ package dev.inquiryassist.inquiry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.Urgency;
-import dev.inquiryassist.core.intake.Choice;
 import dev.inquiryassist.core.intake.IntakeAnswer;
-import dev.inquiryassist.core.intake.IntakeCatalog;
 import dev.inquiryassist.core.intake.IntakeEntry;
 import dev.inquiryassist.core.intake.PlacedBy;
 import dev.inquiryassist.core.intake.QuestionKind;
@@ -39,8 +36,7 @@ class InquiryPresenterTest {
                         "job-admin",
                         names("求人管理画面", "Job admin"),
                         List.of(new InquiryProperties.FunctionEntry("posting", names("求人の掲載", "Posting"))),
-                        null,
-                        List.of())),
+                        null)),
                 List.of(),
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
                 null,

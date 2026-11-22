@@ -17,8 +17,6 @@ import java.util.UUID;
  * @param decision 決定の内容
  * @param reason 理由
  * @param decidedBy 決めた人の名前
- * @param recordedBy 記録した人
- * @param confirmed 決めた人が内容を確かめたか
  * @param language 決めたときの見る人の言語
  * @param decidedAt 決めた時刻
  */
@@ -33,8 +31,6 @@ public record PrecedentView(
         String decision,
         String reason,
         String decidedBy,
-        RecordedBy recordedBy,
-        boolean confirmed,
         String language,
         Instant decidedAt) {
 

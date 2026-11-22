@@ -11,19 +11,12 @@ import { MAX_MESSAGE_LENGTH } from "./Exchange.tsx";
 /** 「決めた人」の選択肢で、「ほかの人」を表す値。名前としては使わない。 */
 const OTHER_PERSON = "\u0000other";
 
-/** 決めた人の入れ方。 */
-export type DecidedByInput =
-  /** 相談先の名前から選ぶ（相談先が1人なら、最初から選んでおく。「ほかの人」で名前を書ける） */
-  | { mode: "choose"; names: string[] }
-  /** 名前を書く（`candidates` は、候補として出す名前） */
-  | { mode: "write"; candidates: string[] };
-
 /** DecisionForm の props。 */
 interface DecisionFormProps {
   /** 状況の初期値 */
   initialSituation: string;
-  /** 決めた人の入れ方 */
-  people: DecidedByInput;
+  /** 決めた人の選択肢（相談先の名前） */
+  names: string[];
   /** 「決定を記録する」の下に添える説明 */
   note: string;
   busy: boolean;
@@ -34,14 +27,14 @@ interface DecisionFormProps {
 }
 
 /**
- * 決定を記録するフォーム（仕様の持ち主の「決める」と、担当者の「決定を記録する」で共通）。
+ * 決定を記録するフォーム（仕様の持ち主の「決める」）。
  * 状況、決定の種類、決定の内容、理由、決めた人を入れて「決定を記録する」。どれかが空なら押せない。
- * 決めた人は、相談先から選ぶか（持ち主の画面）、名前を書く（担当者の画面。候補を出す）。
- * @param props 初期値、決めた人の入れ方、説明、送る処理
+ * 決めた人は、相談先の名前から選ぶ（1人なら最初から選んでおく。「ほかの人」で名前を書ける）。
+ * @param props 初期値、決めた人の選択肢、説明、送る処理
  */
 export function DecisionForm({
   initialSituation,
-  people,
+  names,
   note,
   busy,
   failed,
@@ -53,20 +46,10 @@ export function DecisionForm({
   const [kind, setKind] = useState<DecisionKind | "">("");
   const [decision, setDecision] = useState("");
   const [reason, setReason] = useState("");
-  const [person, setPerson] = useState(
-    people.mode === "choose" && people.names.length === 1
-      ? people.names[0]
-      : "",
-  );
+  const [person, setPerson] = useState(names.length === 1 ? names[0] : "");
   const [otherName, setOtherName] = useState("");
-  const [written, setWritten] = useState("");
 
-  const decidedBy =
-    people.mode === "write"
-      ? written.trim()
-      : person === OTHER_PERSON
-        ? otherName.trim()
-        : person;
+  const decidedBy = person === OTHER_PERSON ? otherName.trim() : person;
   const canSubmit =
     !busy &&
     kind !== "" &&
@@ -130,53 +113,29 @@ export function DecisionForm({
         onChange={(event) => setReason(event.target.value)}
       />
       <label htmlFor={`${id}-by`}>{OWNER_TEXT.decidedBy}</label>
-      {people.mode === "write" ? (
+      <select
+        id={`${id}-by`}
+        value={person}
+        onChange={(event) => setPerson(event.target.value)}
+      >
+        {names.length !== 1 && <option value="">{OWNER_TEXT.choose}</option>}
+        {names.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+        <option value={OTHER_PERSON}>{OWNER_TEXT.decidedByOther}</option>
+      </select>
+      {person === OTHER_PERSON && (
         <>
+          <label htmlFor={`${id}-by-name`}>{OWNER_TEXT.decidedByName}</label>
           <input
-            id={`${id}-by`}
+            id={`${id}-by-name`}
             type="text"
-            list={`${id}-candidates`}
             maxLength={MAX_NAME_LENGTH}
-            value={written}
-            onChange={(event) => setWritten(event.target.value)}
+            value={otherName}
+            onChange={(event) => setOtherName(event.target.value)}
           />
-          <datalist id={`${id}-candidates`}>
-            {people.candidates.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        </>
-      ) : (
-        <>
-          <select
-            id={`${id}-by`}
-            value={person}
-            onChange={(event) => setPerson(event.target.value)}
-          >
-            {people.names.length !== 1 && (
-              <option value="">{OWNER_TEXT.choose}</option>
-            )}
-            {people.names.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-            <option value={OTHER_PERSON}>{OWNER_TEXT.decidedByOther}</option>
-          </select>
-          {person === OTHER_PERSON && (
-            <>
-              <label htmlFor={`${id}-by-name`}>
-                {OWNER_TEXT.decidedByName}
-              </label>
-              <input
-                id={`${id}-by-name`}
-                type="text"
-                maxLength={MAX_NAME_LENGTH}
-                value={otherName}
-                onChange={(event) => setOtherName(event.target.value)}
-              />
-            </>
-          )}
         </>
       )}
       <div className="actions">

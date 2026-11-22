@@ -1,13 +1,10 @@
-import { useEffect, useRef, useState } from "react";
 import type { PlacementInput, ReplyKind } from "../api/client.ts";
 import type {
   ConfigSystem,
   DeclineReasonKind,
-  DecisionRequest,
   DraftResult,
   OperatorDetail,
   Translation,
-  Phase,
   SystemOption,
   TypeOption,
 } from "../api/types.ts";
@@ -18,14 +15,13 @@ import { languageName } from "../i18n/messages.ts";
 import {
   ConsultForm,
   ConsultationWaiting,
-  DecisionRecordFold,
   DecisionsSection,
 } from "./Consultation.tsx";
 import { openConsultationOf } from "./consultations.ts";
 import {
   DeclineForm,
   HistoryList,
-  PhaseSwitch,
+  PhaseIndicator,
   PlacementForm,
   SendToAsker,
 } from "./Controls.tsx";
@@ -35,17 +31,6 @@ import {
   MaterialSections,
   PlacementBadges,
 } from "./Material.tsx";
-import type { DropIntent } from "./state.ts";
-
-/** カードをドラッグで落としたときの、入力欄へのフォーカスの要求。 */
-export interface FocusRequest {
-  /** 問い合わせの id */
-  id: string;
-  /** 「本人に送る」「相談する」「見送る」の入力欄 */
-  target: DropIntent;
-  /** 同じ要求を続けて受けても、もう一度フォーカスを移せるようにする通し番号 */
-  token: number;
-}
 
 /** DetailView の props。 */
 interface DetailViewProps {
@@ -62,12 +47,6 @@ interface DetailViewProps {
   busy: boolean;
   /** 直近の操作が失敗したか */
   failed: boolean;
-  /** ドラッグで落とされたときの、入力欄へのフォーカスの要求 */
-  focusRequest: FocusRequest | null;
-  /** フォーカスを移し終えた（要求を消す） */
-  onFocusHandled: () => void;
-  /** 区間を切り替える。成功したら true */
-  onPhase: (phase: Phase) => Promise<boolean>;
   /** 置き直す。成功したら true */
   onPlacement: (placement: PlacementInput) => Promise<boolean>;
   /** 本人に聞き返す、または結果を伝える。成功したら true */
@@ -82,21 +61,17 @@ interface DetailViewProps {
   onToggleTranslation: () => void;
   /** 返信の下書きを作らせる。失敗したら null */
   onDraft: (kind: ReplyKind, note: string) => Promise<DraftResult | null>;
-  /** AI に調べさせる（調べ直す）。成功したら true */
-  onInvestigate: () => Promise<boolean>;
   /** 見送りとして終える。成功したら true */
   onDecline: (kind: DeclineReasonKind, reason: string) => Promise<boolean>;
   /** 仕様の持ち主に相談する。成功したら true */
   onConsult: (to: string[], question: string) => Promise<boolean>;
   /** 相談を取り下げる。成功したら true */
   onCancelConsultation: () => Promise<boolean>;
-  /** 会議などで決まった決定を記録する。成功したら true */
-  onRecordDecision: (request: DecisionRequest) => Promise<boolean>;
 }
 
 /**
  * 1件の問い合わせの全内容。元の発話から調べた結果、出典の照合結果まで。
- * 上部にいまの状態と区間の切り替え、下部にやり取りと、本人に送る・見送る操作、状態の履歴、
+ * 上部にいまの状態と区間（見るだけ）、下部にやり取りと、本人に送る・相談する・見送る操作、状態の履歴、
  * 最下部にスキルの実行記録を置く。担当者の番でないときは、操作の代わりに待っていることを示す。
  * @param props 問い合わせの全内容と、操作の受け口
  */
@@ -108,9 +83,6 @@ export function DetailView({
   trace,
   busy,
   failed,
-  focusRequest,
-  onFocusHandled,
-  onPhase,
   onPlacement,
   onReply,
   adviceLanguage,
@@ -118,15 +90,12 @@ export function DetailView({
   translating,
   onToggleTranslation,
   onDraft,
-  onInvestigate,
   onDecline,
   onConsult,
   onCancelConsultation,
-  onRecordDecision,
 }: DetailViewProps) {
   const dict = useMessages();
   const OP_TEXT = dict.op;
-  const { structured } = detail;
   /** 訳があれば、`key` の文章のすぐ下に添える（対応する文章が画面にない `key` は、呼ばれないので無視される） */
   const noteOf = (key: string) =>
     translation === null ? null : (
@@ -137,43 +106,6 @@ export function DetailView({
     );
   const ended = detail.ending !== null;
   const operatorsTurn = !ended && detail.turn === "OPERATOR";
-  // 調べ直せるのは、終わっていない、言い直しがある、いま調べていない件
-  const canInvestigate =
-    !ended && structured !== null && detail.investigation.status !== "RUNNING";
-
-  // ドラッグで落とされたら、対応する入力欄にフォーカスを移す（見送るは、折りたたみを開いてから）
-  const sendRef = useRef<HTMLTextAreaElement | null>(null);
-  const declineRef = useRef<HTMLTextAreaElement | null>(null);
-  const consultRef = useRef<HTMLTextAreaElement | null>(null);
-  const [declineOpen, setDeclineOpen] = useState(false);
-  const [consultOpen, setConsultOpen] = useState(false);
-  const target =
-    focusRequest !== null && focusRequest.id === detail.id
-      ? focusRequest.target
-      : null;
-  const token = focusRequest?.token;
-  // 「見送る」「相談する」への要求が来たら、描画のうちに折りたたみを開く（要求ごとに1回）
-  const [openedFor, setOpenedFor] = useState<number | undefined>(undefined);
-  if (
-    (target === "decline" || target === "consult") &&
-    operatorsTurn &&
-    token !== openedFor
-  ) {
-    setOpenedFor(token);
-    if (target === "decline") setDeclineOpen(true);
-    else setConsultOpen(true);
-  }
-  useEffect(() => {
-    if (target === null) return;
-    if (!operatorsTurn) {
-      onFocusHandled();
-      return;
-    }
-    if (target === "send") sendRef.current?.focus();
-    else if (target === "consult") consultRef.current?.focus();
-    else declineRef.current?.focus();
-    onFocusHandled();
-  }, [target, token, operatorsTurn, onFocusHandled]);
   return (
     <article className="op-article">
       <header className="op-article-head">
@@ -219,12 +151,7 @@ export function DetailView({
             </button>
           </p>
         )}
-        <PhaseSwitch
-          phase={detail.phase}
-          enabled={operatorsTurn}
-          busy={busy}
-          onChange={(phase) => void onPhase(phase)}
-        />
+        <PhaseIndicator phase={detail.phase} />
         {!ended && (
           <PlacementForm
             key={`${detail.type?.id}:${detail.system?.id}:${detail.function?.id}`}
@@ -241,22 +168,6 @@ export function DetailView({
         detail={detail}
         adviceLanguage={adviceLanguage}
         noteOf={noteOf}
-        resultAction={
-          canInvestigate ? (
-            <div className="op-investigate">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void onInvestigate()}
-              >
-                {detail.investigation.status === "NOT_RUN"
-                  ? OP_TEXT.investigationStart
-                  : OP_TEXT.investigationRetry}
-              </button>
-              <p className="op-muted">{OP_TEXT.investigationHint}</p>
-            </div>
-          ) : null
-        }
       />
 
       <DecisionsSection decisions={detail.decisions ?? []} />
@@ -264,48 +175,20 @@ export function DetailView({
       <ExchangeSection detail={detail} translation={translation}>
         {operatorsTurn ? (
           <>
-            <SendToAsker
-              busy={busy}
-              inputRef={sendRef}
-              onSend={onReply}
-              onDraft={onDraft}
-            />
+            <SendToAsker busy={busy} onSend={onReply} onDraft={onDraft} />
             <ConsultForm
-              open={consultOpen}
-              onToggle={setConsultOpen}
               busy={busy}
-              defaultConsultants={detail.defaultConsultants ?? []}
-              questionRef={consultRef}
+              consultants={detail.defaultConsultants ?? []}
               onSubmit={onConsult}
             />
-            <DecisionRecordFold
-              detail={detail}
-              busy={busy}
-              failed={false}
-              onSubmit={onRecordDecision}
-            />
-            <DeclineForm
-              open={declineOpen}
-              onToggle={setDeclineOpen}
-              busy={busy}
-              reasonRef={declineRef}
-              onSubmit={onDecline}
-            />
+            <DeclineForm busy={busy} onSubmit={onDecline} />
           </>
         ) : detail.ending === null && detail.awaiting === "CONSULTATION" ? (
-          <>
-            <ConsultationWaiting
-              consultation={openConsultationOf(detail)}
-              busy={busy}
-              onCancel={onCancelConsultation}
-            />
-            <DecisionRecordFold
-              detail={detail}
-              busy={busy}
-              failed={false}
-              onSubmit={onRecordDecision}
-            />
-          </>
+          <ConsultationWaiting
+            consultation={openConsultationOf(detail)}
+            busy={busy}
+            onCancel={onCancelConsultation}
+          />
         ) : (
           <p className="op-waiting">{waitingText(detail, OP_TEXT)}</p>
         )}

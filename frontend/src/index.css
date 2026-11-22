@@ -717,7 +717,6 @@ blockquote {
   }
 
   button,
-  .board-column,
   .board-card {
     transition: none;
   }
@@ -1149,15 +1148,24 @@ blockquote {
   color: var(--muted);
 }
 
-/* 担当者の画面: 状況の切り替え、やり取り */
-.op-status-switch {
+/* 担当者の画面: 区間の表示、やり取り */
+.op-phase-list {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
-.op-status-switch button[aria-pressed="true"] {
+.op-phase-list li {
+  padding: 4px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.op-phase-list li.current {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-ink);
@@ -1193,7 +1201,7 @@ blockquote {
   display: grid;
   grid-auto-flow: column;
   /* 担当者のボードは4列（担当者の番、相談中、本人の番、終わり）。詳細のパネルを開いた状態でも、
-     ノートPCの幅（1280px）で4列が横スクロールなしに収まる幅にする。収まらないと、落とす先の列が隠れる */
+     ノートPCの幅（1280px）で4列が横スクロールなしに収まる幅にする。収まらないと、右の列が隠れる */
   grid-auto-columns: minmax(176px, 1fr);
   gap: 12px;
   align-items: start;
@@ -1212,9 +1220,6 @@ blockquote {
   background: #efebe1;
   border: 1px solid var(--line);
   border-radius: 12px;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
 }
 
 .board-column-head {
@@ -1295,25 +1300,6 @@ blockquote {
   margin-top: 4px;
   color: var(--muted);
   font-size: 0.8rem;
-}
-
-/* 担当者のボード: 掴んでいるカードと、落とせる列 */
-.board-card-item[draggable="true"] {
-  cursor: grab;
-}
-
-.board-card-item.dragging {
-  opacity: 0.45;
-}
-
-.board-column.droppable {
-  border: 1px dashed var(--accent);
-  background: var(--accent-soft);
-}
-
-.board-column.over {
-  border: 1px solid var(--accent);
-  background: #d5e1f2;
 }
 
 .op-card-foot {
@@ -1463,10 +1449,6 @@ blockquote {
   font-size: 0.85rem;
 }
 
-.op-phase .op-muted {
-  margin: 6px 0 0;
-}
-
 .op-fold {
   margin-top: 10px;
 }
@@ -1589,15 +1571,6 @@ blockquote {
 
 .op-investigation {
   color: var(--muted);
-}
-
-.op-investigate {
-  margin: 8px 0 12px;
-}
-
-.op-investigate .op-muted {
-  margin: 4px 0 0;
-  font-size: 0.85rem;
 }
 
 /* 担当者のパネル: AI の案（事実と見分けがつくよう、点線の枠にする）と、返信の下書き */
@@ -1857,7 +1830,7 @@ button.small {
   margin-left: 16px;
 }
 
-/* 先例の一覧、確かめてほしい先例 */
+/* 先例の一覧 */
 .precedent-filter {
   display: flex;
   flex-wrap: wrap;
@@ -1875,20 +1848,6 @@ button.small {
 
 .precedent-list {
   max-width: 760px;
-}
-
-.owner-unconfirmed {
-  margin-top: 28px;
-}
-
-.owner-unconfirmed h2 {
-  margin: 0 0 8px;
-  font-size: 1.05rem;
-}
-
-.op-decision-unconfirmed {
-  margin-left: 8px;
-  font-weight: 400;
 }
 
 .op-based-precedents {

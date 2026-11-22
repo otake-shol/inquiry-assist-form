@@ -1,5 +1,5 @@
 import { useMessages } from "../i18n/context.ts";
-import { useId, type HTMLAttributes, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 /** BoardColumn の props。 */
 interface BoardColumnProps {
@@ -7,10 +7,6 @@ interface BoardColumnProps {
   title: string;
   /** 列にあるカードの数 */
   count: number;
-  /** 見た目の状態。ドラッグ中に、落とせる列と、いま重なっている列を示す */
-  dropState?: "droppable" | "over";
-  /** 列に付けるドラッグ＆ドロップの受け口（担当者のボードだけが使う） */
-  dropProps?: HTMLAttributes<HTMLElement>;
   /** 列の識別子（テストや見た目の手がかり） */
   columnId: string;
   /** カード（`li`）の並び */
@@ -26,8 +22,6 @@ interface BoardColumnProps {
 export function BoardColumn({
   title,
   count,
-  dropState,
-  dropProps,
   columnId,
   children,
 }: BoardColumnProps) {
@@ -37,10 +31,9 @@ export function BoardColumn({
   const countId = `${id}-count`;
   return (
     <section
-      className={`board-column ${dropState ?? ""}`}
+      className="board-column"
       data-column={columnId}
       aria-labelledby={`${titleId} ${countId}`}
-      {...dropProps}
     >
       <div className="board-column-head">
         <h3 id={titleId}>{title}</h3>

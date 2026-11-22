@@ -62,7 +62,6 @@ class DraftUsageConflictTest {
                 mock(InquiryPresenter.class),
                 new IntakeLocales(properties),
                 mock(ApplicationEventPublisher.class),
-                mock(InvestigationRunner.class),
                 drafter,
                 committer,
                 mock(PrecedentRepository.class),

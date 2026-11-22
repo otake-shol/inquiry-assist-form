@@ -63,12 +63,6 @@ class RoundTripApiTest extends ApiSupport {
                 .content(json("reasonKind", reasonKind, "reason", reason)));
     }
 
-    private ResultActions changePhase(String id, String phase) throws Exception {
-        return mvc.perform(put("/api/operator/inquiries/" + id + "/phase")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json("phase", phase)));
-    }
-
     private ResultActions replacePlacement(String id, String body) throws Exception {
         return mvc.perform(put("/api/operator/inquiries/" + id + "/placement")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -313,12 +307,11 @@ class RoundTripApiTest extends ApiSupport {
     @Test
     void 担当者の結果に解決していないと答えると担当者の番に戻り_区間は変わらず_noteがメッセージに入る() throws Exception {
         String id = handedOverToDecide();
-        changePhase(id, "ACT").andExpect(status().isOk());
         deliver(id, "対応しました");
 
         resolveWithNote(id, "まだ直っていません")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.phase").value("ACT"))
+                .andExpect(jsonPath("$.phase").value("DECIDE"))
                 .andExpect(jsonPath("$.turn").value("OPERATOR"))
                 .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.messages[1].from").value("ASKER"))
@@ -412,29 +405,7 @@ class RoundTripApiTest extends ApiSupport {
         decline(id, "OTHER", "もう一度").andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_STATE"));
     }
 
-    // ---- 区間を変える・置き直す ----
-
-    @Test
-    void 区間を変えられ_番は変わらず_履歴に残る() throws Exception {
-        String id = handedOver("区間の確認");
-
-        changePhase(id, "ACT")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.phase").value("ACT"))
-                .andExpect(jsonPath("$.turn").value("OPERATOR"))
-                .andExpect(jsonPath("$.awaiting").value("HANDLING"));
-        changePhase(id, "DECIDE").andExpect(jsonPath("$.phase").value("DECIDE"));
-        assertThat(historyEvents(id)).endsWith("PHASE_CHANGED", "PHASE_CHANGED");
-        assertThat(listed(id, "phase")).isEqualTo("DECIDE");
-
-        changePhase(id, "INTAKE").andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"));
-        changePhase(id, "CLOSED").andExpect(status().isBadRequest());
-        changePhase(id, "NOWHERE").andExpect(status().isBadRequest());
-        mvc.perform(put("/api/operator/inquiries/" + id + "/phase")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest());
-    }
+    // ---- 置き直す ----
 
     @Test
     @SuppressWarnings("unchecked")
@@ -489,10 +460,9 @@ class RoundTripApiTest extends ApiSupport {
     @Test
     void 種類が同じ置き直しは区間を変えず_どれもnullにできる() throws Exception {
         String id = handedOver("期限の仕様");
-        changePhase(id, "ACT");
 
         replacePlacement(id, json("type", "HOW_IT_WORKS", "systemId", "reports"))
-                .andExpect(jsonPath("$.phase").value("ACT"))
+                .andExpect(jsonPath("$.phase").value("KNOW"))
                 .andExpect(jsonPath("$.system.id").value("reports"))
                 .andExpect(jsonPath("$.function").value(nullValue()));
         replacePlacement(id, "{}")
@@ -541,16 +511,15 @@ class RoundTripApiTest extends ApiSupport {
     @Test
     void 終わった件への追記は開き直し_終わる前の区間に戻して担当者の番にする() throws Exception {
         String resolved = handedOverToDecide();
-        changePhase(resolved, "ACT");
         deliver(resolved, "対応しました");
         resolve(resolved, true);
         String declined = handedOver("見送られた件");
         decline(declined, "NOT_REPRODUCIBLE", "再現しません");
 
-        // 解決を伝えた件: 終わる前の区間（ACT）に戻る
+        // 解決を伝えた件: 終わる前の区間（DECIDE）に戻る
         append(resolved, "やはり直っていません")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.phase").value("ACT"))
+                .andExpect(jsonPath("$.phase").value("DECIDE"))
                 .andExpect(jsonPath("$.turn").value("OPERATOR"))
                 .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.ending").value(nullValue()));
@@ -632,7 +601,6 @@ class RoundTripApiTest extends ApiSupport {
         ask(id, "もう一度").andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_STATE"));
         deliver(id, "結果").andExpect(status().isConflict());
         decline(id, "OTHER", "対象外").andExpect(status().isConflict());
-        changePhase(id, "ACT").andExpect(status().isConflict());
         // 聞き返しへの返事を待っている間は、結果の確かめではない
         resolve(id, true).andExpect(status().isConflict());
         sendNow(id).andExpect(status().isConflict());
@@ -644,7 +612,6 @@ class RoundTripApiTest extends ApiSupport {
 
         ask(id, "x").andExpect(status().isNotFound());
         decline(id, "OTHER", "x").andExpect(status().isNotFound());
-        changePhase(id, "ACT").andExpect(status().isNotFound());
         replacePlacement(id, "{}").andExpect(status().isNotFound());
         mvc.perform(post("/api/operator/inquiries/" + id + "/read")).andExpect(status().isNotFound());
         mvc.perform(get("/api/operator/inquiries/" + id)).andExpect(status().isNotFound());
@@ -722,7 +689,6 @@ class RoundTripApiTest extends ApiSupport {
         resolve(id, false);
         ask(id, "どの画面ですか");
         append(id, "請求です");
-        changePhase(id, "ACT");
         deliver(id, "対応しました");
         resolve(id, true);
         append(id, "また起きました");
@@ -739,25 +705,23 @@ class RoundTripApiTest extends ApiSupport {
                         "HANDED_OVER",
                         "ASKED_BACK",
                         "REPLIED",
-                        "PHASE_CHANGED",
                         "RESULT_DELIVERED",
                         "RESOLVED",
                         "REOPENED",
                         "WITHDRAWN");
         assertThat((List<String>) JsonPath.read(detail, "$.history[*].actor"))
                 .containsExactly(
-                        "ASKER", "AI", "ASKER", "AI", "ASKER", "OPERATOR", "ASKER", "OPERATOR", "OPERATOR", "ASKER",
-                        "ASKER", "ASKER");
+                        "ASKER", "AI", "ASKER", "AI", "ASKER", "OPERATOR", "ASKER", "OPERATOR", "ASKER", "ASKER",
+                        "ASKER");
         // 各件は、変化の後の状態を持つ
         assertThat((String) JsonPath.read(detail, "$.history[5].awaiting")).isEqualTo("ASKER_REPLY");
         assertThat((String) JsonPath.read(detail, "$.history[5].turn")).isEqualTo("ASKER");
-        assertThat((String) JsonPath.read(detail, "$.history[7].phase")).isEqualTo("ACT");
-        assertThat((String) JsonPath.read(detail, "$.history[9].phase")).isEqualTo("CLOSED");
-        assertThat((String) JsonPath.read(detail, "$.history[9].ending")).isEqualTo("RESOLVED");
-        assertThat((Object) JsonPath.read(detail, "$.history[9].turn")).isNull();
+        assertThat((String) JsonPath.read(detail, "$.history[8].phase")).isEqualTo("CLOSED");
+        assertThat((String) JsonPath.read(detail, "$.history[8].ending")).isEqualTo("RESOLVED");
+        assertThat((Object) JsonPath.read(detail, "$.history[8].turn")).isNull();
         assertThat((String) JsonPath.read(detail, "$.history[0].at")).isNotBlank();
         assertThat((Object) JsonPath.read(detail, "$.history[0].detail")).isNull();
-        assertThat((Object) JsonPath.read(detail, "$.history[11].ending")).isEqualTo("WITHDRAWN");
+        assertThat((Object) JsonPath.read(detail, "$.history[10].ending")).isEqualTo("WITHDRAWN");
         assertThat(view(id)).doesNotContain("\"history\"");
     }
 

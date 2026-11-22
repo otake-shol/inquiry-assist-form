@@ -3,7 +3,6 @@ package dev.inquiryassist.inquiry;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.inquiryassist.core.InquiryType;
-import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.intake.Choice;
 import dev.inquiryassist.core.intake.IntakeCatalog;
@@ -104,9 +103,8 @@ class InquiryPropertiesTest {
                         "a",
                         names("ja", "システムA", "en", "System A"),
                         List.of(new InquiryProperties.FunctionEntry("a-1", names("ja", "機能A-1", "en", "Function A-1"))),
-                        null,
-                        List.of()),
-                new InquiryProperties.SystemEntry("b", names("ja", "システムB"), List.of(), null, List.of()));
+                        null),
+                new InquiryProperties.SystemEntry("b", names("ja", "システムB"), List.of(), null));
         List<InquiryProperties.CellEntry> cells = List.of(
                 new InquiryProperties.CellEntry(
                         "a",
@@ -119,8 +117,7 @@ class InquiryPropertiesTest {
                                         List.of(
                                                 new InquiryProperties.OptionEntry("today", names("ja", "今日", "en", "Today")),
                                                 new InquiryProperties.OptionEntry("earlier", names("ja", "前から")))),
-                                new InquiryProperties.QuestionEntry("partner", names("ja", "取引先"), List.of())),
-                        List.of()));
+                                new InquiryProperties.QuestionEntry("partner", names("ja", "取引先"), List.of()))));
 
         IntakeCatalog catalog = withCatalog(List.of("ja", "en"), systems, cells).catalog();
 
@@ -147,8 +144,8 @@ class InquiryPropertiesTest {
     @Test
     void 指定した言語の名前で一覧を作り_その言語の名前がない項目は項目ごとに既定の言語に落ちる() {
         List<InquiryProperties.SystemEntry> systems = List.of(
-                new InquiryProperties.SystemEntry("a", names("ja", "システムA", "en", "System A"), List.of(), null, List.of()),
-                new InquiryProperties.SystemEntry("b", names("ja", "システムB"), List.of(), null, List.of()));
+                new InquiryProperties.SystemEntry("a", names("ja", "システムA", "en", "System A"), List.of(), null),
+                new InquiryProperties.SystemEntry("b", names("ja", "システムB"), List.of(), null));
 
         IntakeCatalog en = withCatalog(List.of("ja", "en"), systems, List.of()).catalog("en");
 
@@ -184,85 +181,5 @@ class InquiryPropertiesTest {
         assertThat(configured.skill(Skill.RECEPTION).promptVersion()).isEqualTo("v2");
         assertThat(configured.skill(Skill.RECEPTION).provider()).isEqualTo("ollama");
         assertThat(configured.skill(Skill.RESTATER).promptVersion()).isEqualTo("v3");
-    }
-
-    // ---- 相談先（契約書「仕様の持ち主への相談」） ----
-
-    private static InquiryProperties withConsultants(
-            List<String> global, List<InquiryProperties.SystemEntry> systems, List<InquiryProperties.CellEntry> cells) {
-        InquiryProperties base = withCatalog(List.of("ja"), systems, cells);
-        return new InquiryProperties(
-                base.languages(),
-                base.types(),
-                base.urgencies(),
-                base.systems(),
-                base.cells(),
-                base.slack(),
-                base.publicBaseUrl(),
-                base.skills(),
-                base.ollama(),
-                base.trace(),
-                base.dev(),
-                base.filedGuidance(),
-                base.rules(),
-                global);
-    }
-
-    private static InquiryProperties.SystemEntry system(String id, String... consultants) {
-        return new InquiryProperties.SystemEntry(id, names("ja", id), List.of(), null, List.of(consultants));
-    }
-
-    private static InquiryProperties.CellEntry cell(
-            String system, String function, InquiryType type, String... consultants) {
-        return new InquiryProperties.CellEntry(system, function, type, List.of(), List.of(consultants));
-    }
-
-    @Test
-    void 相談先はマス_システム_全体の順に引き継ぎ_どれもなければ空() {
-        InquiryProperties properties = withConsultants(
-                List.of("全体"),
-                List.of(system("a", "Aの持ち主"), system("b"), system("c")),
-                List.of(cell("a", "a-1", InquiryType.HOW_TO, "マスの持ち主1", "マスの持ち主2")));
-
-        // 当てはまるマスの設定があれば、マス
-        assertThat(properties.consultantsFor(new Placement(InquiryType.HOW_TO, "a", "a-1")))
-                .containsExactly("マスの持ち主1", "マスの持ち主2");
-        // マスに当てはまらなければ、システム
-        assertThat(properties.consultantsFor(new Placement(InquiryType.HOW_IT_WORKS, "a", "a-1"))).containsExactly("Aの持ち主");
-        assertThat(properties.consultantsFor(new Placement(InquiryType.HOW_TO, "a", null))).containsExactly("Aの持ち主");
-        // システムに設定がなければ（システムが決まっていなくても）、全体
-        assertThat(properties.consultantsFor(new Placement(InquiryType.HOW_TO, "b", null))).containsExactly("全体");
-        assertThat(properties.consultantsFor(new Placement(InquiryType.HOW_TO, "none", null))).containsExactly("全体");
-        assertThat(properties.consultantsFor(Placement.NONE)).containsExactly("全体");
-        // どこにも設定がなければ、空
-        assertThat(withConsultants(List.of(), List.of(system("a")), List.of()).consultantsFor(Placement.NONE)).isEmpty();
-    }
-
-    @Test
-    void 相談先のマスは詳しい質問と同じ選び方で_指定した項目が多いものを選び_同数なら先のもの() {
-        InquiryProperties properties = withConsultants(
-                List.of("全体"),
-                List.of(system("a")),
-                List.of(
-                        cell("a", null, null, "システム全体のマス"),
-                        cell("a", "a-1", null, "機能のマス"),
-                        cell("a", "a-1", InquiryType.HOW_TO, "種類つきのマス"),
-                        cell("a", null, InquiryType.HOW_TO, "種類つきの別のマス")));
-
-        assertThat(properties.consultantsFor(new Placement(InquiryType.HOW_TO, "a", "a-1"))).containsExactly("種類つきのマス");
-        assertThat(properties.consultantsFor(new Placement(InquiryType.HOW_IT_WORKS, "a", "a-1"))).containsExactly("機能のマス");
-        // 同数（2つ）の「機能のマス」と「種類つきの別のマス」は、機能が決まっていなければ、種類のほうだけが当てはまる
-        assertThat(properties.consultantsFor(new Placement(InquiryType.HOW_TO, "a", null)))
-                .containsExactly("種類つきの別のマス");
-        assertThat(properties.consultantsFor(new Placement(InquiryType.LOOKS_WRONG, "a", null)))
-                .containsExactly("システム全体のマス");
-    }
-
-    @Test
-    void 選んだマスに相談先がなければシステムの相談先に落ちる() {
-        InquiryProperties properties = withConsultants(
-                List.of("全体"), List.of(system("a", "Aの持ち主")), List.of(cell("a", "a-1", null)));
-
-        assertThat(properties.consultantsFor(new Placement(null, "a", "a-1"))).containsExactly("Aの持ち主");
     }
 }
