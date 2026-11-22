@@ -47,10 +47,13 @@ final class MockScenario {
     /** 下書きが AI_UNAVAILABLE になる。 */
     static final String TAG_DRAFT_ERROR = "[下書きエラー]";
 
+    /** 訳が AI_UNAVAILABLE になる。 */
+    static final String TAG_TRANSLATE_ERROR = "[訳エラー]";
     /** 説明が、手順を返さない。 */
     static final String TAG_NO_STEPS = "[手順なし]";
 
     private static final List<String> ALL_TAGS = List.of(
+            TAG_TRANSLATE_ERROR,
             TAG_NO_STEPS,
             TAG_CONSULT,
             TAG_PROCEDURE,

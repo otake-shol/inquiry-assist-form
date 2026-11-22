@@ -101,6 +101,25 @@ export interface Advice {
   procedure: AdviceProcedure | null;
 }
 
+/** 訳の1件。`key` は、画面のどの文章の訳かを示す（`utterance`、`structured.summary` など）。 */
+export interface TranslationItem {
+  key: string;
+  /** 原文（本人の言語で書かれたもの） */
+  original: string;
+  /** 訳（訳す先の言語） */
+  translated: string;
+}
+
+/**
+ * 担当者に添える訳（`POST /api/operator/inquiries/{id}/translation` の応答）。
+ * `key` は `utterance`、`structured.summary`、`answer.askerExplanation`、`message:{id}`（本人の発言）。
+ */
+export interface Translation {
+  from: string;
+  to: string;
+  items: TranslationItem[];
+}
+
 /** 返信の下書き（`POST /api/operator/inquiries/{id}/draft` の応答）。 */
 export interface DraftResult {
   /** 下書きの文章 */

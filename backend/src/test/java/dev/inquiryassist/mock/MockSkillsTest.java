@@ -708,4 +708,35 @@ class MockSkillsTest {
 
         assertThat(restated.summary()).doesNotContain("[手順なし]");
     }
+
+    // ---- 訳（契約書「訳」） ----
+
+    private final MockTranslatorSkill translator = new MockTranslatorSkill();
+
+    @Test
+    void 訳は原文の前に印を付けて返し_訳す先の言語で印が変わる() {
+        var toJa = translator.translate(List.of("The posting disappeared.", "Thanks"), "en", "ja").value();
+        var toEn = translator.translate(List.of("求人が消えました。"), "ja", "en").value();
+        var toEnUs = translator.translate(List.of("x"), "ja", "en-US").value();
+
+        assertThat(toJa.texts()).containsExactly("【訳の見本】The posting disappeared.", "【訳の見本】Thanks");
+        assertThat(toEn.texts()).containsExactly("[Sample translation] 求人が消えました。");
+        assertThat(toEnUs.texts()).containsExactly("[Sample translation] x");
+        // 渡した数と同じ数を、渡した順に返す
+        assertThat(translator.translate(List.of(), "en", "ja").value().texts()).isEmpty();
+    }
+
+    @Test
+    void 訳のエラータグは渡された文章のどれかにあれば失敗する() {
+        assertThatThrownBy(() -> translator.translate(List.of("普通の文章", "[訳エラー] 失敗する文章"), "en", "ja"))
+                .isInstanceOf(AiUnavailableException.class);
+        assertThat(translator.translate(List.of("普通の文章"), "en", "ja").value().texts()).hasSize(1);
+    }
+
+    @Test
+    void 訳のタグは言い直しの文章から取り除かれる() {
+        var restated = restater.restate("[訳エラー] 期限", InquiryType.HOW_TO, null, null, List.of(), List.of(), "ja").value();
+
+        assertThat(restated.summary()).doesNotContain("[訳エラー]");
+    }
 }

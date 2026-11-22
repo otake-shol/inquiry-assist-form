@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import dev.inquiryassist.core.skill.AdvisorSkill;
 import dev.inquiryassist.core.skill.AnswerPipeline;
 import dev.inquiryassist.core.skill.DrafterSkill;
+import dev.inquiryassist.core.skill.TranslatorSkill;
 import dev.inquiryassist.core.skill.ExplainerSkill;
 import dev.inquiryassist.core.skill.InterviewerSkill;
 import dev.inquiryassist.core.skill.InvestigatorSkill;
@@ -16,6 +17,7 @@ import dev.inquiryassist.inquiry.SkillImplementations;
 import dev.inquiryassist.mock.MockAdvisorSkill;
 import dev.inquiryassist.mock.MockDrafterSkill;
 import dev.inquiryassist.mock.MockExplainerSkill;
+import dev.inquiryassist.mock.MockTranslatorSkill;
 import dev.inquiryassist.mock.MockInterviewerSkill;
 import dev.inquiryassist.mock.MockInvestigatorSkill;
 import dev.inquiryassist.mock.MockKnowledgeSearch;
@@ -42,6 +44,7 @@ class BackendApplicationTests {
     @Autowired ExplainerSkill explainer;
     @Autowired AdvisorSkill advisor;
     @Autowired DrafterSkill drafter;
+    @Autowired TranslatorSkill translator;
     @Autowired KnowledgeSearch knowledge;
     @Autowired AnswerPipeline pipeline;
     @Autowired SkillImplementations implementations;
@@ -56,10 +59,11 @@ class BackendApplicationTests {
         assertThat(explainer).isInstanceOf(MockExplainerSkill.class);
         assertThat(advisor).isInstanceOf(MockAdvisorSkill.class);
         assertThat(drafter).isInstanceOf(MockDrafterSkill.class);
+        assertThat(translator).isInstanceOf(MockTranslatorSkill.class);
         assertThat(knowledge).isInstanceOf(MockKnowledgeSearch.class);
         assertThat(pipeline).isNotNull();
         assertThat(implementations.includesMock()).isTrue();
-        assertThat(implementations.byId().values()).containsOnly("mock").hasSize(7);
+        assertThat(implementations.byId().values()).containsOnly("mock").hasSize(8);
     }
 
     @Test
@@ -73,6 +77,7 @@ class BackendApplicationTests {
                 .andExpect(jsonPath("$.skills.explainer").value("mock"))
                 .andExpect(jsonPath("$.skills.advisor").value("mock"))
                 .andExpect(jsonPath("$.skills.drafter").value("mock"))
-                .andExpect(jsonPath("$.skills.length()").value(7));
+                .andExpect(jsonPath("$.skills.translator").value("mock"))
+                .andExpect(jsonPath("$.skills.length()").value(8));
     }
 }

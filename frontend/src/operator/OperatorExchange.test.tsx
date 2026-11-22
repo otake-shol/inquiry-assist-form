@@ -2384,14 +2384,14 @@ describe("担当者の画面: 実行記録と開発用のリンク", () => {
     }
     await user.click(summary);
     const stages = within(details).getAllByRole("listitem");
-    expect(stages).toHaveLength(9);
+    expect(stages).toHaveLength(10);
     expect(stages[0]).toHaveTextContent("受付");
     expect(stages[3]).toHaveTextContent("失敗 1回");
     expect(stages[4]).toHaveTextContent("照合（コード）");
     expect(stages[4]).toHaveClass("idle");
   });
 
-  it("実行記録の段は、説明の後に 助言 → 案の確認（コード） → 下書き を並べる（担当者の詳細）", async () => {
+  it("実行記録の段は、説明の後に 助言 → 案の確認（コード） → 下書き → 訳 を並べる（担当者の詳細）", async () => {
     const user = userEvent.setup();
     installFakeFetch(
       routes({
@@ -2436,6 +2436,7 @@ describe("担当者の画面: 実行記録と開発用のリンク", () => {
       "助言",
       "案の確認（コード）",
       "下書き",
+      "訳",
     ]);
     expect(stages[6]).toHaveTextContent("AI のスキル");
     expect(stages[6]).toHaveTextContent("モック");
@@ -2444,6 +2445,8 @@ describe("担当者の画面: 実行記録と開発用のリンク", () => {
     expect(stages[7]).not.toHaveClass("idle");
     expect(stages[7]).toHaveTextContent("案が基づく事実を確かめる");
     expect(stages[8]).toHaveTextContent("失敗 1回");
+    // 訳の記録がなければ、薄く示す
+    expect(stages[9]).toHaveClass("idle");
   });
 
   it("mock が true の担当者の画面には、最下部に「開発用: 本人の画面へ」を出す", async () => {

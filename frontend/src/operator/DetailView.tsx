@@ -7,12 +7,13 @@ import type {
   DraftResult,
   Investigation,
   OperatorDetail,
+  Translation,
   Phase,
   Placement,
   SystemOption,
   TypeOption,
 } from "../api/types.ts";
-import { MessageThread } from "../components/Exchange.tsx";
+import { MessageThread, TranslationNote } from "../components/Exchange.tsx";
 import { AnswerSteps } from "../components/Outcome.tsx";
 import { TracePanel } from "../components/TracePanel.tsx";
 import { useMessages } from "../i18n/context.ts";
@@ -72,6 +73,12 @@ interface DetailViewProps {
   onReply: (kind: ReplyKind, body: string) => Promise<boolean>;
   /** AI の案の文章の言語（既定の言語。`GET /api/config` の `languages` の先頭） */
   adviceLanguage?: string;
+  /** 担当者に添える訳（出している間だけ。無ければ null） */
+  translation: Translation | null;
+  /** 訳を取りにいっている最中か */
+  translating: boolean;
+  /** 訳を見る／隠す */
+  onToggleTranslation: () => void;
   /** 返信の下書きを作らせる。失敗したら null */
   onDraft: (kind: ReplyKind, note: string) => Promise<DraftResult | null>;
   /** AI に調べさせる（調べ直す）。成功したら true */
@@ -263,6 +270,9 @@ export function DetailView({
   onPlacement,
   onReply,
   adviceLanguage,
+  translation,
+  translating,
+  onToggleTranslation,
   onDraft,
   onInvestigate,
   onDecline,
@@ -272,6 +282,14 @@ export function DetailView({
   const { structured, answer } = detail;
   const messages = detail.messages ?? [];
   const askerLang = detail.language;
+  /** 訳があれば、`key` の文章のすぐ下に添える（対応する文章が画面にない `key` は、呼ばれないので無視される） */
+  const noteOf = (key: string) =>
+    translation === null ? null : (
+      <TranslationNote
+        text={translation.items.find((item) => item.key === key)?.translated}
+        language={translation.to}
+      />
+    );
   const ended = detail.ending !== null;
   const operatorsTurn = !ended && detail.turn === "OPERATOR";
   // 調べ直せるのは、終わっていない、言い直しがある、いま調べていない件
@@ -370,7 +388,17 @@ export function DetailView({
         )}
         {detail.language !== dict.meta.code && (
           <p className="op-asker-language">
-            {OP_TEXT.askerLanguage(languageName(detail.language))}
+            {OP_TEXT.askerLanguage(languageName(detail.language))}{" "}
+            <button
+              type="button"
+              className="small"
+              disabled={translating}
+              onClick={onToggleTranslation}
+            >
+              {translation === null
+                ? OP_TEXT.translationShow
+                : OP_TEXT.translationHide}
+            </button>
           </p>
         )}
         <PhaseSwitch
@@ -397,6 +425,7 @@ export function DetailView({
           <p className="op-pre" lang={askerLang}>
             {detail.utterance}
           </p>
+          {noteOf("utterance")}
         </section>
       )}
 
@@ -406,6 +435,7 @@ export function DetailView({
           <p className="op-pre" lang={askerLang}>
             {structured.summary}
           </p>
+          {noteOf("structured.summary")}
           <dl className="op-fields">
             <dt>{OP_TEXT.fieldTarget}</dt>
             <dd>{structured.targetSystem ?? "—"}</dd>
@@ -489,6 +519,7 @@ export function DetailView({
             >
               {answer.grounded ? answer.askerExplanation : OP_TEXT.notGrounded}
             </p>
+            {answer.grounded && noteOf("answer.askerExplanation")}
             <AnswerSteps steps={answer.steps} language={askerLang} level={4} />
             <List
               title={OP_TEXT.findings}
@@ -557,6 +588,7 @@ export function DetailView({
           messages={messages}
           mine="OPERATOR"
           askerLanguage={askerLang}
+          translation={translation}
         />
         {messages.length === 0 && (
           <p className="op-muted">{OP_TEXT.noMessages}</p>

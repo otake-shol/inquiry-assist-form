@@ -36,13 +36,14 @@ const STAGES: { key: string; kind: StageKind }[] = [
 ];
 
 /**
- * 担当者の詳細にだけ出す、助言から後ろの段（助言、案の確認（コード）、下書き）。
+ * 担当者の詳細にだけ出す、助言から後ろの段（助言、案の確認（コード）、下書き、訳）。
  * 本人のページには出さない（担当者だけに見せる案があることを、本人に伝えないため）。
  */
 const OPERATOR_STAGES: { key: string; kind: StageKind }[] = [
   { key: "advisor", kind: "skill" },
   { key: "adviceVerifier", kind: "code" },
   { key: "drafter", kind: "skill" },
+  { key: "translator", kind: "skill" },
 ];
 
 /**
@@ -53,7 +54,7 @@ const OPERATOR_STAGES: { key: string; kind: StageKind }[] = [
  * 一覧にないスキルの識別子は、末尾にスキルの段として足す。
  * @param entries 実行記録（無効または古い応答では null / undefined）
  * @param trace 辞書の、実行記録の文言（`messages.trace`。段の名前を持つ）
- * @param operator 担当者の詳細か。そうなら、説明の後に 助言 → 案の確認（コード） → 下書き の3段を足す
+ * @param operator 担当者の詳細か。そうなら、説明の後に 助言 → 案の確認（コード） → 下書き → 訳 の4段を足す
  */
 export function summarizeTrace(
   entries: TraceEntry[] | null | undefined,

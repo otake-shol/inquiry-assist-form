@@ -644,11 +644,21 @@ test("英語に切り替えて通せ、書かれた内容は言語を戻して�
   await page.goto(askerUrl.replace("/inquiries/", "/operator/"));
   const detail = page.getByRole("region", { name: "問い合わせの詳細" });
   await expect(detail.getByText("本人の言語: English")).toBeVisible();
+  // 訳を頼める。訳は原文に添えるもので、原文は残る（モックの訳は、原文に印を付けたもの）
+  await detail.getByRole("button", { name: "訳を見る" }).click();
+  await expect(detail.getByText("訳（AI）").first()).toBeVisible();
+  await expect(detail.getByText(/【訳の見本】/).first()).toBeVisible();
+  await detail.getByRole("button", { name: "訳を隠す" }).click();
+  await expect(detail.getByText("訳（AI）")).toHaveCount(0);
+  // 画面を本人の言語に合わせると、訳は要らないので、頼む口も出ない
   await page.getByRole("button", { name: "English" }).click();
   await expect(
     page.getByRole("region", { name: /^Staff's turn/ }),
   ).toBeVisible();
   await expect(page.getByText(/Requester's language/)).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Show translation" }),
+  ).toHaveCount(0);
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);

@@ -8,6 +8,8 @@ import dev.inquiryassist.inquiry.DraftResult;
 import dev.inquiryassist.inquiry.OperatorDetail;
 import dev.inquiryassist.inquiry.OperatorList;
 import dev.inquiryassist.inquiry.OperatorService;
+import dev.inquiryassist.inquiry.TranslationResult;
+import dev.inquiryassist.inquiry.TranslationService;
 import dev.inquiryassist.notification.OperatorStreamHub;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -45,14 +47,17 @@ public class OperatorController {
 
     private final OperatorService operators;
     private final OperatorStreamHub hub;
+    private final TranslationService translations;
 
     /**
      * @param operators 一覧・詳細・既読化
      * @param hub ツール内の通知の配信
+     * @param translations 訳
      */
-    public OperatorController(OperatorService operators, OperatorStreamHub hub) {
+    public OperatorController(OperatorService operators, OperatorStreamHub hub, TranslationService translations) {
         this.operators = operators;
         this.hub = hub;
+        this.translations = translations;
     }
 
     /**
@@ -122,6 +127,18 @@ public class OperatorController {
     @PostMapping("/inquiries/{id}/draft")
     public DraftResult draft(@PathVariable UUID id, @Valid @RequestBody DraftRequest request) {
         return operators.draft(id, request.kind(), request.note());
+    }
+
+    /**
+     * 担当者が、本人の言語で書かれた文章の訳を頼む。状態は変えない。
+     *
+     * @param id 問い合わせの識別子
+     * @param lang 見る人の言語（訳す先）
+     * @return 訳。原文に添えるもので、原文を置き換えない
+     */
+    @PostMapping("/inquiries/{id}/translation")
+    public TranslationResult translation(@PathVariable UUID id, @ViewerLang String lang) {
+        return translations.translate(id, lang);
     }
 
     /**

@@ -18,6 +18,7 @@ import type {
   OperatorDetail,
   OperatorItem,
   SystemOption,
+  Translation,
 } from "../api/types.ts";
 import { BoardColumn } from "../components/BoardColumn.tsx";
 import { DevLink } from "../components/Navigation.tsx";
@@ -169,6 +170,12 @@ export function OperatorApp({
   const { items, onlyUnread, selectedId, detail, detailLoading, banner } =
     state;
   const [config, setConfig] = useState<AppConfig | null>(null);
+  // 担当者に添える訳（出している間だけ。どの問い合わせの訳かを持つ）
+  const [translation, setTranslation] = useState<{
+    id: string;
+    data: Translation;
+  } | null>(null);
+  const [translating, setTranslating] = useState(false);
   const [acting, setActing] = useState(false);
   // 操作に失敗した問い合わせの id（別の問い合わせを開いたら出さない）
   const [failedId, setFailedId] = useState<string | null>(null);
@@ -200,6 +207,19 @@ export function OperatorApp({
     itemsRef.current = items;
   }, [items]);
   const selectedRef = useRef<string | null>(null);
+  const translationRef = useRef(translation);
+  const apiRef = useRef(api);
+  useEffect(() => {
+    translationRef.current = translation;
+    apiRef.current = api;
+  });
+  // 別の件を開いたとき、画面の言語を切り替えたときは、訳を隠す（訳す先、対象が変わるため）
+  const translationKey = `${selectedId ?? ""}|${language}`;
+  const [shownKey, setShownKey] = useState(translationKey);
+  if (shownKey !== translationKey) {
+    setShownKey(translationKey);
+    setTranslation(null);
+  }
 
   // 古い応答が、新しい応答の一覧を上書きしないようにする
   const listRequest = useRef(0);
@@ -251,6 +271,29 @@ export function OperatorApp({
     if (id !== null) void refreshDetail(id, true);
   }, [api, refreshDetail]);
 
+  /**
+   * 本人の言語で書かれた文章の訳を取り、出す。失敗は、既存のエラーの出し方（原文は見えたまま）。
+   * 取っている間に、別の件を開いた、画面の言語を切り替えた場合は、結果を捨てる。
+   * @param id 問い合わせの id
+   */
+  const loadTranslation = useCallback(
+    async (id: string) => {
+      setTranslating(true);
+      setFailedId(null);
+      try {
+        const data = await api.translate(id);
+        if (selectedRef.current === id && apiRef.current === api) {
+          setTranslation({ id, data });
+        }
+      } catch {
+        setFailedId(id);
+      } finally {
+        setTranslating(false);
+      }
+    },
+    [api],
+  );
+
   useEffect(
     () =>
       subscribe(
@@ -260,6 +303,10 @@ export function OperatorApp({
             dispatch({ type: "updated", item });
             if (selectedRef.current === item.id) {
               void refreshDetail(item.id, item.read);
+              // 訳を出している件は、増えた発言の分まで訳を取り直す
+              if (translationRef.current?.id === item.id) {
+                void loadTranslation(item.id);
+              }
             }
           },
           // 切断中に届いた分を取りこぼさないよう、再接続後に取り直す
@@ -267,7 +314,7 @@ export function OperatorApp({
         },
         language,
       ),
-    [subscribe, loadList, refreshDetail, language],
+    [subscribe, loadList, refreshDetail, loadTranslation, language],
   );
 
   useEffect(() => {
@@ -590,6 +637,14 @@ export function OperatorApp({
                   operate(detail.id, () => api.postReply(detail.id, kind, body))
                 }
                 adviceLanguage={config?.languages?.[0]}
+                translation={
+                  translation?.id === detail.id ? translation.data : null
+                }
+                translating={translating}
+                onToggleTranslation={() => {
+                  if (translation?.id === detail.id) setTranslation(null);
+                  else void loadTranslation(detail.id);
+                }}
                 onDraft={async (kind, note) => {
                   setFailedId(null);
                   try {

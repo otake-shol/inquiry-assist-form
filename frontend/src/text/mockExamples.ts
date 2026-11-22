@@ -28,6 +28,7 @@ export const SCENARIO_TAGS = [
   "[根拠なしの案]",
   "[案エラー]",
   "[下書きエラー]",
+  "[訳エラー]",
 ] as const;
 
 /**

@@ -1947,7 +1947,7 @@ describe("エラーの導線", () => {
 });
 
 describe("モック表示", () => {
-  it("モック時はバッジと例文ボタンが出る。状況の例は5つの種類、動きの例は18個のタグ", async () => {
+  it("モック時はバッジと例文ボタンが出る。状況の例は5つの種類、動きの例は19個のタグ", async () => {
     const user = userEvent.setup();
     installFakeFetch({
       "GET /api/config": { body: makeConfig({ mock: true }) },
@@ -1974,11 +1974,11 @@ describe("モック表示", () => {
       "変えてほしい",
     ]);
     const actions = within(bar).getByRole("group", { name: "動きの例" });
-    expect(within(actions).getAllByRole("button")).toHaveLength(18);
+    expect(within(actions).getAllByRole("button")).toHaveLength(19);
     expect(
       within(actions).getByRole("button", { name: "[言い直しエラー]" }),
     ).toBeInTheDocument();
-    expect(within(bar).getAllByRole("button")).toHaveLength(23);
+    expect(within(bar).getAllByRole("button")).toHaveLength(24);
     expect(
       within(bar).getByText(/「文章で書く」の入力欄に入ります/),
     ).toBeInTheDocument();

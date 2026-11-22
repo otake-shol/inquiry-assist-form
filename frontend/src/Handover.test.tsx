@@ -130,6 +130,30 @@ describe("本人のページ: 担当者に渡した後の状況", () => {
     expect(screen.getByLabelText("追加で伝える")).toBeInTheDocument();
   });
 
+  it("本人のページには、訳のボタンも訳の見出しも出さない（本人の発言は、書かれたままの文章だけ）", async () => {
+    openInquiry(
+      resultDelivered({
+        language: "en",
+        messages: [
+          makeMessage({
+            id: "m1",
+            from: "ASKER",
+            kind: "NOTE",
+            body: "Since yesterday.",
+          }),
+        ],
+      }),
+    );
+
+    await screen.findByText("Since yesterday.");
+    expect(
+      screen.queryByRole("button", { name: /訳を見る|Show translation/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/訳（AI）|Translation \(AI\)/),
+    ).not.toBeInTheDocument();
+  });
+
   it("担当者の結果が届いているときは、状況を示し、結果の見出しと、「やりたかったことは、進められそうですか。」を出す", async () => {
     openInquiry(resultDelivered());
 

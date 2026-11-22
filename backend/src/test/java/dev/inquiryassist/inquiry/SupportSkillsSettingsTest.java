@@ -44,6 +44,16 @@ class SupportSkillsSettingsTest {
     }
 
     @Test
+    void 訳にmock以外を指定すると起動が止まる() {
+        runner(new MockEnvironment().withProperty("inquiry.skills.translator.provider", "ollama"))
+                .run(context -> assertThat(context)
+                        .hasFailed()
+                        .getFailure()
+                        .hasStackTraceContaining("inquiry.skills.translator.provider")
+                        .hasStackTraceContaining("ollama"));
+    }
+
+    @Test
     void 既存の5つのスキルの実装の指定は妨げない() {
         runner(new MockEnvironment().withProperty("inquiry.skills.investigator.provider", "ollama"))
                 .run(context -> assertThat(context).hasNotFailed());

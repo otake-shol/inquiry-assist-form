@@ -15,7 +15,9 @@ public enum Skill {
     /** 確かめられた事実から、担当者向けの判断の案と手順の案を作る。 */
     ADVISOR("advisor"),
     /** 担当者が本人に送る文章（聞き返し、結果）の下書きを作る。 */
-    DRAFTER("drafter");
+    DRAFTER("drafter"),
+    /** 本人の言語で書かれた文章を、担当者の言語に訳す。 */
+    TRANSLATOR("translator");
 
     private final String id;
 

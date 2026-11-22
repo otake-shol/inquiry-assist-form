@@ -159,8 +159,8 @@ describe("表示用の整形", () => {
   });
 });
 
-describe("担当者の詳細の段（助言、案の確認（コード）、下書き）", () => {
-  it("担当者の詳細では、説明の後に 助言 → 案の確認（コード） → 下書き を足して9段にする。本人のページは6段のまま", () => {
+describe("担当者の詳細の段（助言、案の確認（コード）、下書き、訳）", () => {
+  it("担当者の詳細では、説明の後に 助言 → 案の確認（コード） → 下書き → 訳 を足して10段にする。本人のページは6段のまま", () => {
     const operator = summarizeTrace([], ja.trace, true);
     expect(operator.map((s) => [s.key, s.kind, s.label])).toEqual([
       ["reception", "skill", "受付"],
@@ -172,13 +172,14 @@ describe("担当者の詳細の段（助言、案の確認（コード）、下�
       ["advisor", "skill", "助言"],
       ["adviceVerifier", "code", "案の確認（コード）"],
       ["drafter", "skill", "下書き"],
+      ["translator", "skill", "訳"],
     ]);
     expect(summarizeTrace([], ja.trace)).toHaveLength(6);
     expect(
       summarizeTrace([], en.trace, true)
         .slice(6)
         .map((s) => s.label),
-    ).toEqual(["Advisor", "Suggestion check (code)", "Drafter"]);
+    ).toEqual(["Advisor", "Suggestion check (code)", "Drafter", "Translator"]);
   });
 
   it("助言が1回でも成功していれば、案の確認（コード）を動いたものとして数える。失敗だけなら動かない", () => {
@@ -196,11 +197,12 @@ describe("担当者の詳細の段（助言、案の確認（コード）、下�
     expect(failed.find((s) => s.key === "adviceVerifier")!.calls).toBe(0);
   });
 
-  it("本人のページでは、助言と下書きの記録があっても段に出さない", () => {
+  it("本人のページでは、助言、下書き、訳の記録があっても段に出さない", () => {
     const stages = summarizeTrace(
       [
         makeTraceEntry({ skill: "advisor" }),
         makeTraceEntry({ skill: "drafter" }),
+        makeTraceEntry({ skill: "translator" }),
       ],
       ja.trace,
     );

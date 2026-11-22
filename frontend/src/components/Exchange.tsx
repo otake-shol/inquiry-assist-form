@@ -4,6 +4,7 @@ import type {
   InquiryMessage,
   MessageAuthor,
   NoReply,
+  Translation,
 } from "../api/types.ts";
 import { useMessages } from "../i18n/context.ts";
 import { formatFiledAt, formatMonthDay } from "../operator/labels.ts";
@@ -19,6 +20,32 @@ interface MessageThreadProps {
   mine: MessageAuthor;
   /** 本人の言語。本人の追記に `lang` 属性として付ける（担当者の発言は言語が分からないので付けない） */
   askerLanguage?: string;
+  /** 担当者に添える訳（担当者の画面だけ。本人の発言のすぐ下に添える） */
+  translation?: Translation | null;
+}
+
+/**
+ * 訳（AI）。原文のすぐ下に添える、控えめな見た目の注記。原文は置き換えない。
+ * `lang` は訳した先の言語。該当する訳がなければ何も出さない。
+ * @param props 訳の文章と、訳した先の言語
+ */
+export function TranslationNote({
+  text,
+  language,
+}: {
+  text: string | undefined;
+  language: string;
+}) {
+  const { op } = useMessages();
+  if (text === undefined) return null;
+  return (
+    <div className="op-translation">
+      <p className="op-translation-label">{op.translationLabel}</p>
+      <p className="op-translation-body" lang={language}>
+        {text}
+      </p>
+    </div>
+  );
 }
 
 /**
@@ -32,6 +59,7 @@ export function MessageThread({
   messages,
   mine,
   askerLanguage,
+  translation = null,
 }: MessageThreadProps) {
   const { user: USER_TEXT, asker, meta } = useMessages();
   return (
@@ -65,6 +93,16 @@ export function MessageThread({
           >
             {message.body}
           </p>
+          {message.from === "ASKER" && translation !== null && (
+            <TranslationNote
+              text={
+                translation.items.find(
+                  (item) => item.key === `message:${message.id}`,
+                )?.translated
+              }
+              language={translation.to}
+            />
+          )}
         </li>
       ))}
     </ol>

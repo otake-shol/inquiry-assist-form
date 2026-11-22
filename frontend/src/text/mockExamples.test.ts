@@ -60,10 +60,10 @@ describe("モックの例文", () => {
       expect(typeExampleList(messages.mock)).toHaveLength(5);
     });
 
-    it(`${name}: 動きの例は、契約書の18個のタグを表の順に並べ、正常系の例文にタグを付ける`, () => {
+    it(`${name}: 動きの例は、契約書の19個のタグを表の順に並べ、正常系の例文にタグを付ける`, () => {
       const list = tagExampleList(messages.mock);
       expect(list.map((e) => e.label)).toEqual([...SCENARIO_TAGS]);
-      expect(list).toHaveLength(18);
+      expect(list).toHaveLength(19);
       for (const example of list) {
         expect(example.text).toBe(
           `${messages.mock.typeExamples.HOW_IT_WORKS.text} ${example.label}`,
@@ -82,7 +82,7 @@ describe("モックの例文", () => {
     }
   });
 
-  it("タグは識別子で、言語によらず同じ18個", () => {
+  it("タグは識別子で、言語によらず同じ19個", () => {
     expect(SCENARIO_TAGS).toEqual([
       "[判定エラー]",
       "[質問なし]",
@@ -102,6 +102,7 @@ describe("モックの例文", () => {
       "[根拠なしの案]",
       "[案エラー]",
       "[下書きエラー]",
+      "[訳エラー]",
     ]);
   });
 });

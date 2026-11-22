@@ -426,6 +426,10 @@ export const ja = {
     adviceRollback: "元に戻す方法",
     adviceStaffCarryOut: "実行するのは担当者です。",
     /** 返信の下書き（「本人に送る」の入力欄のすぐ上） */
+    /** 訳（本人の言語が画面の言語と違うとき） */
+    translationShow: "訳を見る",
+    translationHide: "訳を隠す",
+    translationLabel: "訳（AI）",
     draftNote: "伝えたいこと（任意）",
     draftAsk: "聞き返しを下書きさせる",
     draftResult: "結果を下書きさせる",
@@ -495,6 +499,7 @@ export const ja = {
       ["explainer", "説明"],
       ["advisor", "助言"],
       ["drafter", "下書き"],
+      ["translator", "訳"],
     ] as [id: string, label: string][],
     /** 内訳の文。例: 「受付・聞き手は手元のモデル、調査はモックで動いています」 */
     mixText: (real: string[], mock: string[]) =>
@@ -516,6 +521,7 @@ export const ja = {
       advisor: "助言",
       adviceVerifier: "案の確認（コード）",
       drafter: "下書き",
+      translator: "訳",
     } as Record<string, string>,
     /** 案の確認（コード）の段の説明 */
     adviceCodeDetail: "案が基づく事実を確かめる",

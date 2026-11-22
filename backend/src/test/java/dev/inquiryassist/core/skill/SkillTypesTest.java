@@ -93,6 +93,6 @@ class SkillTypesTest {
     @Test
     void スキルの識別子は小文字の固定値() {
         assertThat(java.util.Arrays.stream(Skill.values()).map(Skill::id).toList())
-                .containsExactly("reception", "interviewer", "restater", "investigator", "explainer", "advisor", "drafter");
+                .containsExactly("reception", "interviewer", "restater", "investigator", "explainer", "advisor", "drafter", "translator");
     }
 }

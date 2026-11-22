@@ -323,7 +323,7 @@ inquiry:
 ```json
 {
   "mock": true,
-  "skills": { "reception": "mock", "interviewer": "mock", "restater": "mock", "investigator": "mock", "explainer": "mock", "advisor": "mock", "drafter": "mock" },
+  "skills": { "reception": "mock", "interviewer": "mock", "restater": "mock", "investigator": "mock", "explainer": "mock", "advisor": "mock", "drafter": "mock", "translator": "mock" },
   "trace": true,
   "user": { "id": "local-user", "name": "開発用ユーザー" },
   "operatorName": "担当者（開発用）",
@@ -512,6 +512,7 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | `[根拠なしの案]` | 助言 | 判断の案の `basedOn` に、存在しない番号だけを入れて返す。コードが案を捨て、`judgment` は `null` になる |
 | `[案エラー]` | 助言 | 助言が `AI_UNAVAILABLE` で失敗する。`advice.status` は `FAILED` |
 | `[下書きエラー]` | 下書き | 下書きが `AI_UNAVAILABLE` で失敗する |
+| `[訳エラー]` | 訳 | 訳が `AI_UNAVAILABLE` で失敗する（タグは、本人が書いた文章から読む） |
 
 ### 説明が出す手順
 
@@ -529,6 +530,10 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
   - `ASK`、`ja`: 「確認させてください。（note、なければ「起きている場面を、もう少し詳しく教えていただけますか。」）」
   - `RESULT`、`ja`: 「お待たせしました。確認した結果をお伝えします。（note、なければ判断の案の文章。それもなければ1件目の事実の文）」
   - `en` は、同じ組み立ての英語（"Let me check one thing. …"、"Thank you for waiting. Here is what we found. …"）。
+
+### 訳
+
+モックの訳は、訳さない。原文の前に、訳の見本であることを示す印を付けて返す（訳す先が `ja` なら「【訳の見本】」、`en` なら "[Sample translation] "）。骨組みでは、訳がどこに出るかを確かめられれば足りる。
 
 ### 聞き手（設定に質問があり、文章が書かれている場合）
 
@@ -664,7 +669,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 - **`answer.memo.unconfirmed`**: 調査が挙げたが、根拠の実在を確かめられなかった事実の文の一覧。該当がなければ空配列。**担当者にだけ返す。** 中身が入るのはオペレータの詳細（`GET /api/operator/inquiries/{id}`）の `answer.memo.unconfirmed` だけで、本人向けの InquiryView（2〜9 と進捗ストリームの `done`）では常に空配列にする。裏づけのない内容は、本人には真偽を判断できず、読めばそのまま試してしまうおそれがあるため。画面で隠すのではなく、API が本人向けの応答に含めない。オペレータ画面は「根拠を確かめられなかったこと」として、分かったこと（`findings`）と区別して示す。本人向けの説明（`askerExplanation`）は `findings` の内容だけから書かれ、`unconfirmed` の内容を含まない。
 - **0次回答の進捗**: 調査の進捗に続けて「根拠を確かめています」が流れ、根拠ありの場合はさらに「答えをまとめています」が流れる。
 - **説明の失敗**: 調査と照合が成功し、説明だけが失敗した場合、進捗ストリームは `failed`（`AI_UNAVAILABLE` または `AI_REFUSED`）を流し、`awaiting` は `INVESTIGATION` のまま。調査の結果（技術メモ、出典と照合結果、利用量）は保存する。ただし本人向けの InquiryView の `answer` は `ANSWERING` の間は `null` のままにする（説明がない状態を「答えが見つからなかった」と誤って見せないため）。画面は従来どおり再試行と「今すぐ担当者に送る」を出す。送った場合、オペレータの詳細（`GET /api/operator/inquiries/{id}`）の `answer` に保存済みの調査の内容が入り、`grounded` は `false`、`askerExplanation` は `null` になる。再試行で調査が成功すれば、保存済みの内容は新しい結果で置き換える。
-- **利用量の記録**: `usages[].step` はスキルの識別子（`reception`、`interviewer`、`restater`、`investigator`、`explainer`、`advisor`、`drafter`）。押して答えただけの入口では、受付は呼ばれない（記録にも現れない）。
+- **利用量の記録**: `usages[].step` はスキルの識別子（`reception`、`interviewer`、`restater`、`investigator`、`explainer`、`advisor`、`drafter`、`translator`）。押して答えただけの入口では、受付は呼ばれない（記録にも現れない）。
 - **問いに答えられたか（`answer.answered`）**: 確かめられた事実があること（`grounded`）と、その事実が本人の問いに答えていること（`answered`）を区別する。根拠はあるが的外れな事実しか集まらなかった場合に、それを答えとして見せないため。
   - `answered` は真偽値。`grounded` が `false` のときは常に `false`。`grounded` が `true` のときは、説明のスキルの判定（問いに答えているか）をそのまま入れる。
   - `grounded: true`、`answered: false` の場合も、`askerExplanation`（確認できなかったことと、関連して分かったこと）、`citations`、`memo` は従来どおり返す。
@@ -800,12 +805,38 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 | 置き直す | `PUT /api/operator/inquiries/{id}/placement` | `{ "type": "DO_FOR_ME", "systemId": "system-a", "functionId": "a-1" }`（どれも `null` にできる） | 終わっていない | 置き場所を変える。置いた人（`by`）は `OPERATOR` になる。種類が変わった場合は、区間を新しい種類の「担当者に渡す」の決まりに合わせる。番は変えない |
 | 調べ直す | `POST /api/operator/inquiries/{id}/investigation` | 本文なし | 終わっていない。言い直しがある。いま調べていない（`investigation.status` が `RUNNING` でない） | 裏での調査を始める（`investigation.status: RUNNING`）。番は変えない。種類が `CHANGE_REQUEST` でも、担当者が頼めば調べる。結果は担当者だけに見せる（`audience: OPERATOR`）。前の結果は、新しい結果が出た時点で置き換える（失敗した場合は、前の結果を残す） |
 | 返信の下書きを作る | `POST /api/operator/inquiries/{id}/draft` | `{ "kind": "ASK" または "RESULT", "note": "伝えたいこと（任意。1〜2000文字）" }` | 担当者の番 | AI が、本人に送る文章の下書きを作って返す。**状態は変えず、何も送らない。** 応答は、ほかの操作と違い `{ "body": "下書きの文章", "language": "ja" }`。下書きは、本人の言語（`language`）で書かれる。担当者が確かめ、直してから、「本人に聞き返す」か「結果を伝える」で送る。失敗したときは `AI_UNAVAILABLE`／`AI_REFUSED` |
+| 訳を見る | `POST /api/operator/inquiries/{id}/translation` | 本文なし（訳す先は、見る人の言語） | 本人の言語（`language`）が、見る人の言語と違う | 本人の言語で書かれた文章の訳を返す（下の「訳」）。**状態は変えない。** 応答は、ほかの操作と違う形。本人の言語と見る人の言語が同じなら `INVALID_STATE`。失敗したときは `AI_UNAVAILABLE`／`AI_REFUSED` |
 | 既読にする | `POST /api/operator/inquiries/{id}/read` | 本文なし | いつでも | `read: true` |
 
 - `reasonKind` は `NOT_REPRODUCIBLE`（再現しない）、`KNOWN_LIMITATION`（既知の制限）、`OUT_OF_SCOPE`（対象外）、`DUPLICATE`（重複）、`OTHER`（その他）のいずれか。
 - 実行できないときは `INVALID_STATE`。入力の誤り（空の本文、範囲外の値、システムにない機能、存在しない id）は `VALIDATION`。
 - 担当者は、見送る場合を除いて、問い合わせを終わらせられない。結果を伝えた後、終わらせるのは本人（7）。
 - 以前の `PUT …/status`（未対応、対応中、完了の切り替え）は廃止した。
+
+### 訳
+
+本人の言語と、担当者が見ている言語が違う場合、担当者は訳を頼める（LG-4。スキルの構成は `skill-architecture.md` の「訳のスキル」）。
+
+`POST /api/operator/inquiries/{id}/translation` の応答:
+
+```json
+{
+  "from": "en",
+  "to": "ja",
+  "items": [
+    { "key": "utterance", "original": "The job posting disappeared.", "translated": "求人の掲載が消えました。" },
+    { "key": "structured.summary", "original": "…", "translated": "…" },
+    { "key": "answer.askerExplanation", "original": "…", "translated": "…" },
+    { "key": "message:3f2a…", "original": "…", "translated": "…" }
+  ]
+}
+```
+
+- 訳すのは、本人の言語で書かれた文章のうち、次のもの（あるものだけ）: 本人が書いた文章（`utterance`）、言い直し（`structured.summary`）、本人向けの説明（`answer.askerExplanation`）、本人の発言（`messages` のうち `from` が `ASKER` のもの。`key` は `message:` に続けてメッセージの `id`）。
+- 訳さないもの: 根拠の引用、設定の名前、担当者の発言、AI の案、入口の質問への答え（選択肢の名前は、見る人の言語で返している）。
+- 訳は問い合わせに保存し、同じ文章を2度訳さない（訳す先の言語と、原文が同じなら、保存した訳を返す）。新しい発言が増えた後に呼ぶと、増えた分だけを訳す。
+- 訳は、担当者向けの応答にだけ含める。本人向けの InquiryView には含めない。
+- 訳は原文に添えるもので、原文を置き換えない。担当者向けの詳細（`GET /api/operator/inquiries/{id}`）は、これまでどおり原文だけを返す。
 
 ### 本人の操作（担当者に渡した後）
 
@@ -924,7 +955,7 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 - `durationMillis` は、呼び出しにかかった時間。この項目を加える前の記録では `null`。
 - 照合（根拠の実在の確認）は通常のコードで、スキルではないため、記録には現れない。画面は、調査と説明の間に「照合（コード）」を固定で描く。
 - 助言の案を確かめる処理（基づく事実のない案を捨てる）も通常のコードで、記録には現れない。画面は、助言の後に「案の確認（コード）」を固定で描く。
-- 助言と下書きの呼び出しは、担当者向けの詳細の `trace` にだけ含める。本人向けの InquiryView の `trace` には含めない（担当者だけに見せる案があることを、本人のページに出さない）。
+- 助言、下書き、訳の呼び出しは、担当者向けの詳細の `trace` にだけ含める。本人向けの InquiryView の `trace` には含めない（担当者だけに見せる案があることを、本人のページに出さない）。
 
 ## 利用者の表示と仮の文言
 

@@ -11,6 +11,7 @@ import type {
   OperatorDetail,
   OperatorList,
   Phase,
+  Translation,
   Urgency,
 } from "./types.ts";
 
@@ -349,6 +350,18 @@ export function createClient(language: Language) {
   }
 
   /**
+   * `POST /api/operator/inquiries/{id}/translation`。本人の言語で書かれた文章の訳を見る。
+   * 訳す先は見る人の言語（`Accept-Language`）。状態は変えず、原文は置き換えない。
+   * @param id 問い合わせ ID
+   */
+  function translate(id: string): Promise<Translation> {
+    return request<Translation>(
+      "POST",
+      `/api/operator/inquiries/${id}/translation`,
+    );
+  }
+
+  /**
    * `PUT /api/operator/inquiries/{id}/phase`。区間を変える（分かる、決まる、行われる）。
    * @param id 問い合わせ ID
    * @param phase 新しい区間
@@ -403,6 +416,7 @@ export function createClient(language: Language) {
     declineInquiry,
     investigate,
     draft,
+    translate,
     setPhase,
     setPlacement,
   };
