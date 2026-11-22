@@ -103,7 +103,10 @@ public final class AnswerPipeline {
         List<Citation> citations = new ArrayList<>(verified.confirmed().stream()
                 .flatMap(f -> f.evidence().stream())
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new)));
-        return new Result(new ZeroAnswer(true, explanation.value().answersQuestion(), explanation.value().text(), memo, citations), verified, usages);
+        // 問いに答えていない説明の手順は捨てる（答えになっていない手順を、本人が試さないようにするため。ZeroAnswer が空にする）
+        Explanation out = explanation.value();
+        return new Result(
+                new ZeroAnswer(true, out.answersQuestion(), out.text(), out.steps(), memo, citations), verified, usages);
     }
 
     /**

@@ -23,6 +23,7 @@ import dev.inquiryassist.core.lifecycle.InquiryState;
 import dev.inquiryassist.core.lifecycle.Phase;
 import dev.inquiryassist.core.lifecycle.Transition;
 import dev.inquiryassist.core.lifecycle.Turn;
+import dev.inquiryassist.core.skill.Explanation;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.core.skill.SkillUsage;
 import jakarta.persistence.Column;
@@ -226,6 +227,11 @@ class InquiryEntity {
 
     @Column(name = "asker_explanation")
     String askerExplanation;
+
+    /** 説明が出した、本人が自分で行える手順（行う順）。ほかの答えの項目と同じ時点で保存し、同じ時点で置き換える。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "answer_steps", nullable = false)
+    List<Explanation.Step> answerSteps = new ArrayList<>();
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "technical_memo")

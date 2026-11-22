@@ -258,6 +258,7 @@ export function makeStructuredView(
 export const groundedAnswer: ZeroAnswer = {
   grounded: true,
   askerExplanation: "掲載期限は最大90日まで延長できます。",
+  steps: [],
   memo: {
     findings: ["延長上限は90日と定義されている"],
     notFound: ["延長回数の制限"],
@@ -280,6 +281,7 @@ export const groundedAnswer: ZeroAnswer = {
 export const ungroundedAnswer: ZeroAnswer = {
   grounded: false,
   askerExplanation: null,
+  steps: [],
   memo: {
     findings: [],
     notFound: ["該当する仕様の記述"],
@@ -448,6 +450,7 @@ export function makeDetail(
     answer: {
       grounded: true,
       askerExplanation: "掲載期限を過ぎると一覧から外れます。",
+      steps: [],
       memo: {
         findings: ["期限切れで非表示になる"],
         notFound: ["再掲載の手順"],

@@ -45,6 +45,7 @@ describe("handoverText", () => {
       answer: {
         grounded: false,
         askerExplanation: null,
+        steps: [],
         memo: { findings: [], notFound: [], nextChecks: [] },
         citations: [],
       },
@@ -67,6 +68,7 @@ describe("handoverText", () => {
       answer: {
         grounded: false,
         askerExplanation: null,
+        steps: [],
         memo: { findings: [], notFound: [], nextChecks: [] },
         citations: [],
       },

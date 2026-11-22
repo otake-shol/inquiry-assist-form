@@ -1514,6 +1514,73 @@ describe("担当者のパネル: 調査の状況と調べ直す", () => {
   });
 });
 
+describe("担当者のパネル: 調べた結果の手順（本人が自分で行える操作）", () => {
+  const steps = [
+    { action: "求人管理画面で、対象の求人の編集を開く", check: null },
+    {
+      action: "掲載期限を変えて、保存する",
+      check: "応募者向けの一覧に、求人が表示される",
+    },
+  ];
+
+  it("説明の下に、本人のページと同じ形で出す。AI の案とは別の節で、点線の枠には入れない", async () => {
+    const user = userEvent.setup();
+    const base = makeDetail({ read: true, messages: [] });
+    const { card } = await renderBoard({
+      "GET /api/operator/inquiries/op-1": {
+        body: {
+          ...base,
+          language: "en",
+          answer: { ...base.answer!, steps },
+          advice: {
+            status: "DONE",
+            judgment: null,
+            procedure: {
+              steps: [{ target: "画面", action: "直す", check: "見る" }],
+              rollback: null,
+              basedOn: ["事実"],
+            },
+          },
+        },
+      },
+    });
+    const panel = await openPanel(user, card);
+
+    const heading = within(panel).getByRole("heading", { name: "手順" });
+    const explanation =
+      within(panel).getByText("掲載期限を過ぎると一覧から外れます。");
+    expect(
+      explanation.compareDocumentPosition(heading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    const list = heading.nextElementSibling as HTMLElement;
+    expect(list.tagName).toBe("OL");
+    expect(list).toHaveAttribute("lang", "en");
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[1].querySelector(".step-check")).toHaveTextContent(
+      "確かめ方: 応募者向けの一覧に、求人が表示される",
+    );
+    expect(heading.closest(".op-advice")).toBeNull();
+    // AI の案の手順は、別の節（見出し「手順の案」）
+    expect(
+      within(panel).getByRole("heading", { name: "手順の案" }),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getAllByRole("heading", { name: "手順" }),
+    ).toHaveLength(1);
+  });
+
+  it("手順が無い件には、見出しを出さない", async () => {
+    const user = userEvent.setup();
+    const { card } = await renderBoard();
+    const panel = await openPanel(user, card);
+    expect(
+      within(panel).queryByRole("heading", { name: "手順" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("担当者のパネル: AI の案", () => {
   const judgment = {
     text: "資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。",

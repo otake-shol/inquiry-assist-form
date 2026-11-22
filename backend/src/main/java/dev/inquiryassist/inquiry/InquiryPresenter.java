@@ -71,6 +71,7 @@ class InquiryPresenter {
                         e.answerGrounded,
                         e.answered(),
                         e.askerExplanation,
+                        List.copyOf(e.answerSteps),
                         forAsker(e.technicalMemo),
                         e.citations.stream()
                                 .filter(StoredCitation::verified)

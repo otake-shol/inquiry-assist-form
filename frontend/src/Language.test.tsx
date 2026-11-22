@@ -1363,6 +1363,44 @@ describe("英語の AI の案と返信の下書き", () => {
   });
 });
 
+describe("英語の手順", () => {
+  it("本人のページ: 見出し「Steps」と「Check: …」が英語で出る。手順の文章は書かれた言語のまま", async () => {
+    storedEnglish();
+    installFakeFetch({
+      ...bilingualConfig(),
+      ...inquiry(
+        makeStructuredView({
+          ...RESULT_STATE,
+          language: "ja",
+          answer: {
+            ...groundedAnswer,
+            answered: true,
+            steps: [
+              { action: "求人管理画面で、対象の求人の編集を開く", check: null },
+              {
+                action: "掲載期限を変えて、保存する",
+                check: "一覧に表示される",
+              },
+            ],
+          },
+        }),
+      ),
+    });
+    open("/inquiries/inq-1");
+
+    const heading = await screen.findByRole("heading", { name: "Steps" });
+    const list = heading.nextElementSibling as HTMLElement;
+    expect(list).toHaveAttribute("lang", "ja");
+    expect(
+      within(list).getByText("掲載期限を変えて、保存する"),
+    ).toBeInTheDocument();
+    expect(list.querySelectorAll(".step-check")).toHaveLength(1);
+    expect(list.querySelector(".step-check")).toHaveTextContent(
+      "Check: 一覧に表示される",
+    );
+  });
+});
+
 describe("書かれた内容の言語（lang 属性）", () => {
   it("本人の文章、言い直し、説明、AI が書いた事実には問い合わせの language、根拠の引用には ja が付く。画面の言語とは別", async () => {
     storedEnglish();

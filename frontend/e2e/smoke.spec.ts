@@ -97,6 +97,14 @@ test("選択肢を押すだけで、入口から結果まで通せる", async ({
   await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
     timeout: 30_000,
   });
+  // 「使い方を知りたい」には、説明に加えて、自分で行える手順を番号つきで示す
+  await expect(page.getByRole("heading", { name: "手順" })).toBeVisible();
+  await expect(
+    page.getByText("求人管理画面で、対象の求人の編集を開く"),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/確かめ方: 応募者向けの一覧に、求人が表示される/),
+  ).toBeVisible();
   // 問いを確かめた後は、答えを待たずに送る道が出る
   await expect(
     page.getByRole("button", { name: "答えを待たずに担当者に送る" }),

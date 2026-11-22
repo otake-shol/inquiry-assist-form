@@ -404,6 +404,7 @@ public class OperatorService {
                         Boolean.TRUE.equals(e.answerGrounded),
                         e.answered(),
                         e.askerExplanation,
+                        List.copyOf(e.answerSteps),
                         e.technicalMemo,
                         e.citations.stream()
                                 .map(c -> new OperatorDetail.CitationDetail(

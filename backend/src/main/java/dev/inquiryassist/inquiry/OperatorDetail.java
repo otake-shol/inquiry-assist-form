@@ -5,6 +5,7 @@ import dev.inquiryassist.core.TechnicalMemo;
 import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.lifecycle.Actor;
 import dev.inquiryassist.core.lifecycle.Awaiting;
+import dev.inquiryassist.core.skill.Explanation;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.Ending;
 import dev.inquiryassist.core.lifecycle.HandoverReason;
@@ -112,6 +113,7 @@ public record OperatorDetail(
      * @param grounded 照合できた出典に根拠があるか
      * @param answered 確かめられた事実が本人の問いに答えているか。grounded でなければ常に false
      * @param askerExplanation 本人向けの説明
+     * @param steps 本人が自分で行える手順（行う順）。なければ空
      * @param memo 技術メモ
      * @param citations 出典。照合結果つき
      */
@@ -119,6 +121,7 @@ public record OperatorDetail(
             boolean grounded,
             boolean answered,
             String askerExplanation,
+            List<Explanation.Step> steps,
             TechnicalMemo memo,
             List<CitationDetail> citations) {}
 

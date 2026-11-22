@@ -1,5 +1,6 @@
 package dev.inquiryassist.core;
 
+import dev.inquiryassist.core.skill.Explanation;
 import java.util.List;
 
 /**
@@ -13,13 +14,34 @@ import java.util.List;
  * @param grounded 一次情報に根拠があるか
  * @param answered 確かめられた事実が本人の問いに答えているか。{@code grounded} でなければ常に {@code false}
  * @param askerExplanation 本人向けの説明。業務の言葉で書く。根拠がない場合は {@code null}
+ * @param steps 本人が自分で行える手順。問いに答えていない（{@code answered} が {@code false}）場合は、常に空
  * @param memo 担当者向けの技術メモ
  * @param citations 出典
  */
 public record ZeroAnswer(
-        boolean grounded, boolean answered, String askerExplanation, TechnicalMemo memo, List<Citation> citations) {
+        boolean grounded,
+        boolean answered,
+        String askerExplanation,
+        List<Explanation.Step> steps,
+        TechnicalMemo memo,
+        List<Citation> citations) {
+
+    /**
+     * 手順なしの回答を作る。
+     *
+     * @param grounded 一次情報に根拠があるか
+     * @param answered 確かめられた事実が本人の問いに答えているか
+     * @param askerExplanation 本人向けの説明
+     * @param memo 担当者向けの技術メモ
+     * @param citations 出典
+     */
+    public ZeroAnswer(
+            boolean grounded, boolean answered, String askerExplanation, TechnicalMemo memo, List<Citation> citations) {
+        this(grounded, answered, askerExplanation, List.of(), memo, citations);
+    }
 
     public ZeroAnswer {
+        steps = steps == null || !answered ? List.of() : List.copyOf(steps);
         memo = memo == null ? TechnicalMemo.empty() : memo;
         citations = citations == null ? List.of() : List.copyOf(citations);
         if (!grounded && answered) {

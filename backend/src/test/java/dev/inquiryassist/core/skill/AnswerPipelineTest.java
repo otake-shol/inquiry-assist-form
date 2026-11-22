@@ -39,6 +39,7 @@ class AnswerPipelineTest {
         final List<List<Finding>> received = new ArrayList<>();
         RuntimeException failure;
         boolean answers = true;
+        List<Explanation.Step> steps = List.of();
 
         @Override
         public AiResult<Explanation> explain(StructuredInquiry inquiry, List<Finding> confirmedFindings, String language) {
@@ -46,7 +47,7 @@ class AnswerPipelineTest {
             if (failure != null) {
                 throw failure;
             }
-            return new AiResult<>(new Explanation("説明文", answers), new Usage("exp-model", "v2", 20, 8, 0, false));
+            return new AiResult<>(new Explanation("説明文", answers, steps), new Usage("exp-model", "v2", 20, 8, 0, false));
         }
     }
 
@@ -221,5 +222,47 @@ class AnswerPipelineTest {
         assertThatThrownBy(() -> new AnswerPipeline(failing, verifierOf(FILES), explainer).run(INQUIRY, SCOPE, m -> {}, "ja"))
                 .isInstanceOf(AiRefusalException.class);
         assertThat(explainer.received).isEmpty();
+    }
+
+    @Test
+    void 説明の手順は問いに答えていれば残り_答えていなければ捨てる() {
+        var steps = List.of(new Explanation.Step("編集を開く", null), new Explanation.Step("保存する", "一覧に出る"));
+        var answering = new RecordingExplainer();
+        answering.steps = steps;
+        var offTopic = new RecordingExplainer();
+        offTopic.steps = steps;
+        offTopic.answers = false;
+
+        var kept = pipeline(mixed(), answering, new ArrayList<>()).run(INQUIRY, SCOPE, m -> {}, "ja").answer();
+        var dropped = pipeline(mixed(), offTopic, new ArrayList<>()).run(INQUIRY, SCOPE, m -> {}, "ja").answer();
+
+        assertThat(kept.steps()).isEqualTo(steps);
+        assertThat(dropped.grounded()).isTrue();
+        assertThat(dropped.answered()).isFalse();
+        // 答えになっていない手順を、本人が試さないようにする
+        assertThat(dropped.steps()).isEmpty();
+        // 説明の文章は、手順を捨てても残る
+        assertThat(dropped.askerExplanation()).isEqualTo("説明文");
+    }
+
+    @Test
+    void 根拠なしのときの手順は空() {
+        var explainer = new RecordingExplainer();
+        explainer.steps = List.of(new Explanation.Step("編集を開く", null));
+        var ghost = new Investigation(List.of(finding("幽霊", citation("ghost", "x"))), List.of(), List.of());
+
+        var answer = pipeline(ghost, explainer, new ArrayList<>()).run(INQUIRY, SCOPE, m -> {}, "ja").answer();
+
+        assertThat(answer.grounded()).isFalse();
+        assertThat(answer.steps()).isEmpty();
+        // 説明を呼ばないので、手順も出ない
+        assertThat(explainer.received).isEmpty();
+    }
+
+    @Test
+    void 手順を持たない説明は手順なしの回答になる() {
+        var answer = pipeline(mixed(), new RecordingExplainer(), new ArrayList<>()).run(INQUIRY, SCOPE, m -> {}, "ja").answer();
+
+        assertThat(answer.steps()).isEmpty();
     }
 }

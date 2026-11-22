@@ -935,3 +935,90 @@ describe("本人のページ: 引き継いだ理由", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("本人のページ: 調べた結果の手順", () => {
+  const steps = [
+    { action: "求人管理画面で、対象の求人の編集を開く", check: null },
+    {
+      action: "掲載期限を変えて、保存する",
+      check: "応募者向けの一覧に、求人が表示される",
+    },
+  ];
+  const withSteps = (
+    overrides: Partial<InquiryView> = {},
+    answer: object = {},
+  ) =>
+    makeStructuredView({
+      ...RESULT_STATE,
+      answer: { ...groundedAnswer, answered: true, steps, ...answer },
+      ...overrides,
+    });
+
+  it("手順があるとき、説明の文章のすぐ下に、見出し「手順」と番号つきの手順を出す。確かめ方は、あるときだけ小さく添える", async () => {
+    openInquiry(withSteps());
+
+    const heading = await screen.findByRole("heading", { name: "手順" });
+    const explanation = screen.getByText(
+      "掲載期限は最大90日まで延長できます。",
+    );
+    expect(explanation.nextElementSibling).toBe(heading.parentElement);
+    const list = heading.nextElementSibling as HTMLElement;
+    expect(list.tagName).toBe("OL");
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[0].querySelector(".step-action")).toHaveTextContent(
+      "求人管理画面で、対象の求人の編集を開く",
+    );
+    // 確かめ方が無い手順には、その行を出さない
+    expect(items[0].querySelector(".step-check")).toBeNull();
+    expect(items[1].querySelector(".step-action")).toHaveTextContent(
+      "掲載期限を変えて、保存する",
+    );
+    expect(items[1].querySelector(".step-check")).toHaveTextContent(
+      "確かめ方: 応募者向けの一覧に、求人が表示される",
+    );
+    // 事実の側。AI の案の枠（点線）の中には入れない
+    expect(heading.closest(".op-advice")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/steps|action/);
+  });
+
+  it("手順の lang 属性は、問い合わせの言語（本人の言語）", async () => {
+    openInquiry(withSteps({ language: "en" }));
+
+    const heading = await screen.findByRole("heading", { name: "手順" });
+    expect(heading.nextElementSibling).toHaveAttribute("lang", "en");
+  });
+
+  it("手順が無い（空配列）、または steps が欠けた古い応答では、見出しごと出さない", async () => {
+    openInquiry(withSteps({}, { steps: [] }));
+    await screen.findByRole("heading", { name: "調べた結果" });
+    expect(
+      screen.queryByRole("heading", { name: "手順" }),
+    ).not.toBeInTheDocument();
+    cleanup();
+
+    const legacy = withSteps({}, {});
+    delete (legacy.answer as { steps?: unknown }).steps;
+    openInquiry(legacy);
+    await screen.findByRole("heading", { name: "調べた結果" });
+    expect(
+      screen.queryByRole("heading", { name: "手順" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("「やってほしい」で手順が出ても、「自分でできました」「担当者に頼む」のボタンはこれまでどおり出る", async () => {
+    openInquiry(
+      withSteps({
+        type: { id: "DO_FOR_ME", label: "やってほしい", by: "ASKER" },
+      }),
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "自分でできました" }),
+    ).toHaveClass("primary");
+    expect(
+      screen.getByRole("button", { name: "担当者に頼む" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "手順" })).toBeInTheDocument();
+  });
+});

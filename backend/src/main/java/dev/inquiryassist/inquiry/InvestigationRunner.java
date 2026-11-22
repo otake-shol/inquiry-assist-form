@@ -268,6 +268,7 @@ class InvestigationRunner {
             inquiry.answerGrounded = null;
             inquiry.answerAnswered = null;
             inquiry.askerExplanation = null;
+            inquiry.answerSteps = new ArrayList<>();
             inquiry.technicalMemo = AnswerPipeline.memoOf(e.investigation());
             inquiry.citations = storedCitations(e.investigation().citationResults());
             discardAdvice(inquiry);
@@ -321,6 +322,7 @@ class InvestigationRunner {
         inquiry.answerGrounded = result.answer().grounded();
         inquiry.answerAnswered = result.answer().answered();
         inquiry.askerExplanation = result.answer().askerExplanation();
+        inquiry.answerSteps = new ArrayList<>(result.answer().steps());
         inquiry.technicalMemo = result.answer().memo();
         inquiry.citations = storedCitations(result.investigation().citationResults());
         result.usages().forEach(inquiry::addUsage);

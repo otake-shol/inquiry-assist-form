@@ -56,4 +56,16 @@ class ZeroAnswerTest {
         assertTrue(answer.citations().isEmpty());
         assertEquals(MEMO, answer.memo());
     }
+
+    @Test
+    void 手順は問いに答えているときだけ持ち_答えていなければ空にする() {
+        var steps = List.of(new dev.inquiryassist.core.skill.Explanation.Step("編集を開く", null));
+
+        assertEquals(steps, new ZeroAnswer(true, true, "説明", steps, MEMO, List.of(citation("A.java"))).steps());
+        assertEquals(List.of(), new ZeroAnswer(true, false, "説明", steps, MEMO, List.of(citation("A.java"))).steps());
+        assertEquals(List.of(), new ZeroAnswer(true, true, "説明", null, MEMO, List.of(citation("A.java"))).steps());
+        // 手順なしの作り方
+        assertEquals(List.of(), new ZeroAnswer(true, true, "説明", MEMO, List.of(citation("A.java"))).steps());
+        assertEquals(List.of(), ZeroAnswer.ungrounded(MEMO).steps());
+    }
 }

@@ -48,6 +48,8 @@ export const en: Messages = {
     notAnswered: "The materials I have do not answer your question.",
     relatedTitle: "Related findings",
     citationsTitle: (n) => `Sources (${n})`,
+    stepsTitle: "Steps",
+    stepCheck: "Check: ",
     memoTitle: "Details for the support team",
     memoFindings: "Findings",
     memoNotFound: "What I looked for but could not find",

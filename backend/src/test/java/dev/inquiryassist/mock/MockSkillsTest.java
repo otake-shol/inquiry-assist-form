@@ -652,4 +652,60 @@ class MockSkillsTest {
 
         assertThat(restated.summary()).doesNotContain("[相談]", "[手順]", "[根拠なしの案]", "[案エラー]", "[下書きエラー]");
     }
+
+    // ---- 説明が出す手順（契約書「説明が出す手順」） ----
+
+    private dev.inquiryassist.core.skill.Explanation explain(InquiryType type, String goal, String language) {
+        return explainer.explain(inquiry(type, goal), twoFindings(), language).value();
+    }
+
+    @Test
+    void 説明は使い方とやってほしいで手順を2つ返す() {
+        for (InquiryType type : List.of(InquiryType.HOW_TO, InquiryType.DO_FOR_ME)) {
+            var steps = explain(type, "期限", "ja").steps();
+
+            assertThat(steps).hasSize(2);
+            assertThat(steps.get(0).action()).isEqualTo("求人管理画面で、対象の求人の編集を開く");
+            assertThat(steps.get(0).check()).isNull();
+            assertThat(steps.get(1).action()).isEqualTo("掲載期限を変えて、保存する");
+            assertThat(steps.get(1).check()).isEqualTo("応募者向けの一覧に、求人が表示される");
+        }
+    }
+
+    @Test
+    void 説明は英語なら英語の手順を返す() {
+        var steps = explain(InquiryType.HOW_TO, "x", "en").steps();
+
+        assertThat(steps).hasSize(2);
+        assertThat(steps.get(0).action()).isEqualTo("Open the edit screen for the job posting in the job admin screen");
+        assertThat(steps.get(0).check()).isNull();
+        assertThat(steps.get(1).action()).isEqualTo("Change the posting deadline and save");
+        assertThat(steps.get(1).check()).isEqualTo("The job posting appears in the list for applicants");
+    }
+
+    @Test
+    void 説明は仕組みと不具合と種類なしと変えてほしいでは手順を返さない() {
+        for (InquiryType type : new InquiryType[] {
+            InquiryType.HOW_IT_WORKS, InquiryType.LOOKS_WRONG, InquiryType.CHANGE_REQUEST, null
+        }) {
+            assertThat(explain(type, "期限", "ja").steps()).as(String.valueOf(type)).isEmpty();
+        }
+    }
+
+    @Test
+    void 手順なしのタグと的外れのタグでは手順を返さない() {
+        assertThat(explain(InquiryType.HOW_TO, "[手順なし] 期限", "ja").steps()).isEmpty();
+        var offTopic = explain(InquiryType.HOW_TO, "[的外れ] 期限", "ja");
+        assertThat(offTopic.answersQuestion()).isFalse();
+        assertThat(offTopic.steps()).isEmpty();
+        // 手順がなくても、説明の文章は返る
+        assertThat(explain(InquiryType.HOW_TO, "[手順なし] 期限", "ja").text()).isNotBlank();
+    }
+
+    @Test
+    void 手順なしのタグは言い直しの文章から取り除かれる() {
+        var restated = restater.restate("[手順なし] 期限", InquiryType.HOW_TO, null, null, List.of(), List.of(), "ja").value();
+
+        assertThat(restated.summary()).doesNotContain("[手順なし]");
+    }
 }

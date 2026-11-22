@@ -250,12 +250,22 @@ export interface AnswerMemo {
   nextChecks: string[];
 }
 
+/** 本人が自分で行える手順の1つ。 */
+export interface AnswerStep {
+  /** 何をするか */
+  action: string;
+  /** 結果の確かめ方（なければ null） */
+  check: string | null;
+}
+
 /** 0次回答。`grounded` が false のとき `askerExplanation` は null。 */
 export interface ZeroAnswer {
   grounded: boolean;
   /** 確かめられた事実が本人の問いに答えているか。無い古い応答では `grounded` と同じ扱い */
   answered?: boolean;
   askerExplanation: string | null;
+  /** 本人が自分で行える手順（行う順。なければ空配列）。古い API では欠ける */
+  steps: AnswerStep[];
   memo: AnswerMemo;
   citations: Citation[];
 }
@@ -443,6 +453,8 @@ export interface OperatorAnswer {
   /** 問いに答えているか。無い古い応答では `grounded` と同じ扱い */
   answered?: boolean;
   askerExplanation: string | null;
+  /** 本人が自分で行える手順（本人に見せるもの。なければ空配列）。古い API では欠ける */
+  steps: AnswerStep[];
   memo: AnswerMemo;
   citations: OperatorCitation[];
 }

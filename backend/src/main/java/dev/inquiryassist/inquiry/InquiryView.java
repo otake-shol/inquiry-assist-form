@@ -5,6 +5,7 @@ import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.TechnicalMemo;
 import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.lifecycle.Actor;
+import dev.inquiryassist.core.skill.Explanation;
 import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.Ending;
@@ -159,6 +160,7 @@ public record InquiryView(
      * @param grounded 照合できた出典に根拠があるか
      * @param answered 確かめられた事実が本人の問いに答えているか。grounded でなければ常に false
      * @param askerExplanation 本人向けの説明。根拠なしなら null
+     * @param steps 本人が自分で行える手順（行う順）。なければ空。問いに答えていないときは、常に空
      * @param memo 担当者向けの技術メモ
      * @param citations 照合できた出典
      */
@@ -166,6 +168,7 @@ public record InquiryView(
             boolean grounded,
             boolean answered,
             String askerExplanation,
+            List<Explanation.Step> steps,
             TechnicalMemo memo,
             List<Citation> citations) {}
 }

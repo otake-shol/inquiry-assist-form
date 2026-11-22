@@ -13,6 +13,7 @@ import type {
   TypeOption,
 } from "../api/types.ts";
 import { MessageThread } from "../components/Exchange.tsx";
+import { AnswerSteps } from "../components/Outcome.tsx";
 import { TracePanel } from "../components/TracePanel.tsx";
 import { useMessages } from "../i18n/context.ts";
 import { languageName } from "../i18n/messages.ts";
@@ -488,6 +489,7 @@ export function DetailView({
             >
               {answer.grounded ? answer.askerExplanation : OP_TEXT.notGrounded}
             </p>
+            <AnswerSteps steps={answer.steps} language={askerLang} level={4} />
             <List
               title={OP_TEXT.findings}
               items={answer.memo.findings}

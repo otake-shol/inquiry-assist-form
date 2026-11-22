@@ -1690,3 +1690,34 @@ button.small {
   border-radius: 8px;
   font-size: 0.85rem;
 }
+
+/* 調べた結果の手順（本人が自分で行える操作。事実の側なので、点線の枠には入れない） */
+.answer-steps {
+  margin: 8px 0 12px;
+}
+
+.steps-title {
+  margin: 12px 0 4px;
+  font-size: 1rem;
+}
+
+.steps-list {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.steps-list li {
+  margin: 0 0 6px;
+}
+
+.step-action {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.step-check {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}

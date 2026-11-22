@@ -1,4 +1,5 @@
 import type {
+  AnswerStep,
   ClosedBy,
   Declined,
   Ending,
@@ -77,6 +78,45 @@ function MemoList({
   );
 }
 
+/**
+ * 本人が自分で行える手順。見出し「手順」と、番号つきの手順を出す。手順ごとに、何をするか（`action`）を
+ * 本文の大きさで、確かめ方（`check`。あれば）をその下に小さく出す。手順がなければ、見出しごと出さない。
+ * 事実の側の表示なので、AI の案（点線の枠）とは混ぜない。書かれた内容なので `lang` は問い合わせの言語。
+ * @param props 手順と、その言語、見出しの段
+ */
+export function AnswerSteps({
+  steps,
+  language,
+  level = 3,
+}: {
+  steps: AnswerStep[] | undefined;
+  language?: string;
+  /** 見出しの段（本人のページは3、担当者のパネルは4） */
+  level?: 3 | 4;
+}) {
+  const { text: TEXT } = useMessages();
+  if (steps === undefined || steps.length === 0) return null;
+  const Heading = level === 3 ? "h3" : "h4";
+  return (
+    <div className="answer-steps">
+      <Heading className="steps-title">{TEXT.stepsTitle}</Heading>
+      <ol className="steps-list" lang={language}>
+        {steps.map((step, index) => (
+          <li key={`${index}:${step.action}`}>
+            <span className="step-action">{step.action}</span>
+            {step.check !== null && (
+              <span className="step-check">
+                {TEXT.stepCheck}
+                {step.check}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /** 調べた結果の props。 */
 interface ResultProps {
   answer: ZeroAnswer;
@@ -121,6 +161,9 @@ export function Result({
         <p className="answer-body" lang={language}>
           {answer.askerExplanation}
         </p>
+      )}
+      {answer.grounded && answered && (
+        <AnswerSteps steps={answer.steps} language={language} />
       )}
       {answer.grounded && !answered && (
         <>

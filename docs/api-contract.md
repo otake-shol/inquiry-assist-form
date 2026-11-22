@@ -191,7 +191,7 @@ InquiryView と担当者向けの詳細は、`noReply` を持つ。
 - `intake.next.kind` は `TYPE`、`SYSTEM`、`FUNCTION`、`DETAIL`、`NOTE` のいずれか。`options` が空の質問は文章で答える。`allowsText` が `true` の質問は、選択肢のほかに文章でも答えられる。`canSkip` は `NOTE` だけが `true` になりうる。「わからない」は、`NOTE` 以外のすべての質問で選べる（画面が常に出す）。
 - `phase`、`turn`、`awaiting`、`ending` は「状態」の節のとおり。`declined` は、見送りで終わった件だけが持つ（`{ "reasonKind": "KNOWN_LIMITATION", "reason": "理由の文章" }`）。`handedOverAt` は、担当者に初めて渡した時刻（渡していなければ `null`）。
 - `structured` は、問いを組み立てた後（`awaiting` が `QUESTION_CONFIRMATION` になった時点）から非 null。項目は `summary`（本人に見せる言い直しの文章。必須）、`targetSystem`、`goal`、`whatHappened`、`expectedResult`。`urgency` は `structured` から外し、問い合わせの `urgency` に一本化する。
-- `answer` は、答えの完了後に非 null。形は従来どおり（`grounded`、`answered`、`askerExplanation`、`memo`、`citations`）。裏での調査の結果（担当者だけに見せるもの）は、本人向けの InquiryView では `null` のまま（「調査の状況と、裏での調査」の節）。
+- `answer` は、答えの完了後に非 null。項目は `grounded`、`answered`、`askerExplanation`、`steps`、`memo`、`citations`。`steps` は、本人が自分で行える手順（`[{ "action": "求人管理画面で、対象の求人の編集を開く", "check": "編集の画面が開く" }]`。行う順。`check` は結果の確かめ方で、なければ `null`）。手順がなければ空配列。`answered` が `false` のときは、常に空配列。裏での調査の結果（担当者だけに見せるもの）は、本人向けの InquiryView では `null` のまま（「調査の状況と、裏での調査」の節）。
 - `handoverReason` は、直近に担当者へ渡した理由（「担当者に渡す」の節）。
 - `canSendNow` は、いま「答えを待たずに担当者へ送る」（8）を実行できるか。
 - `noReply` は、本人の返事を待っている間（結果の確かめ、聞き返しへの返事）だけ非 null（「返事がないとき」の節）。
@@ -506,11 +506,21 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | `[拒否]` | 調査 | 進捗を流した後に `AI_REFUSED` |
 | `[説明エラー]` | 説明 | 調査と照合は成功し、説明が `AI_UNAVAILABLE` で失敗する。調査の結果は保存される |
 | `[的外れ]` | 説明 | 調査は通常の事実を返し、説明が「問いに答えていない」と判定する。根拠あり（`grounded: true`）で `answered: false` になる |
+| `[手順なし]` | 説明 | 手順（`answer.steps`）を返さない（タグがなければ、種類が `HOW_TO` か `DO_FOR_ME` のときに手順を2つ返す） |
 | `[相談]` | 助言 | 判断の案の `needsConsultation` を `true` にし、理由を添える |
 | `[手順]` | 助言 | 種類にかかわらず、手順の案を返す（タグがなければ、手順の案を返すのは種類が `DO_FOR_ME` と `CHANGE_REQUEST` のときだけ） |
 | `[根拠なしの案]` | 助言 | 判断の案の `basedOn` に、存在しない番号だけを入れて返す。コードが案を捨て、`judgment` は `null` になる |
 | `[案エラー]` | 助言 | 助言が `AI_UNAVAILABLE` で失敗する。`advice.status` は `FAILED` |
 | `[下書きエラー]` | 下書き | 下書きが `AI_UNAVAILABLE` で失敗する |
+
+### 説明が出す手順
+
+モックの説明は、種類が `HOW_TO` か `DO_FOR_ME` のとき、説明の文章に加えて、手順を2つ返す（`[手順なし]` を付けた場合と、`[的外れ]` の場合は返さない）。
+
+| 言語 | 1つ目 | 2つ目 |
+| --- | --- | --- |
+| `ja` | `action`「求人管理画面で、対象の求人の編集を開く」、`check` は `null` | `action`「掲載期限を変えて、保存する」、`check`「応募者向けの一覧に、求人が表示される」 |
+| `en` | `action` "Open the edit screen for the job posting in the job admin screen"、`check` は `null` | `action` "Change the posting deadline and save"、`check` "The job posting appears in the list for applicants" |
 
 ### 助言と下書き
 
