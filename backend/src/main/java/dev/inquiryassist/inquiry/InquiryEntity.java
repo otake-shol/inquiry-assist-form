@@ -63,7 +63,10 @@ class InquiryEntity {
             String revision,
             boolean verified) {}
 
-    /** 保存する AI 処理ごとの利用量。 */
+    /**
+     * 保存する AI 処理ごとの利用量。{@code provider} は、記録した時点のそのスキルの実装の名前（{@code inquiry.skills.<スキル>.provider}）。
+     * この項目を加える前の記録では null（実行記録では、モックなら mock、そうでなければ ollama と読み替える）。
+     */
     record StoredUsage(
             String step,
             String model,
@@ -73,7 +76,8 @@ class InquiryEntity {
             long cacheReadTokens,
             boolean mock,
             boolean failed,
-            Long durationMillis) {}
+            Long durationMillis,
+            String provider) {}
 
     /** 保存するやり取り1件。担当者の返信と本人の追記を同じ形で持つ。 */
     record StoredMessage(
@@ -348,11 +352,13 @@ class InquiryEntity {
     }
 
     /**
-     * スキル1回の利用量を追記する。モック由来なら記録全体を mock とする。
+     * スキル1回の利用量を追記する。モック由来なら記録全体を mock とする。実装の名前は、記録する時点の設定の値を一緒に保存する
+     * （あとで設定を差し替えても、記録した時点の名前が残る）。
      *
      * @param usage スキルごとの利用量
+     * @param implementations スキルごとの実装（記録する時点の実装の名前を引く）
      */
-    void addUsage(SkillUsage usage) {
+    void addUsage(SkillUsage usage, SkillImplementations implementations) {
         Usage u = usage.usage();
         usages.add(new StoredUsage(
                 usage.skill().id(),
@@ -363,18 +369,9 @@ class InquiryEntity {
                 u.cacheReadTokens(),
                 u.mock(),
                 usage.failed(),
-                usage.durationMillis()));
+                usage.durationMillis(),
+                implementations.providerOf(usage.skill())));
         mock = mock || u.mock();
-    }
-
-    /**
-     * 成功したスキルの利用量を追記する。
-     *
-     * @param skill 呼んだスキル
-     * @param usage 利用量
-     */
-    void addUsage(Skill skill, Usage usage) {
-        addUsage(new SkillUsage(skill, usage));
     }
 
     /**
@@ -383,9 +380,10 @@ class InquiryEntity {
      * @param skill 呼んだスキル
      * @param usage 利用量
      * @param durationMillis 呼び出しにかかった時間（ミリ秒）
+     * @param implementations スキルごとの実装（記録する時点の実装の名前を引く）
      */
-    void addUsage(Skill skill, Usage usage, long durationMillis) {
-        addUsage(new SkillUsage(skill, usage, false, durationMillis));
+    void addUsage(Skill skill, Usage usage, long durationMillis, SkillImplementations implementations) {
+        addUsage(new SkillUsage(skill, usage, false, durationMillis), implementations);
     }
 
     /**

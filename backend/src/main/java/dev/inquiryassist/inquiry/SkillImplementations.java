@@ -6,8 +6,8 @@ import java.util.Map;
 import org.springframework.core.env.PropertyResolver;
 
 /**
- * スキルと一次情報の検索が、どの実装で動いているか。いまは、どれも {@code mock} だけ（{@link SkillProviderGuard} が、ほかの値で起動を止める）。
- * 実際のモデルの実装を足すときの、差し込み口として残す。
+ * スキルと一次情報の検索が、どの実装で動いているか。名前は任意で、{@code mock} 以外は、足した実装の名前。
+ * その名前の実装が、ちょうど1つあることは、{@link SkillProviderGuard} が起動時に確かめる。
  *
  * <p>「モックを含むか」は Spring のプロファイルではなく、スキルごとの設定
  * （{@code inquiry.skills.<識別子>.provider}、{@code inquiry.knowledge.provider}）から判断する。
@@ -17,6 +17,9 @@ public final class SkillImplementations {
 
     /** モックの実装名。 */
     public static final String MOCK = "mock";
+
+    /** 一次情報の検索の実装を選ぶ設定の名前。 */
+    public static final String KNOWLEDGE_KEY = "inquiry.knowledge.provider";
 
     private final Map<Skill, String> skills;
     private final String knowledge;
@@ -37,7 +40,7 @@ public final class SkillImplementations {
         for (Skill skill : Skill.values()) {
             skills.put(skill, resolver.getProperty("inquiry.skills." + skill.id() + ".provider", MOCK));
         }
-        return new SkillImplementations(skills, resolver.getProperty("inquiry.knowledge.provider", MOCK));
+        return new SkillImplementations(skills, resolver.getProperty(KNOWLEDGE_KEY, MOCK));
     }
 
     /**
@@ -46,6 +49,13 @@ public final class SkillImplementations {
      */
     public String providerOf(Skill skill) {
         return skills.get(skill);
+    }
+
+    /**
+     * @return 一次情報の検索の実装名
+     */
+    public String knowledgeProvider() {
+        return knowledge;
     }
 
     /**

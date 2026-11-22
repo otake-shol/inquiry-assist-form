@@ -307,7 +307,7 @@ public class InquiryService {
         inquiry.structuredByAi = result.value();
         inquiry.revisionNotes.add(note);
         inquiry.revisionsLeft--;
-        inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start));
+        inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start), implementations);
         return presenter.toView(commit(inquiry, null));
     }
 
@@ -543,7 +543,8 @@ public class InquiryService {
             result = restate(inquiry, List.copyOf(inquiry.revisionNotes));
         } catch (AiRefusalException | AiUnavailableException e) {
             log.warn("言い直しが失敗しました id={}", inquiry.id, e);
-            inquiry.addUsage(new SkillUsage(Skill.RESTATER, failedUsageOf(e, Skill.RESTATER), true, millisSince(start)));
+            inquiry.addUsage(
+                    new SkillUsage(Skill.RESTATER, failedUsageOf(e, Skill.RESTATER), true, millisSince(start)), implementations);
             if (inquiry.urgency == Urgency.BLOCKED) {
                 return presenter.toView(commit(inquiry, handOver(inquiry, true)));
             }
@@ -551,7 +552,7 @@ public class InquiryService {
             throw new ComposeFailedException(inquiry.id, e);
         }
         inquiry.structuredByAi = result.value();
-        inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start));
+        inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start), implementations);
         if (inquiry.urgency == Urgency.BLOCKED) {
             return presenter.toView(investigateAfterBlocked(commit(inquiry, handOver(inquiry, true))));
         }
@@ -595,7 +596,7 @@ public class InquiryService {
         try {
             AiResult<Reception> result = reception.receive(
                     inquiry.writtenText(), catalog(inquiry).candidates(), IntakeEntries.chosen(inquiry.intake));
-            inquiry.addUsage(Skill.RECEPTION, result.usage(), millisSince(start));
+            inquiry.addUsage(Skill.RECEPTION, result.usage(), millisSince(start), implementations);
             IntakePlanner.Placed placed = planner(inquiry).place(inquiry.intake, result.value());
             inquiry.intake = new ArrayList<>(placed.entries());
             if (placed.detailsReset()) {
@@ -604,7 +605,8 @@ public class InquiryService {
             }
         } catch (AiRefusalException | AiUnavailableException e) {
             log.warn("受付が失敗したため、置き場所を質問として聞きます id={}", inquiry.id, e);
-            inquiry.addUsage(new SkillUsage(Skill.RECEPTION, failedUsageOf(e, Skill.RECEPTION), true, millisSince(start)));
+            inquiry.addUsage(
+                    new SkillUsage(Skill.RECEPTION, failedUsageOf(e, Skill.RECEPTION), true, millisSince(start)), implementations);
         }
     }
 
@@ -634,11 +636,12 @@ public class InquiryService {
         long start = System.nanoTime();
         try {
             AiResult<Prefill> result = interviewer.prefill(inquiry.writtenText(), questions);
-            inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start));
+            inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start), implementations);
             inquiry.intake.addAll(planner(inquiry).acceptPrefill(inquiry.intake, questions, inquiry.writtenText(), result.value()));
         } catch (AiRefusalException | AiUnavailableException e) {
             log.warn("答えの読み取りが失敗したため、設定の質問をすべて聞きます id={}", inquiry.id, e);
-            inquiry.addUsage(new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true, millisSince(start)));
+            inquiry.addUsage(
+                    new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true, millisSince(start)), implementations);
         }
         questions.stream().map(IntakeQuestion::id).forEach(inquiry.prefillAttempted::add);
     }
@@ -658,12 +661,13 @@ public class InquiryService {
                     functionOf(inquiry, placement),
                     scope,
                     inquiry.language);
-            inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start));
+            inquiry.addUsage(Skill.INTERVIEWER, result.usage(), millisSince(start), implementations);
             return new ArrayList<>(
                     result.value().questions().stream().map(IntakeQuestion::detailOf).toList());
         } catch (AiRefusalException | AiUnavailableException e) {
             log.warn("聞き手が失敗したため、詳しい質問なしで続行します id={}", inquiry.id, e);
-            inquiry.addUsage(new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true, millisSince(start)));
+            inquiry.addUsage(
+                    new SkillUsage(Skill.INTERVIEWER, failedUsageOf(e, Skill.INTERVIEWER), true, millisSince(start)), implementations);
             return new ArrayList<>();
         }
     }

@@ -145,7 +145,7 @@ public class TranslationService {
         for (int attempt = 1; attempt <= SAVE_ATTEMPTS; attempt++) {
             try {
                 committer.update(id, entity -> {
-                    entity.addUsage(usage);
+                    entity.addUsage(usage, implementations);
                     return new InquiryCommitter.Update(null, InquiryCommitter.Publish.NONE);
                 });
                 return;

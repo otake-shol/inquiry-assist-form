@@ -1,0 +1,15 @@
+/*
+ * 色などの見た目の上書き。各チームが、骨組みの `index.css` を書き換えずに、この1ファイルだけで
+ * 見た目を変えるための置き場（`index.css` の後に読み込まれる）。
+ * `:root` の色の変数を上書きすると、画面全体の色が変わる。変えられる変数は、`index.css` の先頭の
+ * `:root` にある（--bg、--ink、--muted、--line、--card、--accent、--accent-strong、--accent-ink、--accent-soft、
+ * --user-bg、--warn-bg、--warn-line、--danger-bg、--danger-line）。
+ *
+ * 例: 基調の色（ボタンや強調の色）を、緑系に変える。
+ *
+ * :root {
+ *   --accent: #1f6f50;
+ *   --accent-strong: #17553d;
+ *   --accent-soft: #e3f2ea;
+ * }
+ */

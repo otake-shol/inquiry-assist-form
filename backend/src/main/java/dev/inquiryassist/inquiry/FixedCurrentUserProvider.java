@@ -2,10 +2,15 @@ package dev.inquiryassist.inquiry;
 
 import dev.inquiryassist.core.AccessScope;
 import java.util.Set;
+import org.springframework.context.annotation.Fallback;
 import org.springframework.stereotype.Component;
 
-/** 固定ユーザー {@code local-user} を返す暫定実装。{@code job-board}、{@code faq}、{@code glossary} を閲覧できる。 */
+/**
+ * 固定ユーザー {@code local-user} を返す暫定実装。{@code job-board}、{@code faq}、{@code glossary} を閲覧できる。
+ * {@link Fallback} なので、{@link CurrentUserProvider} の実装を別に足すと（{@code @Primary} なしで）そちらが使われ、これは使われない。
+ */
 @Component
+@Fallback
 public class FixedCurrentUserProvider implements CurrentUserProvider {
 
     /** 固定ユーザーの識別子。 */

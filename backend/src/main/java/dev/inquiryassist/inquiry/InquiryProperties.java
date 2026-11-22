@@ -24,7 +24,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param cells マスの設定。置き場所ごとの詳しい質問。同じ指定の数なら、書かれた順で先のものを使う
  * @param slack Slack への投稿の設定
  * @param publicBaseUrl 投稿に載せるオペレータ画面へのリンクの基点。未設定ならリンクを載せない
- * @param skills スキルごとの実装の設定（キーはスキルの識別子）。書かれていないスキルは {@code mock}。いまは {@code mock} だけが有効
+ * @param skills スキルごとの実装の設定（キーはスキルの識別子）。書かれていないスキルは {@code mock}
  * @param trace スキルの実行記録の設定
  * @param dev 認証を加えるまでの、利用者と担当者の表示名の仮の設定
  * @param filedGuidance 担当者に渡した後に画面が見せる案内文。言語ごと
@@ -106,10 +106,11 @@ public record InquiryProperties(
             @DefaultValue("開発用ユーザー") String userName, @DefaultValue("担当者（開発用）") String operatorName) {}
 
     /**
-     * スキルごとの実装の設定。実際のモデルの実装を足すときの、差し込み口（{@code provider}）だけを持つ。モデルの名前や時間切れなど、
-     * 実装ごとの設定は、実装を足すときに、その実装の設定として足す。
+     * スキルごとの実装の設定。実装を選ぶ名前（{@code provider}）だけを持つ。モデルの名前や時間切れなど、実装ごとの設定は、
+     * 実装を足すときに、その実装の設定として足す。
      *
-     * @param provider 実装の種類。いまは {@code mock} だけが有効で、ほかの値は起動を止める（{@link SkillProviderGuard}）。既定は {@code mock}
+     * @param provider 実装の名前。{@code mock}（既定）のときだけモックが有効で、ほかの名前なら、その名前で足した実装を使う
+     *     （実装がちょうど1つあることは、{@link SkillProviderGuard} が起動時に確かめる）
      */
     public record SkillSettings(@DefaultValue("mock") String provider) {}
 

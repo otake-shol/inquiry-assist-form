@@ -56,7 +56,7 @@ public class OperatorService {
     /**
      * @param repository 問い合わせ記録の保存先
      * @param properties 投稿先と担当者の表示名の設定
-     * @param implementations スキルごとの実装（実行記録の実装名に使う）
+     * @param implementations スキルごとの実装（利用量に実装の名前を記録するときと、失敗した呼び出しの補完に使う）
      * @param presenter 一覧と詳細の項目を作る
      * @param locales 置き直しの入力を確かめる、システムと機能の一覧（言語ごと）
      * @param drafter 返信の下書き
@@ -356,7 +356,7 @@ public class OperatorService {
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
                 committer.update(id, inquiry -> {
-                    inquiry.addUsage(usage);
+                    inquiry.addUsage(usage, implementations);
                     return new InquiryCommitter.Update(null, InquiryCommitter.Publish.NONE);
                 });
                 return;
@@ -490,7 +490,7 @@ public class OperatorService {
                 presenter.noReplyOf(e),
                 MessageBodies.viewsOf(e),
                 List.copyOf(e.history),
-                TraceViews.of(e, properties, implementations, true));
+                TraceViews.of(e, properties, true));
     }
 
     /**

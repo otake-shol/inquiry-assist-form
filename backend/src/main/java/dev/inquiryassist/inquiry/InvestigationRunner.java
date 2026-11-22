@@ -325,13 +325,14 @@ class InvestigationRunner {
             inquiry.technicalMemo = AnswerPipeline.memoOf(e.investigation());
             inquiry.citations = storedCitations(e.investigation().citationResults());
             discardAdvice(inquiry);
-            e.usages().forEach(inquiry::addUsage);
+            e.usages().forEach(u -> inquiry.addUsage(u, implementations));
             failureForAsker = (RuntimeException) e.getCause();
             resultStored = true;
         } else if (failure instanceof AiUnavailableException || failure instanceof AiRefusalException) {
             // 調査の失敗。分かる場合は、失敗した呼び出しの利用量を記録する
             inquiry.addUsage(new SkillUsage(
-                    Skill.INVESTIGATOR, failedUsageOf(failure), true, (System.nanoTime() - startNanos) / 1_000_000L));
+                    Skill.INVESTIGATOR, failedUsageOf(failure), true, (System.nanoTime() - startNanos) / 1_000_000L),
+                    implementations);
         }
         if (forAsker) {
             inquiry.investigationStatus = InvestigationStatus.FAILED;
@@ -373,7 +374,7 @@ class InvestigationRunner {
         inquiry.advice = null;
     }
 
-    private static void store(InquiryEntity inquiry, AnswerPipeline.Result result) {
+    private void store(InquiryEntity inquiry, AnswerPipeline.Result result) {
         discardAdvice(inquiry);
         inquiry.answerGrounded = result.answer().grounded();
         inquiry.answerAnswered = result.answer().answered();
@@ -381,7 +382,7 @@ class InvestigationRunner {
         inquiry.answerSteps = new ArrayList<>(result.answer().steps());
         inquiry.technicalMemo = result.answer().memo();
         inquiry.citations = storedCitations(result.investigation().citationResults());
-        result.usages().forEach(inquiry::addUsage);
+        result.usages().forEach(u -> inquiry.addUsage(u, implementations));
     }
 
     // ---- 時間切れ ----

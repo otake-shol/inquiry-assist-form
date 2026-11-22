@@ -210,12 +210,12 @@ class AdviceRunner {
                     }
                     switch (mode) {
                         case DONE -> {
-                            inquiry.addUsage(Skill.ADVISOR, usage, millis);
+                            inquiry.addUsage(Skill.ADVISOR, usage, millis, implementations);
                             inquiry.adviceStatus = AdviceStatus.DONE;
                             inquiry.advice = content;
                         }
                         case FAILED -> {
-                            inquiry.addUsage(new SkillUsage(Skill.ADVISOR, failedUsageOf(failure), true, millis));
+                            inquiry.addUsage(new SkillUsage(Skill.ADVISOR, failedUsageOf(failure), true, millis), implementations);
                             inquiry.adviceStatus = AdviceStatus.FAILED;
                             inquiry.advice = null;
                         }

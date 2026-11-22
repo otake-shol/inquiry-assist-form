@@ -11,8 +11,9 @@ spring:
       ddl-auto: none
 
 inquiry:
-  # スキルごとの実装。いまは mock だけが有効で、ほかの値を指定すると起動を止める（実際のモデルの実装は、まだない。
-  # 足すときの差し込み口として、スキルごとの provider を残している）。設定を書かなければ、すべてモックで、外部のAIには接続しない。
+  # スキルごとの実装の名前。mock のほかは、自分で足した実装の名前（任意）。実装は、そのスキルのインターフェースを実装したクラスを
+  # dev.inquiryassist 以下に足し、@Component を付けるだけでよい。ここは、その名前に書き換える（モックは provider が mock のときだけ有効）。
+  # 実装がない、または2つ以上あるときは、起動時にメッセージを出して止まる。設定を書かなければ、すべてモックで、外部のAIには接続しない。
   # 本番（プロファイル production）では、1つでもモックがあれば起動を止める
   skills:
     reception: { provider: mock }
@@ -23,6 +24,7 @@ inquiry:
     advisor: { provider: mock }
     drafter: { provider: mock }
     translator: { provider: mock }
+  # 一次情報の検索（KnowledgeSearch）の実装の名前。スキルと同じ決まり
   knowledge:
     provider: mock
   mock:

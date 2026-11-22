@@ -3,10 +3,15 @@ package dev.inquiryassist.inquiry;
 import dev.inquiryassist.core.TechnicalMemo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Fallback;
 import org.springframework.stereotype.Component;
 
-/** 起票先が未確定のため、整形後の問いと技術メモの要約をログに出すだけの実装。 */
+/**
+ * 起票先が未確定のため、整形後の問いと技術メモの要約をログに出すだけの実装。
+ * {@link Fallback} なので、{@link FilingNotifier} の実装を別に足すと（{@code @Primary} なしで）そちらが使われ、これは使われない。
+ */
 @Component
+@Fallback
 public class LoggingFilingNotifier implements FilingNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(LoggingFilingNotifier.class);

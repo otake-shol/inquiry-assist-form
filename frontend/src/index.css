@@ -5,6 +5,8 @@
   --line: #ddd9cf;
   --card: #fffefb;
   --accent: #1d4f91;
+  /* 基調の色の、濃いほう（主のボタンに触れたときなど）。--accent を変えたら、これも変える */
+  --accent-strong: #173f75;
   --accent-ink: #ffffff;
   --accent-soft: #e6edf7;
   --user-bg: #e9eef6;
@@ -275,7 +277,7 @@ button.primary {
 }
 
 button.primary:hover:not(:disabled) {
-  background: #173f75;
+  background: var(--accent-strong);
 }
 
 button.link {
@@ -290,7 +292,7 @@ button.link {
 
 button.link:hover:not(:disabled) {
   background: none;
-  color: #173f75;
+  color: var(--accent-strong);
 }
 
 button:disabled {

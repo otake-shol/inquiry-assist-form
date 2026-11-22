@@ -61,4 +61,38 @@ class LegacyUsageApiTest extends ApiSupport {
                 .andExpect(jsonPath("$.skills.advisor").value("mock"))
                 .andExpect(jsonPath("$.skills.translator").value("mock"));
     }
+
+    @Test
+    void 実装の名前を保存した記録は_設定が変わった後も保存した名前のまま出る_名前のない記録は読み替える() throws Exception {
+        String id = filedNow("使い方を教えて", null);
+        // 設定上の実装はすべて mock。保存した名前が、bedrock と、後から差し替えた custom の記録と、名前のない古い記録
+        jdbc.update(
+                "update inquiries set usages = ?::jsonb where id = ?::uuid",
+                "["
+                        + "{\"step\":\"investigator\",\"model\":\"m1\",\"promptVersion\":\"v1\",\"inputTokens\":1,\"outputTokens\":1,"
+                        + "\"cacheReadTokens\":0,\"mock\":false,\"failed\":false,\"durationMillis\":5,\"provider\":\"bedrock\"},"
+                        + "{\"step\":\"investigator\",\"model\":\"m2\",\"promptVersion\":\"v1\",\"inputTokens\":1,\"outputTokens\":1,"
+                        + "\"cacheReadTokens\":0,\"mock\":false,\"failed\":false,\"durationMillis\":5,\"provider\":\"custom\"},"
+                        + "{\"step\":\"explainer\",\"model\":\"qwen3.6:35b\",\"promptVersion\":\"v2\",\"inputTokens\":1,\"outputTokens\":1,"
+                        + "\"cacheReadTokens\":0,\"mock\":false,\"failed\":false}"
+                        + "]",
+                id);
+
+        for (String path : new String[] {"/api/inquiries/" + id, "/api/operator/inquiries/" + id}) {
+            mvc.perform(get(path))
+                    .andExpect(jsonPath("$.trace[0].provider").value("bedrock"))
+                    .andExpect(jsonPath("$.trace[1].provider").value("custom"))
+                    .andExpect(jsonPath("$.trace[2].provider").value("ollama"));
+        }
+    }
+
+    @Test
+    void 新しい記録は_記録した時点のスキルごとの実装の名前を保存する() throws Exception {
+        String id = filedNow("使い方を教えて", null);
+
+        java.util.List<String> providers = jdbc.queryForList(
+                "select u->>'provider' from inquiries, jsonb_array_elements(usages) u where id = ?::uuid", String.class, id);
+
+        org.assertj.core.api.Assertions.assertThat(providers).isNotEmpty().containsOnly("mock");
+    }
 }

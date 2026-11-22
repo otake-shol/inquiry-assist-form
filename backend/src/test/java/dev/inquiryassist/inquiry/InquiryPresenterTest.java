@@ -46,8 +46,7 @@ class InquiryPresenterTest {
                 Map.of(),
                 InquiryProperties.Rules.defaults(),
                 List.of());
-        return new InquiryPresenter(
-                new IntakeLocales(properties), properties, SkillImplementations.from(new MockEnvironment()));
+        return new InquiryPresenter(new IntakeLocales(properties), properties);
     }
 
     private static InquiryEntity entity() {

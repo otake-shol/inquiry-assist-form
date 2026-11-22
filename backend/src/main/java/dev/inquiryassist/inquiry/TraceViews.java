@@ -7,7 +7,7 @@ import java.util.List;
 final class TraceViews {
 
     /**
-     * 手元のモデルの実装を外す前に保存した、モックでない利用量の実装名。そのころ、モックでない呼び出しは、手元のモデルだけだった。
+     * 実装の名前を持たない古い記録の、モックでない利用量の実装名。実装の名前を保存する前に、モックでない呼び出しは、手元のモデルだけだった。
      * 保存済みの記録を、これまでどおり読むために残す（モデルの名前は、保存した値をそのまま出す）。
      */
     static final String LEGACY_PROVIDER = "ollama";
@@ -19,12 +19,10 @@ final class TraceViews {
      *
      * @param entity 問い合わせ記録
      * @param properties 実行記録の有効・無効の設定
-     * @param implementations スキルごとの実装
      * @param forOperator 担当者向けなら true。本人向け（false）は、助言、下書き、訳の呼び出しを含めない
      * @return 呼び出しを実行した順の記録。無効なら null
      */
-    static List<TraceEntry> of(
-            InquiryEntity entity, InquiryProperties properties, SkillImplementations implementations, boolean forOperator) {
+    static List<TraceEntry> of(InquiryEntity entity, InquiryProperties properties, boolean forOperator) {
         if (!properties.trace().enabled()) {
             return null;
         }
@@ -33,7 +31,7 @@ final class TraceViews {
                 .filter(u -> forOperator || !isOperatorSkill(u.step()))
                 .map(u -> new TraceEntry(
                         u.step(),
-                        providerOf(u, implementations),
+                        providerOf(u),
                         u.model(),
                         u.promptVersion(),
                         u.inputTokens(),
@@ -48,18 +46,13 @@ final class TraceViews {
     }
 
     /**
-     * 保存済みの記録には、実装の名前がない。モックの呼び出しは mock。モックでない呼び出しは、設定上の実装名が mock でなければそれ
-     * （実際のモデルの実装を足したとき）。mock なら、設定が変わった後に読む、これまでの記録なので、{@link #LEGACY_PROVIDER}。
+     * 実装の名前は、記録した時点で保存した値を使う。保存した名前がない記録（この項目を加える前の記録）は、モックなら mock、
+     * そうでなければ {@link #LEGACY_PROVIDER}。
      */
-    private static String providerOf(InquiryEntity.StoredUsage usage, SkillImplementations implementations) {
-        if (usage.mock()) {
-            return SkillImplementations.MOCK;
+    private static String providerOf(InquiryEntity.StoredUsage usage) {
+        if (usage.provider() != null) {
+            return usage.provider();
         }
-        for (Skill skill : Skill.values()) {
-            if (skill.id().equals(usage.step()) && !implementations.isMock(skill)) {
-                return implementations.providerOf(skill);
-            }
-        }
-        return LEGACY_PROVIDER;
+        return usage.mock() ? SkillImplementations.MOCK : LEGACY_PROVIDER;
     }
 }

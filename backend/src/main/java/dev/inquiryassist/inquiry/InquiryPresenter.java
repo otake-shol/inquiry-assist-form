@@ -39,20 +39,14 @@ class InquiryPresenter {
 
     private final IntakeLocales locales;
     private final InquiryProperties properties;
-    private final SkillImplementations implementations;
 
     /**
      * @param locales 言語ごとの、種類、システム、機能の名前と、次の質問を決める処理
      * @param properties 実行記録の有効・無効の設定
-     * @param implementations スキルごとの実装
      */
-    InquiryPresenter(
-            IntakeLocales locales,
-            InquiryProperties properties,
-            SkillImplementations implementations) {
+    InquiryPresenter(IntakeLocales locales, InquiryProperties properties) {
         this.locales = locales;
         this.properties = properties;
-        this.implementations = implementations;
     }
 
     /**
@@ -110,7 +104,7 @@ class InquiryPresenter {
                 e.askerUnreadReply,
                 noReplyOf(e),
                 MessageBodies.viewsOf(e),
-                TraceViews.of(e, properties, implementations, false),
+                TraceViews.of(e, properties, false),
                 e.mock);
     }
 
