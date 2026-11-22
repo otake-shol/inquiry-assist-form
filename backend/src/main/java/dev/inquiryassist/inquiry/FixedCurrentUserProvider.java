@@ -20,4 +20,13 @@ public class FixedCurrentUserProvider implements CurrentUserProvider {
     public AccessScope currentScope() {
         return SCOPE;
     }
+
+    /**
+     * @param userId 投稿者の識別子
+     * @return 固定ユーザーと同じ閲覧範囲（識別子だけが違う）
+     */
+    @Override
+    public AccessScope scopeOf(String userId) {
+        return new AccessScope(userId, SCOPE.allowedRepositories());
+    }
 }

@@ -317,6 +317,18 @@ export function createClient(language: Language) {
   }
 
   /**
+   * `POST /api/operator/inquiries/{id}/investigation`。AI に調べさせる（調べ直す）。番は変わらず、
+   * 結果は担当者だけに見える。
+   * @param id 問い合わせ ID
+   */
+  function investigate(id: string): Promise<OperatorDetail> {
+    return request<OperatorDetail>(
+      "POST",
+      `/api/operator/inquiries/${id}/investigation`,
+    );
+  }
+
+  /**
    * `PUT /api/operator/inquiries/{id}/phase`。区間を変える（分かる、決まる、行われる）。
    * @param id 問い合わせ ID
    * @param phase 新しい区間
@@ -369,6 +381,7 @@ export function createClient(language: Language) {
     markRead,
     postReply,
     declineInquiry,
+    investigate,
     setPhase,
     setPlacement,
   };

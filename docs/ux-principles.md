@@ -85,6 +85,21 @@ AIは門番ではなく伴走者。使えば早く答えが出るが、使わな
 | 見送り | 見送り | 担当者から、今回は対応を見送るとの連絡がありました。（続けて、担当者が書いた理由） |
 | 取り下げ | 取り下げ | この問い合わせは取り下げました。 |
 
+### 引き継いだ理由を本人に伝える
+
+AI が担当者に引き継いだ件では、本人が自分で送っていないので、なぜ担当者に渡ったのかを伝える。「いまの状況」の「担当者が確認しています」のすぐ下に、1文を添える。`handoverReason` で出し分ける。
+
+| `handoverReason` | 日本語 | 英語 |
+| --- | --- | --- |
+| `NO_ANSWER` | 調べましたが、はっきりした答えが見つかりませんでした。担当者に引き継ぎました。 | I looked into it but couldn't find a clear answer, so I've handed this over to the support team. |
+| `TIMEOUT` | 調べるのに時間がかかっているため、担当者に引き継ぎました。調べた内容は、担当者に渡します。 | This is taking a while to look into, so I've handed it over to the support team. What I find will be passed on to them. |
+| それ以外 | 添えない | — |
+
+- 理由の1文を添えた場合、その下の案内（担当者に渡した直後の案内）では、「担当者に送りました。」を繰り返さず、添えた内容だけを伝える（「ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。」。調べた結果がなければ「ここまでの内容を添えています。…」）。
+- AI が答えられなかった件（`NO_ANSWER`）でも、「調べた結果」は従来どおり見せる（根拠がなければ見つからなかった旨、問いに答えていなければ「関連して分かったこと」）。その下に、解決したかを選ぶボタンは出さない（もう担当者の番なので）。本人に、送るかどうかを選ばせない。
+- 時間切れ（`TIMEOUT`）の件は、「調べた結果」を出さない（`answer` が `null`）。後から裏で結果が出ても、本人のページには出さない。伝えるのは担当者。
+- 調べている間の「答えを待たずに担当者へ送る」は、これまでどおり出す（時間切れを待たずに、本人が送れる）。
+
 ### 本人のページ（担当者に渡した後）
 
 - ページの上部: 左に「問い合わせアシスト」（押すと新しい問い合わせの入力へ）、右に「送った問い合わせ」と利用者の名前。未読の発言があれば「送った問い合わせ」に件数の印をつける。
@@ -164,10 +179,32 @@ AIは門番ではなく伴走者。使えば早く答えが出るが、使わな
 
 パネルの中身は、上から次のとおり。
 
-1. **いまの状態**: 誰の番か、何を待っているか（終わっていれば終わり方）を1行で。種類、システムと機能、緊急度。
+1. **いまの状態**: 誰の番か、何を待っているか（終わっていれば終わり方）を1行で。種類、システムと機能、緊急度。担当者の番のときは、渡った理由（`handoverReason`）を1行で添える（「渡った理由: …」／ "Why it came to staff: …"）。
+
+   | `handoverReason` | 日本語 | 英語 |
+   | --- | --- | --- |
+   | `SENT_NOW` | 本人が、答えを待たずに送った | The requester sent it without waiting for an answer |
+   | `UNRESOLVED` | 本人が、解決していないと答えた | The requester said it was not resolved |
+   | `BLOCKED` | 業務が止まっている | Work is blocked |
+   | `ROUTE` | この種類は、担当者が判断する | Staff decide on this type of inquiry |
+   | `NO_ANSWER` | AI が答えられなかった | AI could not answer |
+   | `TIMEOUT` | AI の調査が、時間内に終わらなかった | AI did not finish looking into it in time |
+   | `REOPENED` | 本人が、終わった件に追記した | The requester added to a closed inquiry |
 2. **区間**: 「分かる」「決まる」「行われる」の切り替え。担当者の番のときだけ押せる。
 3. **置き直す**: 折りたたみ。種類、システム、機能を選び直して「置き直す」。機能の選択肢は、選んだシステムのもの。
-4. 本人が書いた文章、入口の質問と答え、言い直し、調べた結果（従来どおり）。
+4. 本人が書いた文章、入口の質問と答え、言い直し、調べた結果（従来どおり）。「調べた結果」の見出しのすぐ下に、調査の状況（`investigation`）を1行で出す。
+
+   | 状況 | 日本語 | 英語 |
+   | --- | --- | --- |
+   | `NOT_RUN` | AI は調べていません。 | AI has not looked into this. |
+   | `RUNNING` | AI が調べています。終わると、ここに結果が出ます。 | AI is looking into this. The result will appear here when it finishes. |
+   | `DONE`、`audience: ASKER` | 本人も、この結果を見ています。 | The requester has seen this result too. |
+   | `DONE`、`audience: OPERATOR` | この結果は、本人には見せていません。 | The requester has not been shown this result. |
+   | `FAILED` | AI の調査は失敗しました。 | AI's investigation failed. |
+
+   - `unconfirmedQuestion` が `true` のときは、続けて「本人が確かめていない言い直しをもとに調べています。」／ "This is based on a restatement the requester has not confirmed." を出す。
+   - 調べ直せるとき（終わっていない、言い直しがある、調べている最中でない）は、ボタンを出す。調べたことがなければ「AI に調べさせる」／ "Have AI look into it"、あれば「調べ直す」／ "Look into it again"。ボタンの下に「番は変わりません。結果は、担当者だけに見えます。」／ "The turn does not change. Only staff can see the result." を添える。
+   - 開いているパネルの件に、担当者のストリームの `updated` が届いたら、詳細を取り直す（裏での調査が終わると、開いたままのパネルに結果が出る）。
 5. **やり取り**: 担当者の発言は右、本人の追記は左。発言の種類（質問、結果、見送りの連絡）を小さく示す。
 6. **本人に送る**（担当者の番のときだけ）: 入力欄1つと、2つのボタン「聞き返す」「結果を伝える」。押したボタンで、本人の番になったときに本人が何を求められるかが決まる。ボタンの下に、違いを1行で添える（「聞き返す: 本人の返事を待ちます」「結果を伝える: 本人が解決したかを確かめます」）。
 7. **見送る**（担当者の番のときだけ。折りたたみ）: 理由の種類（再現しない、既知の制限、対象外、重複、その他）と、理由の文章、「見送りとして終える」。

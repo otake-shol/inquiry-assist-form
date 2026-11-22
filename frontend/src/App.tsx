@@ -501,6 +501,12 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
             }
             language={view!.language}
             noReply={view!.noReply}
+            handoverNote={
+              view!.awaiting === "HANDLING" && view!.handoverReason !== null
+                ? (messages.asker.handoverReasonNote[view!.handoverReason] ??
+                  null)
+                : null
+            }
             busy={busy}
             onSend={async (body) =>
               (await run(() => api.postMessage(view!.id, body))) !== null

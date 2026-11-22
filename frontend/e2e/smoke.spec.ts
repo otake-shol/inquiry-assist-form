@@ -351,6 +351,7 @@ test("根拠を確かめられなかったことは本人には見せず担当�
 /**
  * `[的外れ]` では説明が「問いに答えていない」と判定する。
  * 本人の画面では、答えを確認できなかったと先に示し、説明は「関連して分かったこと」として出す。
+ * AI が答えられなかった件は、本人に選ばせずに、担当者へ引き継ぐ。
  */
 test("問いに答えていない結果は関連して分かったこととして示す", async ({
   page,
@@ -372,6 +373,16 @@ test("問いに答えていない結果は関連して分かったこととし�
   await expect(
     page.getByRole("heading", { name: "関連して分かったこと" }),
   ).toBeVisible();
+  // 送るかどうかを選ばせない。引き継いだことと、その理由を伝える
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+  await expect(
+    page.getByText(
+      /はっきりした答えが見つかりませんでした。担当者に引き継ぎました/,
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "解決しました" })).toHaveCount(
+    0,
+  );
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
@@ -786,6 +797,69 @@ test("聞き返しに返事がないまま期間が過ぎると取り下げで�
 
   await page.goto("/operator");
   await expect(cardIn(/^担当者の番/)).toBeVisible();
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * 調査が時間内に終わらないと、打ち切らずに担当者へ引き継ぎ、調査は裏で続ける。
+ * 結果は担当者だけに届き、本人のページには出ない。担当者は、調べ直しを頼める。
+ *
+ * `[遅延]` の調査は6秒かかる。スモークの API は、引き継ぐまでの時間を3秒にして起動する
+ * （`playwright.config.ts` の `INQUIRY_RULES_ANSWER_TIMEOUT`）。手元で起動済みの API を使い回す場合も、
+ * 同じ環境変数を付けて起動しておく。
+ */
+test("調査が時間切れになると担当者に引き継ぎ、裏で調べた結果は担当者だけに届く", async ({
+  page,
+}) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+  const mark = `時間切れ確認 ${Date.now()}`;
+
+  await startByText(page, `${mark} 請求書の宛名を知りたい [遅延]`);
+  await answerUnknownAndConfirm(page);
+
+  // 失敗ではなく、引き継ぎとして伝える。調べた結果は出さない
+  await expect(
+    page.getByText(/調べるのに時間がかかっているため、担当者に引き継ぎました/),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "調べた結果" })).toHaveCount(
+    0,
+  );
+  const askerUrl = page.url();
+
+  // 担当者のパネル: 渡った理由が分かり、裏での調査が終わると、開いたままのパネルに結果が出る
+  await page.goto("/operator");
+  await page
+    .getByRole("region", { name: "受付一覧" })
+    .getByRole("region", { name: /^担当者の番/ })
+    .getByRole("listitem")
+    .filter({ hasText: mark })
+    .getByRole("button")
+    .click();
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+  await expect(
+    detail.getByText(/AI の調査が、時間内に終わらなかった/),
+  ).toBeVisible();
+  await expect(
+    detail.getByText("この結果は、本人には見せていません。"),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(detail.getByText("分かったこと")).toBeVisible();
+
+  // 担当者は、調べ直しを頼める。番は変わらない
+  await detail.getByRole("button", { name: "調べ直す" }).click();
+  await expect(
+    detail.getByText("この結果は、本人には見せていません。"),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(detail.getByLabel("本人に送る")).toBeVisible();
+
+  // 本人のページには、裏で調べた結果を出さない
+  await page.goto(askerUrl);
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "調べた結果" })).toHaveCount(
+    0,
+  );
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);

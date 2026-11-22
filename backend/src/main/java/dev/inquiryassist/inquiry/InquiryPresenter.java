@@ -64,7 +64,8 @@ class InquiryPresenter {
     InquiryView toView(InquiryEntity e) {
         String lang = viewerOf(e);
         IntakeNext next = e.awaiting == Awaiting.INTAKE_ANSWER ? locales.planner(lang).next(e.snapshot()) : null;
-        InquiryView.AnswerView answer = e.answerGrounded == null
+        // 裏での調査の結果は、担当者だけに見せる
+        InquiryView.AnswerView answer = e.answerGrounded == null || e.investigationAudience == InvestigationAudience.OPERATOR
                 ? null
                 : new InquiryView.AnswerView(
                         e.answerGrounded,
@@ -104,6 +105,7 @@ class InquiryPresenter {
                 InquiryStateMachine.canSendNow(e.state(), e.context(next)),
                 e.sentImmediately,
                 e.handedOverAt,
+                e.handoverReason,
                 e.askerUnreadReply,
                 noReplyOf(e),
                 MessageBodies.viewsOf(e),
@@ -291,6 +293,21 @@ class InquiryPresenter {
             question = new InquiryView.QuestionView(q.id(), q.kind(), q.text(), q.options(), q.allowsText(), q.canSkip());
         }
         return new InquiryView.IntakeView(entries(e, lang), question, next instanceof IntakeNext.Complete);
+    }
+
+    /**
+     * 調査の状況を作る（担当者向け）。結果を誰に見せるかは、終わっているときだけ。
+     *
+     * @param e 問い合わせ記録
+     * @return 調査の状況
+     */
+    OperatorDetail.InvestigationView investigationOf(InquiryEntity e) {
+        return new OperatorDetail.InvestigationView(
+                e.investigationStatus,
+                e.investigationStatus == InvestigationStatus.DONE ? e.investigationAudience : null,
+                e.investigationStartedAt,
+                e.investigationFinishedAt,
+                e.investigationUnconfirmedQuestion);
     }
 
     /**

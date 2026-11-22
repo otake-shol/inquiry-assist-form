@@ -94,7 +94,9 @@ interface ResultProps {
 
 /**
  * 調べた結果。根拠があれば本人向けの説明を主に示し、資料と詳しい内容は折りたたむ。
- * 根拠がなければ見つからなかったと伝え、担当者に送ることを主のボタンにする。
+ * 根拠がなければ見つからなかったと伝え、問いに答えていなければ「関連して分かったこと」として示す。
+ * 本人が確かめるのは、根拠があり問いに答えている結果だけ（答えられなかった件は API が担当者に渡すので、
+ * 本人に送らせる選択肢は無い）。
  * 「やってほしい」で自分でできる手順が見つかったときは、「自分でできました」「担当者に頼む」を出す。
  * @param props 結果と操作の受け口
  */
@@ -170,43 +172,21 @@ export function Result({
       )}
       {awaitingResolution && (
         <div className="actions">
-          {answered ? (
-            <>
-              <button
-                type="button"
-                className="primary"
-                disabled={busy}
-                onClick={() => onResolve(true)}
-              >
-                {doForMe ? TEXT.doneByMyself : TEXT.resolved}
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onResolve(false)}
-              >
-                {doForMe ? TEXT.askStaff : TEXT.notResolved}
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="primary"
-                disabled={busy}
-                onClick={() => onResolve(false)}
-              >
-                {doForMe ? TEXT.askStaff : TEXT.sendToStaff}
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onResolve(true)}
-              >
-                {doForMe ? TEXT.doneByMyself : TEXT.resolved}
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            className="primary"
+            disabled={busy}
+            onClick={() => onResolve(true)}
+          >
+            {doForMe ? TEXT.doneByMyself : TEXT.resolved}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onResolve(false)}
+          >
+            {doForMe ? TEXT.askStaff : TEXT.notResolved}
+          </button>
         </div>
       )}
     </div>

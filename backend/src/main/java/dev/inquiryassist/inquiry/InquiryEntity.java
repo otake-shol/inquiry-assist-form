@@ -16,6 +16,7 @@ import dev.inquiryassist.core.lifecycle.Actor;
 import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.Ending;
+import dev.inquiryassist.core.lifecycle.HandoverReason;
 import dev.inquiryassist.core.lifecycle.HistoryEntry;
 import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
 import dev.inquiryassist.core.lifecycle.InquiryState;
@@ -45,6 +46,9 @@ import org.hibernate.type.SqlTypes;
  */
 @Entity
 @Table(name = "inquiries")
+// 変えた列だけを更新する。読み込んだ記録を、別のスレッドの直接の更新（既読、未読の解除）と重なる短い間に保存しても、
+// 変えていない列（既読の時刻など）を古い値で上書きしない
+@org.hibernate.annotations.DynamicUpdate
 class InquiryEntity {
 
     /** 保存する出典。照合結果つき。 */
@@ -241,6 +245,36 @@ class InquiryEntity {
     @Column(name = "revision_notes", nullable = false)
     List<String> revisionNotes = new ArrayList<>();
 
+    /** 直近に担当者へ渡した理由。渡したことがなければ null。聞き返しへの返事などでは変えない。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "handover_reason")
+    HandoverReason handoverReason;
+
+    /** 調査の状況。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "investigation_status", nullable = false)
+    InvestigationStatus investigationStatus = InvestigationStatus.NOT_RUN;
+
+    /**
+     * 保存している調査の結果を誰に見せるか。結果がなければ null。調査の最中や失敗の後も、前の結果が残っていれば、その結果の分を持つ
+     * （本人向けの答えを隠すかどうかは、これで決める）。
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "investigation_audience")
+    InvestigationAudience investigationAudience;
+
+    /** 直近の調査を始めた時刻。 */
+    @Column(name = "investigation_started_at")
+    Instant investigationStartedAt;
+
+    /** 直近の調査が終わった（または失敗した）時刻。調べている最中は null。 */
+    @Column(name = "investigation_finished_at")
+    Instant investigationFinishedAt;
+
+    /** 調査のもとにした問い（言い直し）を、本人が確かめていないか。 */
+    @Column(name = "investigation_unconfirmed_question", nullable = false)
+    boolean investigationUnconfirmedQuestion;
+
     /** 担当者に初めて渡した時刻。渡したことがなければ null。 */
     @Column(name = "handed_over_at")
     Instant handedOverAt;
@@ -255,10 +289,15 @@ class InquiryEntity {
     @Column(name = "asker_unread_reply", nullable = false)
     boolean askerUnreadReply;
 
-    @Column(name = "slack_notified", nullable = false)
+    /**
+     * Slack に投稿できたか。投稿の結果は、保存の確定後に別のスレッドが直接更新する（{@link InquiryRepository#markSlackResult}）。
+     * 記録を読み込んで保存し直す操作（裏での調査の結果の保存など）が、古い値で上書きしないよう、記録の保存では更新しない。
+     */
+    @Column(name = "slack_notified", nullable = false, updatable = false)
     boolean slackNotified;
 
-    @Column(name = "slack_error")
+    /** Slack への投稿の失敗。{@link #slackNotified} と同じ理由で、記録の保存では更新しない。 */
+    @Column(name = "slack_error", updatable = false)
     String slackError;
 
     @JdbcTypeCode(SqlTypes.JSON)
@@ -461,6 +500,9 @@ class InquiryEntity {
         }
         if (transition.event() == dev.inquiryassist.core.lifecycle.HistoryEvent.REOPENED) {
             declined = null;
+        }
+        if (transition.handoverReason() != null) {
+            handoverReason = transition.handoverReason();
         }
         history.add(new HistoryEntry(
                 now, transition.actor(), transition.event(), phase, turn, awaiting, ending, detail));

@@ -55,20 +55,22 @@ public record InquiryProperties(
      * @param noReply 返事がないときの期間
      * @param sweepEnabled 決まりの判定を、定期的に行うか
      * @param sweepInterval 判定の間隔
+     * @param answerTimeout 本人が待つ調査を、担当者に引き継ぐまでの時間
      */
     public record Rules(
             @DefaultValue("Asia/Tokyo") ZoneId zone,
             @DefaultValue NoReply noReply,
             @DefaultValue("true") boolean sweepEnabled,
-            @DefaultValue("15m") Duration sweepInterval) {
+            @DefaultValue("15m") Duration sweepInterval,
+            @DefaultValue("60s") Duration answerTimeout) {
 
         /**
          * 既定の設定。
          *
-         * @return 東京の時間帯、5営業日で知らせて、さらに5営業日で終える、15分ごとに判定する設定
+         * @return 東京の時間帯、5営業日で知らせて、さらに5営業日で終える、15分ごとに判定する、調査は60秒で引き継ぐ設定
          */
         public static Rules defaults() {
-            return new Rules(ZoneId.of("Asia/Tokyo"), new NoReply(5, 5), true, Duration.ofMinutes(15));
+            return new Rules(ZoneId.of("Asia/Tokyo"), new NoReply(5, 5), true, Duration.ofMinutes(15), Duration.ofSeconds(60));
         }
 
         /**

@@ -16,11 +16,12 @@ class InquiryTypeTest {
     }
 
     @Test
-    void 使い方と仕組みは答えの後に本人が確かめる() {
+    void 使い方と仕組みは根拠があり問いに答えているときだけ本人が確かめ_答えられなければ担当者に送る() {
         for (InquiryType type : List.of(InquiryType.HOW_TO, InquiryType.HOW_IT_WORKS)) {
             assertThat(type.filesAfterAnswer(true, true)).isFalse();
-            assertThat(type.filesAfterAnswer(true, false)).isFalse();
-            assertThat(type.filesAfterAnswer(false, false)).isFalse();
+            // 本人に、送るかどうかを選ばせない（根拠がない、または問いに答えていない）
+            assertThat(type.filesAfterAnswer(true, false)).isTrue();
+            assertThat(type.filesAfterAnswer(false, false)).isTrue();
         }
     }
 

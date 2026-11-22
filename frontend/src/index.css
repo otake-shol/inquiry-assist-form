@@ -1565,3 +1565,26 @@ blockquote {
   color: var(--muted);
   font-size: 0.85rem;
 }
+
+.handover-reason {
+  margin: 0 0 12px;
+}
+
+.op-handover-reason,
+.op-investigation {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+}
+
+.op-investigation {
+  color: var(--muted);
+}
+
+.op-investigate {
+  margin: 8px 0 12px;
+}
+
+.op-investigate .op-muted {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+}

@@ -166,6 +166,7 @@ export function makeView(overrides: Partial<InquiryView> = {}): InquiryView {
     unreadReply: false,
     noReply: null,
     closedBy: null,
+    handoverReason: null,
     mock: true,
     ...overrides,
   };
@@ -404,6 +405,14 @@ export function makeDetail(
     ...HANDLING_STATE,
     declined: null,
     closedBy: null,
+    handoverReason: "ROUTE",
+    investigation: {
+      status: "NOT_RUN",
+      audience: null,
+      startedAt: null,
+      finishedAt: null,
+      unconfirmedQuestion: false,
+    },
     noReply: null,
     filedAt: "2026-11-21T05:00:00Z",
     askerId: "local-user",

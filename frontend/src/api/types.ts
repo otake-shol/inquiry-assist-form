@@ -47,6 +47,35 @@ export interface Declined {
   reason: string;
 }
 
+/**
+ * 担当者に渡した理由（直近に渡したときの理由）。本人が答えを待たずに送った、解決していないと答えた、
+ * 業務が止まっている、種類の経路、AI が答えられなかった、調査の時間切れ、終わった件への追記。
+ */
+export type HandoverReason =
+  | "SENT_NOW"
+  | "UNRESOLVED"
+  | "BLOCKED"
+  | "ROUTE"
+  | "NO_ANSWER"
+  | "TIMEOUT"
+  | "REOPENED";
+
+/** AI の調査の状況。 */
+export type InvestigationStatus = "NOT_RUN" | "RUNNING" | "DONE" | "FAILED";
+
+/** 担当者向けの、調査の状況（`GET /api/operator/inquiries/{id}` の `investigation`）。 */
+export interface Investigation {
+  status: InvestigationStatus;
+  /** 結果を誰に見せたか。本人が待っている間に出た答えは `ASKER`、裏での調査の結果は `OPERATOR`。`DONE` のときだけ非 null */
+  audience: "ASKER" | "OPERATOR" | null;
+  /** 直近の調査を始めた時刻 */
+  startedAt: string | null;
+  /** 直近の調査が終わった（または失敗した）時刻 */
+  finishedAt: string | null;
+  /** 調査のもとにした言い直しを、本人が確かめていないか（業務が止まっている件） */
+  unconfirmedQuestion: boolean;
+}
+
 /** 問い合わせを終わらせた人。時間は、返事がないまま期間が過ぎたこと。 */
 export type ClosedBy = "ASKER" | "OPERATOR" | "TIME";
 
@@ -242,6 +271,8 @@ export interface InquiryView extends StateFields {
   declined: Declined | null;
   /** 終わらせた人（終わっていない件は null） */
   closedBy: ClosedBy | null;
+  /** 直近に担当者へ渡した理由（渡したことがなければ null） */
+  handoverReason: HandoverReason | null;
   urgency: Urgency;
   /** 種類。決まっていなければ null */
   type: Placement<InquiryTypeId> | null;
@@ -382,6 +413,10 @@ export interface OperatorDetail extends StateFields {
   declined: Declined | null;
   /** 終わらせた人（終わっていない件は null） */
   closedBy: ClosedBy | null;
+  /** 直近に担当者へ渡した理由 */
+  handoverReason: HandoverReason | null;
+  /** AI の調査の状況 */
+  investigation: Investigation;
   /** 返事がないときの予定（本人の返事を待っている間だけ非 null） */
   noReply: NoReply | null;
   filedAt: string;

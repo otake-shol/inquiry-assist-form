@@ -28,6 +28,26 @@ interface InquiryRepository extends JpaRepository<InquiryEntity, UUID> {
     @Query("select e.id from InquiryEntity e where e.awaiting in :awaiting")
     List<UUID> findIdsByAwaitingIn(@Param("awaiting") java.util.Collection<dev.inquiryassist.core.lifecycle.Awaiting> awaiting);
 
+    /**
+     * 調査を始める。調べている最中でなければ、状況を {@code RUNNING} にする（同時に始めようとした一方だけが1件を更新する）。
+     * 版を進めるので、始める前に読み込んだ記録を保存し直そうとする操作は、競合として拒否される（古い状況で上書きしない）。
+     */
+    @Transactional
+    @Modifying(clearAutomatically = true)
+    @Query("update InquiryEntity e set e.investigationStatus = dev.inquiryassist.inquiry.InvestigationStatus.RUNNING,"
+            + " e.investigationStartedAt = :now, e.investigationFinishedAt = null,"
+            + " e.investigationUnconfirmedQuestion = :unconfirmed, e.version = e.version + 1"
+            + " where e.id = :id and e.investigationStatus <> dev.inquiryassist.inquiry.InvestigationStatus.RUNNING")
+    int startInvestigation(
+            @Param("id") UUID id, @Param("now") Instant now, @Param("unconfirmed") boolean unconfirmed);
+
+    /** 起動時に、調べている最中のまま残っている調査を失敗にする。楽観ロックの対象外で、起動直後の1回だけ使う。 */
+    @Transactional
+    @Modifying(clearAutomatically = true)
+    @Query("update InquiryEntity e set e.investigationStatus = dev.inquiryassist.inquiry.InvestigationStatus.FAILED,"
+            + " e.investigationFinishedAt = :now where e.investigationStatus = dev.inquiryassist.inquiry.InvestigationStatus.RUNNING")
+    int failRunningInvestigations(@Param("now") Instant now);
+
     /** 返信を読んだことにする。楽観ロックの対象外の列だけを更新し、取得が他の操作と競合しないようにする。 */
     @Transactional
     @Modifying(clearAutomatically = true)

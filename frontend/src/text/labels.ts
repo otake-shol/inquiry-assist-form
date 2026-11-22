@@ -15,7 +15,7 @@ export interface HandoverText {
 
 /**
  * 担当者に渡したことを伝える案内を決める。渡し方（業務が止まっている、答えを待たずに送った、
- * 調べた結果を添えた、入力を添えた）で、添えた内容の言い方が変わる。
+ * 調べた結果を添えた、入力を添えた、AI が引き継いだ）で、添えた内容の言い方が変わる。
  * @param view 担当者に渡したことのある問い合わせ
  * @param filedGuidance 担当者に送った後の案内文（API の設定）
  * @param handover 辞書の、渡した直後の案内（`messages.asker.handover`）
@@ -25,8 +25,15 @@ export function handoverText(
   filedGuidance: string | null,
   handover: Messages["asker"]["handover"],
 ): HandoverText {
-  const lead =
-    view.urgency === "BLOCKED" && view.sentImmediately
+  // AI が引き継いだ件は、引き継いだことと理由を別の文で伝える（Exchange の handoverNote）。
+  // 同じことを2度言わないよう、ここでは添えた内容だけを伝える
+  const byAi =
+    view.handoverReason === "NO_ANSWER" || view.handoverReason === "TIMEOUT";
+  const lead = byAi
+    ? view.answer !== null
+      ? handover.attachedWithAnswer
+      : handover.attachedPlain
+    : view.urgency === "BLOCKED" && view.sentImmediately
       ? handover.blocked
       : view.sentImmediately
         ? handover.immediate

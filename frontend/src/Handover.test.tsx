@@ -851,3 +851,87 @@ describe("本人のページ: 時間で「取り下げ」になった件", () =>
     expect(screen.queryByLabelText("追加で伝える")).not.toBeInTheDocument();
   });
 });
+
+describe("本人のページ: 引き継いだ理由", () => {
+  const NO_ANSWER =
+    "調べましたが、はっきりした答えが見つかりませんでした。担当者に引き継ぎました。";
+  const TIMEOUT =
+    "調べるのに時間がかかっているため、担当者に引き継ぎました。調べた内容は、担当者に渡します。";
+
+  it.each([
+    ["NO_ANSWER", NO_ANSWER],
+    ["TIMEOUT", TIMEOUT],
+  ] as const)(
+    "%s のとき、「担当者が確認しています」のすぐ下に理由の1文を添える",
+    async (reason, text) => {
+      openInquiry(makeFiledView({ handoverReason: reason, messages: [] }));
+
+      const status = await screen.findByText("担当者が確認しています");
+      expect(status.nextElementSibling).toBe(screen.getByText(text));
+      expect(document.body.textContent).not.toMatch(
+        /NO_ANSWER|TIMEOUT|handoverReason/,
+      );
+    },
+  );
+
+  it.each([
+    "SENT_NOW",
+    "UNRESOLVED",
+    "BLOCKED",
+    "ROUTE",
+    "REOPENED",
+    null,
+  ] as const)("%s のときは、理由の文を添えない", async (reason) => {
+    openInquiry(makeFiledView({ handoverReason: reason, messages: [] }));
+
+    await screen.findByText("担当者が確認しています");
+    expect(screen.queryByText(NO_ANSWER)).not.toBeInTheDocument();
+    expect(screen.queryByText(TIMEOUT)).not.toBeInTheDocument();
+    expect(document.querySelector(".handover-reason")).toBeNull();
+  });
+
+  it("担当者が確認している間だけ添える（聞き返された後や、終わった後は添えない）", async () => {
+    openInquiry(
+      makeFiledView({
+        ...ASKER_REPLY_STATE,
+        handoverReason: "NO_ANSWER",
+        messages: [
+          makeMessage({ id: "m1", kind: "ASK", body: "いつからですか。" }),
+        ],
+      }),
+    );
+    await screen.findByText("担当者から質問が届いています");
+    expect(screen.queryByText(NO_ANSWER)).not.toBeInTheDocument();
+    cleanup();
+
+    openInquiry(
+      makeFiledView({
+        ...closedState("RESOLVED"),
+        handoverReason: "TIMEOUT",
+        messages: [],
+      }),
+    );
+    await screen.findByText("解決済み", { selector: ".handling-status" });
+    expect(screen.queryByText(TIMEOUT)).not.toBeInTheDocument();
+  });
+
+  it("答えられなかった件を開き直しても、調べた結果は見せ、解決したかを選ぶボタンは出さない", async () => {
+    openInquiry(
+      makeFiledView({
+        handoverReason: "NO_ANSWER",
+        answer: { ...groundedAnswer, grounded: false, askerExplanation: null },
+        structured: makeStructuredView().structured,
+        sentImmediately: false,
+        messages: [],
+      }),
+    );
+
+    expect(
+      await screen.findByText("手元の資料からは答えを見つけられませんでした。"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(NO_ANSWER)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /解決しました|担当者に送る/ }),
+    ).not.toBeInTheDocument();
+  });
+});

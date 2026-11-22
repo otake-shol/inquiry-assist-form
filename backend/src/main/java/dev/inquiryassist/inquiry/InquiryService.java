@@ -5,19 +5,14 @@ import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiResult;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.AnsweredQuestion;
-import dev.inquiryassist.core.Citation;
-import dev.inquiryassist.core.CitationVerifier;
 import dev.inquiryassist.core.FollowUpQuestion;
 import dev.inquiryassist.core.FunctionOption;
 import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.StructuredInquiry;
 import dev.inquiryassist.core.SystemOption;
-import dev.inquiryassist.core.TechnicalMemo;
 import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.Usage;
-import dev.inquiryassist.core.ZeroAnswer;
-import dev.inquiryassist.core.intake.AnswerKind;
 import dev.inquiryassist.core.intake.IntakeCatalog;
 import dev.inquiryassist.core.intake.IntakeEntries;
 import dev.inquiryassist.core.intake.IntakeEntry;
@@ -30,8 +25,6 @@ import dev.inquiryassist.core.intake.QuestionMismatchException;
 import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
 import dev.inquiryassist.core.lifecycle.Transition;
-import dev.inquiryassist.core.skill.AnswerPipeline;
-import dev.inquiryassist.core.skill.ExplanationFailedException;
 import dev.inquiryassist.core.skill.Interview;
 import dev.inquiryassist.core.skill.InterviewerSkill;
 import dev.inquiryassist.core.skill.Prefill;
@@ -41,19 +34,13 @@ import dev.inquiryassist.core.skill.ReceptionSkill;
 import dev.inquiryassist.core.skill.RestaterSkill;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.core.skill.SkillUsage;
-import dev.inquiryassist.inquiry.InquiryEntity.StoredCitation;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 問い合わせの段階遷移と、種類ごとの経路を実装するアプリケーション層（契約書「段階の遷移」「入口の質問」）。
@@ -79,60 +66,51 @@ public class InquiryService {
     private final ReceptionSkill reception;
     private final InterviewerSkill interviewer;
     private final RestaterSkill restater;
-    private final AnswerPipeline pipeline;
     private final InquiryRepository repository;
     private final CurrentUserProvider users;
-    private final FilingNotifier notifier;
-    private final TransactionTemplate transaction;
     private final SkillImplementations implementations;
     private final InquiryProperties properties;
     private final IntakeLocales locales;
     private final InquiryPresenter presenter;
-    private final ApplicationEventPublisher events;
-    private final Set<UUID> generating = ConcurrentHashMap.newKeySet();
+    private final InquiryCommitter committer;
+    private final InvestigationRunner runner;
 
     /**
      * @param reception 受付
      * @param interviewer 聞き手
      * @param restater 言い直し
-     * @param pipeline 調査、照合、説明の流れ
      * @param repository 問い合わせ記録の保存先
      * @param users 現在の投稿者
-     * @param notifier 担当者への通知先
-     * @param transaction 保存時のトランザクション
      * @param implementations スキルごとの実装（失敗した呼び出しの利用量の補完に使う）
      * @param properties 担当者の表示名など
      * @param locales 言語ごとの、種類、システム、機能の名前とマスの設定、入口の質問を決める処理
      * @param presenter 本人向けの表現を作る
-     * @param events 担当者へ送った確定後にイベントを発行する
+     * @param committer 遷移の反映と保存（担当者への通知と、確定後のイベントを含む）
+     * @param runner 調査の実行と、結果の保存
      */
     public InquiryService(
             ReceptionSkill reception,
             InterviewerSkill interviewer,
             RestaterSkill restater,
-            AnswerPipeline pipeline,
             InquiryRepository repository,
             CurrentUserProvider users,
-            FilingNotifier notifier,
-            TransactionTemplate transaction,
             SkillImplementations implementations,
             InquiryProperties properties,
             IntakeLocales locales,
             InquiryPresenter presenter,
-            ApplicationEventPublisher events) {
+            InquiryCommitter committer,
+            InvestigationRunner runner) {
         this.reception = reception;
         this.interviewer = interviewer;
         this.restater = restater;
-        this.pipeline = pipeline;
         this.repository = repository;
         this.users = users;
-        this.notifier = notifier;
-        this.transaction = transaction;
         this.implementations = implementations;
         this.properties = properties;
         this.locales = locales;
         this.presenter = presenter;
-        this.events = events;
+        this.committer = committer;
+        this.runner = runner;
     }
 
     /**
@@ -242,7 +220,7 @@ public class InquiryService {
         if (inquiry.awaiting == Awaiting.QUESTION_CONFIRMATION) {
             inquiry.urgency = urgency;
             if (urgency == Urgency.BLOCKED) {
-                return presenter.toView(commit(inquiry, handOver(inquiry, true)));
+                return presenter.toView(investigateAfterBlocked(commit(inquiry, handOver(inquiry, true))));
             }
             return presenter.toView(commit(inquiry, null));
         }
@@ -352,63 +330,29 @@ public class InquiryService {
 
     /**
      * 0次回答を生成する。調査、照合、説明の順に進め、照合できた事実だけから本人向けの説明を作る。
-     * 種類ごとの経路（{@link InquiryType#filesAfterAnswer}）に従い、担当者へ送るか、本人が結果を確かめる段階に進める。
-     * 同じ問い合わせの生成は同時に1つだけ走らせる。
+     * 種類ごとの経路（{@link InquiryType#filesAfterAnswer}）に従い、担当者へ渡すか、本人が結果を確かめる段階に進める。
+     * 同じ問い合わせの調査は同時に1つだけ走らせる。
+     *
+     * <p>調査が {@code inquiry.rules.answer-timeout} を超えたら、その時点で担当者に渡して返す（調査は止めず、裏で続けて、
+     * 結果は担当者だけに渡す）。このとき本人向けの回答は返さない。
      *
      * <p>説明だけが失敗した場合は、調査と照合の結果（技術メモ、出典と照合結果、利用量）を保存したうえで
      * 失敗を投げる。待っていることは {@code INVESTIGATION} のままで、本人向けの回答は返さない。
      *
      * @param id 問い合わせの識別子
      * @param progress 進捗の通知先
-     * @return 完了後の問い合わせ
-     * @throws InvalidStateException 調査を待っている状態でない、または同じ問い合わせの生成が進行中の場合
+     * @return 完了後（または時間切れで担当者に渡した後）の問い合わせ
+     * @throws InvalidStateException 同じ問い合わせの調査が進行中の場合
+     * @throws dev.inquiryassist.core.lifecycle.IllegalTransitionException 調査を待っている状態でない場合
      * @throws dev.inquiryassist.core.AiRefusalException モデルが回答を拒否した場合
      * @throws dev.inquiryassist.core.AiUnavailableException モデルを呼び出せなかった場合
      */
     public InquiryView generateAnswer(UUID id, ProgressListener progress, String lang) {
-        if (!generating.add(id)) {
-            throw new InvalidStateException("0次回答を生成中です");
-        }
-        try {
-            InquiryEntity inquiry = load(id, lang);
-            requireAwaiting(inquiry, Awaiting.INVESTIGATION);
-            AccessScope scope = users.currentScope();
-            AnswerPipeline.Result result;
-            long start = System.nanoTime();
-            try {
-                result = pipeline.run(inquiry.structured(), scope, progress, inquiry.language);
-            } catch (AiUnavailableException | AiRefusalException e) {
-                // 調査の失敗。分かる場合は、失敗した呼び出しの利用量を記録する
-                inquiry.addUsage(new SkillUsage(
-                        Skill.INVESTIGATOR, failedUsageOf(e, Skill.INVESTIGATOR), true, millisSince(start)));
-                commit(inquiry, null);
-                throw e;
-            } catch (ExplanationFailedException e) {
-                // 費用をかけた調査の結果は失わない。本人向けの回答は作らない（answerGrounded は null のまま）
-                inquiry.answerGrounded = null;
-                inquiry.answerAnswered = null;
-                inquiry.askerExplanation = null;
-                inquiry.technicalMemo = AnswerPipeline.memoOf(e.investigation());
-                inquiry.citations = storedCitations(e.investigation().citationResults());
-                e.usages().forEach(inquiry::addUsage);
-                commit(inquiry, null);
-                throw (RuntimeException) e.getCause();
-            }
-            ZeroAnswer answer = result.answer();
-            inquiry.answerGrounded = answer.grounded();
-            inquiry.answerAnswered = answer.answered();
-            inquiry.askerExplanation = answer.askerExplanation();
-            inquiry.technicalMemo = answer.memo();
-            inquiry.citations = storedCitations(result.investigation().citationResults());
-            result.usages().forEach(inquiry::addUsage);
-
-            // 種類が決まっていない場合は HOW_IT_WORKS と同じ経路（状態の遷移が決める）
-            Transition done = InquiryStateMachine.answeredByAi(
-                    inquiry.state(), inquiry.context(null), answer.grounded(), answer.answered());
-            return presenter.toView(commit(inquiry, apply(inquiry, done, false)));
-        } finally {
-            generating.remove(id);
-        }
+        InquiryEntity inquiry = load(id, lang);
+        requireAwaiting(inquiry, Awaiting.INVESTIGATION);
+        InquiryEntity saved = runner.runForAsker(id, progress);
+        saved.viewerLanguage = lang;
+        return presenter.toView(saved);
     }
 
     /**
@@ -446,8 +390,14 @@ public class InquiryService {
         InquiryEntity inquiry = load(id, lang);
         inquiry.language = lang;
         IntakeNext next = inquiry.awaiting == Awaiting.INTAKE_ANSWER ? planner(inquiry).next(inquiry.snapshot()) : null;
+        // 調査を待っている間に送った件だけ、AI の調査を裏で続ける（答えが既にある件や、言い直しがない件は調べない）
+        boolean wasInvestigating = inquiry.awaiting == Awaiting.INVESTIGATION;
         Transition transition = InquiryStateMachine.sentNow(inquiry.state(), inquiry.context(next));
-        return presenter.toView(commit(inquiry, apply(inquiry, transition, true)));
+        InquiryEntity saved = commit(inquiry, apply(inquiry, transition, true));
+        if (wasInvestigating) {
+            runner.startBackground(saved.id);
+        }
+        return presenter.toView(saved);
     }
 
     /**
@@ -581,10 +531,22 @@ public class InquiryService {
         inquiry.structuredByAi = result.value();
         inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start));
         if (inquiry.urgency == Urgency.BLOCKED) {
-            return presenter.toView(commit(inquiry, handOver(inquiry, true)));
+            return presenter.toView(investigateAfterBlocked(commit(inquiry, handOver(inquiry, true))));
         }
         inquiry.apply(InquiryStateMachine.composed(inquiry.state()), Instant.now());
         return presenter.toView(commit(inquiry, null));
+    }
+
+    /**
+     * 業務が止まっている件を担当者に渡した後に、AI の調査を裏で始める（言い直しがあり、調べない種類でない場合）。
+     * 本人は言い直しを確かめていないので、調査の状況の {@code unconfirmedQuestion} が {@code true} になる。保存の確定後に呼ぶこと。
+     */
+    private InquiryEntity investigateAfterBlocked(InquiryEntity saved) {
+        InquiryType type = saved.type();
+        if (saved.structuredByAi != null && (type == null || type.investigates())) {
+            runner.startBackground(saved.id);
+        }
+        return saved;
     }
 
     private AiResult<StructuredInquiry> restate(InquiryEntity inquiry, List<String> corrections) {
@@ -740,10 +702,6 @@ public class InquiryService {
         return usage != null ? usage : new Usage("unknown", "unknown", 0, 0, 0, implementations.isMock(skill));
     }
 
-    private static List<StoredCitation> storedCitations(List<CitationVerifier.Result> results) {
-        return new ArrayList<>(results.stream().map(InquiryService::toStored).toList());
-    }
-
     /** 詳しい質問と答えを、言い直しに渡す形にする。「わからない」は答えを null にする。 */
     private static List<AnsweredQuestion> answeredQuestions(InquiryEntity inquiry) {
         return inquiry.intake.stream()
@@ -768,73 +726,14 @@ public class InquiryService {
         return apply(inquiry, transition, immediately);
     }
 
-    /**
-     * 遷移を反映する。担当者に初めて渡す遷移なら、通知の内容を返す（通知は保存と同じトランザクションで {@link #commit} が出す）。
-     * それ以外は null。
-     */
+    /** 遷移を反映する（{@link InquiryCommitter#apply}）。 */
     private FilingNotifier.FilingNotice apply(InquiryEntity inquiry, Transition transition, boolean immediately) {
-        boolean first = inquiry.handedOverAt == null && transition.handsOver();
-        inquiry.apply(transition, Instant.now());
-        if (!first) {
-            return null;
-        }
-        inquiry.sentImmediately = immediately;
-        Placement placement = inquiry.placement();
-        return new FilingNotifier.FilingNotice(
-                inquiry.id,
-                placement.type(),
-                inquiry.urgency,
-                inquiry.utterance(),
-                placement.systemId() == null ? null : defaultCatalog().systemLabel(placement.systemId()),
-                placement.functionId() == null
-                        ? null
-                        : defaultCatalog().functionLabel(placement.systemId(), placement.functionId()),
-                inquiry.structured(),
-                inquiry.technicalMemo,
-                immediately);
+        return committer.apply(inquiry, transition, immediately);
     }
 
-    /**
-     * 保存する。担当者に初めて渡す場合は保存の確定前に通知し、通知が失敗したら保存も取り消す。
-     * すでに担当者に渡したことのある問い合わせの変更は、オペレータの画面へ更新を知らせる。
-     * 他の操作との競合は {@link InvalidStateException} にする。
-     */
+    /** 保存して、確定後に担当者へ知らせる（{@link InquiryCommitter#commit}）。 */
     private InquiryEntity commit(InquiryEntity inquiry, FilingNotifier.FilingNotice notice) {
-        inquiry.updatedAt = Instant.now();
-        InquiryEntity saved;
-        try {
-            saved = transaction.execute(status -> {
-                InquiryEntity s = repository.saveAndFlush(inquiry);
-                if (notice != null) {
-                    notifier.notifyFiled(notice);
-                }
-                return s;
-            });
-        } catch (OptimisticLockingFailureException e) {
-            throw new InvalidStateException("他の操作と競合しました。最新の状態を取得し直してください");
-        }
-        // 保存し直した記録は別のインスタンスになりうるため、見る人の言語を引き継ぐ
-        saved.viewerLanguage = inquiry.viewerLanguage;
-        if (notice != null) {
-            // 保存の確定後に配る。配信側の失敗で、確定済みの更新を失敗にしない
-            try {
-                events.publishEvent(presenter.filedEvent(saved));
-            } catch (RuntimeException e) {
-                log.error("担当者への通知イベントの配信に失敗 id={}", saved.id, e);
-            }
-        } else if (saved.handedOverAt != null) {
-            publishUpdated(saved);
-        }
-        return saved;
-    }
-
-    /** 保存の確定後に、オペレータの画面へ更新を知らせる。配信側の失敗で、確定済みの更新を失敗にしない。 */
-    private void publishUpdated(InquiryEntity saved) {
-        try {
-            events.publishEvent(presenter.updatedEvent(saved));
-        } catch (RuntimeException e) {
-            log.error("更新の通知イベントの配信に失敗 id={}", saved.id, e);
-        }
+        return committer.commit(inquiry, notice);
     }
 
     private InquiryEntity load(UUID id, String lang) {
@@ -851,16 +750,4 @@ public class InquiryService {
         InquiryStateMachine.require(inquiry.state(), expected);
     }
 
-    private static StoredCitation toStored(CitationVerifier.Result result) {
-        Citation c = result.citation();
-        return new StoredCitation(
-                c.sourceType(),
-                c.repository(),
-                c.path(),
-                c.startLine(),
-                c.endLine(),
-                c.quote(),
-                c.revision(),
-                result.verified());
-    }
 }

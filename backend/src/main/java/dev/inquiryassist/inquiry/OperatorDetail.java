@@ -7,6 +7,7 @@ import dev.inquiryassist.core.lifecycle.Actor;
 import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.Ending;
+import dev.inquiryassist.core.lifecycle.HandoverReason;
 import dev.inquiryassist.core.lifecycle.HistoryEntry;
 import dev.inquiryassist.core.lifecycle.Phase;
 import dev.inquiryassist.core.lifecycle.Turn;
@@ -40,6 +41,8 @@ import java.util.UUID;
  * @param ending 終わり方。終わっていない件は null
  * @param closedBy 終わらせた人（{@code ASKER}、{@code OPERATOR}、{@code TIME}）。終わっていない件は null
  * @param declined 見送りの内容。見送りで終わった件だけ非 null
+ * @param handoverReason 直近に担当者へ渡した理由
+ * @param investigation 調査の状況
  * @param noReply 返事がないときの決まりの予定。本人の返事（結果の確かめ、聞き返しへの返事）を待っている間だけ非 null
  * @param messages 担当者の発言と本人の追記（古い順）
  * @param history 状態の履歴（起きた順）
@@ -69,10 +72,28 @@ public record OperatorDetail(
         Ending ending,
         Actor closedBy,
         Declined declined,
+        HandoverReason handoverReason,
+        InvestigationView investigation,
         InquiryView.NoReplyView noReply,
         List<MessageView> messages,
         List<HistoryEntry> history,
         List<TraceEntry> trace) {
+
+    /**
+     * 調査の状況（契約書「調査の状況と、裏での調査」）。
+     *
+     * @param status 調査の状況
+     * @param audience 結果を誰に見せるか。{@code DONE} のときだけ非 null
+     * @param startedAt 直近の調査を始めた時刻。調べていなければ null
+     * @param finishedAt 直近の調査が終わった（または失敗した）時刻。調べている最中と、調べていなければ null
+     * @param unconfirmedQuestion 調査のもとにした問い（言い直し）を、本人が確かめていないか
+     */
+    public record InvestigationView(
+            InvestigationStatus status,
+            InvestigationAudience audience,
+            Instant startedAt,
+            Instant finishedAt,
+            boolean unconfirmedQuestion) {}
 
     /**
      * 0次回答。

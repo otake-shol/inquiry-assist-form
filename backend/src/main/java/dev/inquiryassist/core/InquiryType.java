@@ -7,9 +7,9 @@ package dev.inquiryassist.core;
  * 緊急度（{@link Urgency#BLOCKED}）として持つ。種類が決まっていない問い合わせは {@link #HOW_IT_WORKS} と同じ経路にする。
  */
 public enum InquiryType {
-    /** 使い方を知りたい。調べ、答えを本人が確かめる。 */
+    /** 使い方を知りたい。調べ、答えられれば本人が確かめ、答えられなければ担当者に渡す。 */
     HOW_TO,
-    /** 仕組みを知りたい。調べ、答えを本人が確かめる。 */
+    /** 仕組みを知りたい。調べ、答えられれば本人が確かめ、答えられなければ担当者に渡す。 */
     HOW_IT_WORKS,
     /** おかしいかもしれない。調べるが、意図した動きかは担当者が判断するため必ず担当者に送る。 */
     LOOKS_WRONG,
@@ -50,9 +50,9 @@ public enum InquiryType {
     public boolean filesAfterAnswer(boolean grounded, boolean answered) {
         return switch (this) {
             case LOOKS_WRONG -> true;
-            // 本人が自分でできる手順が見つかった場合だけ、本人に確かめてもらう
-            case DO_FOR_ME -> !(grounded && answered);
-            case HOW_TO, HOW_IT_WORKS -> false;
+            // 根拠があり、問いに答えている場合だけ、本人に確かめてもらう。答えられなかった場合は、本人に選ばせず担当者に渡す
+            // （DO_FOR_ME は、本人が自分でできる手順が見つかった場合）
+            case DO_FOR_ME, HOW_TO, HOW_IT_WORKS -> !(grounded && answered);
             case CHANGE_REQUEST -> true;
         };
     }

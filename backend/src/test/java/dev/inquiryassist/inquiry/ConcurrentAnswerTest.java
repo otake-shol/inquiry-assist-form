@@ -42,7 +42,7 @@ class ConcurrentAnswerTest {
     }
 
     @Test
-    void 生成中に今すぐ送ると生成側の保存は競合として拒否され起票は1件だけになる() throws Exception {
+    void 生成中に今すぐ送ると生成は止まらず_結果は担当者だけに保存され_起票は1件だけになる() throws Exception {
         String utterance = "[遅延] 求人の掲載期限の仕様";
         var id = IntakeSteps.toStructured(service, utterance).id();
         service.confirmStructured(id, null, "ja");
@@ -56,9 +56,13 @@ class ConcurrentAnswerTest {
 
         assertThat(sent.awaiting()).isEqualTo(Awaiting.HANDLING);
         assertThat(sent.turn()).isEqualTo(Turn.OPERATOR);
-        assertThatThrownBy(() -> generating.get(10, TimeUnit.SECONDS))
-                .hasCauseInstanceOf(InvalidStateException.class);
-        assertThat(service.get(id, "ja").sentImmediately()).isTrue();
-        assertThat(service.get(id, "ja").answer()).isNull();
+        assertThat(sent.handoverReason()).isEqualTo(dev.inquiryassist.core.lifecycle.HandoverReason.SENT_NOW);
+        // 走っている調査はそのまま続き、終わった時点の状態（担当者の番）で、裏の結果として保存される。待っていた側には本人向けの答えがない
+        InquiryView finished = generating.get(15, TimeUnit.SECONDS);
+        assertThat(finished.awaiting()).isEqualTo(Awaiting.HANDLING);
+        assertThat(finished.answer()).isNull();
+        InquiryView view = service.get(id, "ja");
+        assertThat(view.sentImmediately()).isTrue();
+        assertThat(view.answer()).isNull();
     }
 }

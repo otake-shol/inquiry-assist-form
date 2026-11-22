@@ -1019,6 +1019,177 @@ describe("英語の聞き返しに返事がないときの画面", () => {
   });
 });
 
+describe("英語の引き継ぎと調査の状況", () => {
+  it("本人のページ: 引き継いだ理由の1文が英語で出る", async () => {
+    storedEnglish();
+    installFakeFetch({
+      ...bilingualConfig(),
+      ...inquiry(
+        makeFiledView({
+          language: "en",
+          handoverReason: "NO_ANSWER",
+          messages: [],
+        }),
+      ),
+    });
+    open("/inquiries/inq-1");
+    expect(
+      await screen.findByText(
+        "I looked into it but couldn't find a clear answer, so I've handed this over to the support team.",
+      ),
+    ).toBeInTheDocument();
+    cleanup();
+
+    installFakeFetch({
+      ...bilingualConfig(),
+      ...inquiry(
+        makeFiledView({
+          language: "en",
+          handoverReason: "TIMEOUT",
+          messages: [],
+        }),
+      ),
+    });
+    open("/inquiries/inq-1");
+    expect(
+      await screen.findByText(
+        "This is taking a while to look into, so I've handed it over to the support team. What I find will be passed on to them.",
+      ),
+    ).toBeInTheDocument();
+    cleanup();
+
+    installFakeFetch({
+      ...bilingualConfig(),
+      ...inquiry(
+        makeFiledView({
+          language: "en",
+          handoverReason: "ROUTE",
+          messages: [],
+        }),
+      ),
+    });
+    open("/inquiries/inq-1");
+    await screen.findByText("The support team is looking into it");
+    expect(document.querySelector(".handover-reason")).toBeNull();
+  });
+
+  /** 英語の担当者の画面で、調査の状況と渡った理由を指定して、パネルを開く。 */
+  async function openOperatorWith(detail: Parameters<typeof makeDetail>[0]) {
+    const user = userEvent.setup();
+    storedEnglish();
+    installFakeFetch({
+      ...bilingualConfig(),
+      "GET /api/operator/inquiries": {
+        body: {
+          unreadCount: 0,
+          items: [makeItem({ read: true, language: "en" })],
+        },
+      },
+      "GET /api/operator/inquiries/op-1": {
+        body: makeDetail({
+          read: true,
+          language: "en",
+          messages: [],
+          ...detail,
+        }),
+      },
+    });
+    open("/operator");
+    await user.click(
+      await screen.findByRole("button", { name: /求人が一覧に出なくなった/ }),
+    );
+    return await screen.findByRole("region", { name: "Inquiry details" });
+  }
+
+  it.each([
+    ["SENT_NOW", "The requester sent it without waiting for an answer"],
+    ["UNRESOLVED", "The requester said it was not resolved"],
+    ["BLOCKED", "Work is blocked"],
+    ["ROUTE", "Staff decide on this type of inquiry"],
+    ["NO_ANSWER", "AI could not answer"],
+    ["TIMEOUT", "AI did not finish looking into it in time"],
+    ["REOPENED", "The requester added to a closed inquiry"],
+  ] as const)(
+    "担当者のパネル: 渡った理由の行（%s）が英語で出る",
+    async (reason, text) => {
+      const panel = await openOperatorWith({ handoverReason: reason });
+      expect(
+        await within(panel).findByText(`Why it came to staff: ${text}`),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    [{ status: "NOT_RUN", audience: null }, "AI has not looked into this."],
+    [
+      { status: "RUNNING", audience: null },
+      "AI is looking into this. The result will appear here when it finishes.",
+    ],
+    [
+      { status: "DONE", audience: "ASKER" },
+      "The requester has seen this result too.",
+    ],
+    [
+      { status: "DONE", audience: "OPERATOR" },
+      "The requester has not been shown this result.",
+    ],
+    [{ status: "FAILED", audience: null }, "AI's investigation failed."],
+  ] as const)(
+    "担当者のパネル: 調査の状況の行が英語で出る（%j）",
+    async (inv, text) => {
+      const panel = await openOperatorWith({
+        investigation: {
+          startedAt: null,
+          finishedAt: null,
+          unconfirmedQuestion: false,
+          ...inv,
+        },
+      });
+      expect(await within(panel).findByText(text)).toBeInTheDocument();
+    },
+  );
+
+  it("担当者のパネル: 注記、ボタンの2通りの名前、説明が英語で出る", async () => {
+    const panel = await openOperatorWith({
+      investigation: {
+        status: "NOT_RUN",
+        audience: null,
+        startedAt: null,
+        finishedAt: null,
+        unconfirmedQuestion: true,
+      },
+    });
+    expect(
+      await within(panel).findByText(
+        "This is based on a restatement the requester has not confirmed.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByRole("button", { name: "Have AI look into it" }),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByText(
+        "The turn does not change. Only staff can see the result.",
+      ),
+    ).toBeInTheDocument();
+    cleanup();
+    vi.unstubAllGlobals();
+
+    const again = await openOperatorWith({
+      investigation: {
+        status: "DONE",
+        audience: "OPERATOR",
+        startedAt: null,
+        finishedAt: null,
+        unconfirmedQuestion: false,
+      },
+    });
+    expect(
+      await within(again).findByRole("button", { name: "Look into it again" }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("書かれた内容の言語（lang 属性）", () => {
   it("本人の文章、言い直し、説明、AI が書いた事実には問い合わせの language、根拠の引用には ja が付く。画面の言語とは別", async () => {
     storedEnglish();

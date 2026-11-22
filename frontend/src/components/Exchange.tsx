@@ -240,6 +240,8 @@ interface FollowUpProps {
   language?: string;
   /** 返事がないときの予定 */
   noReply?: NoReply | null;
+  /** AI が引き継いだ理由の1文（「担当者が確認しています」のすぐ下）。無ければ添えない */
+  handoverNote?: string | null;
 }
 
 /**
@@ -262,6 +264,7 @@ export function FollowUp({
   onRestart,
   language,
   noReply = null,
+  handoverNote = null,
 }: FollowUpProps) {
   const { user: USER_TEXT } = useMessages();
   const hasReply = messages.some((message) => message.from === "OPERATOR");
@@ -273,6 +276,9 @@ export function FollowUp({
       <p className="handling-status" aria-live="polite">
         {statusLabel}
       </p>
+      {handoverNote !== null && (
+        <p className="handover-reason">{handoverNote}</p>
+      )}
       {!hasReply && handover !== null && (
         <div className="handover">
           <p>{handover.lead}</p>

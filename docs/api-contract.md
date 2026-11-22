@@ -45,18 +45,30 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 
 | 種類 | 調べるか | 言い直しを確定した後 |
 | --- | --- | --- |
-| `HOW_TO`、`HOW_IT_WORKS` | 調べる | 答えを本人が確かめる（`KNOW`、`RESULT_CONFIRMATION`） |
+| `HOW_TO`、`HOW_IT_WORKS`、種類が決まっていない | 調べる | 根拠があり、問いに答えている場合は、答えを本人が確かめる（`KNOW`、`RESULT_CONFIRMATION`）。AI が答えられなかった場合（根拠がない、または問いに答えていない）は、答えの完了と同時に、担当者に渡す。本人に、送るかどうかを選ばせない |
 | `LOOKS_WRONG` | 調べる | 答えの完了と同時に、担当者に渡す（意図した動きかは、担当者が判断する） |
 | `DO_FOR_ME` | 調べる | 根拠があり、問いに答えている（本人が自分でできる手順が見つかった）場合は、本人が確かめる（`KNOW`、`RESULT_CONFIRMATION`）。それ以外は、答えの完了と同時に、担当者に渡す |
 | `CHANGE_REQUEST` | 調べない | 確定と同時に、担当者に渡す |
 
-緊急度が `BLOCKED` の問い合わせは、種類にかかわらず、入口の質問を終えた時点で担当者に渡す（言い直しの確認と調査を待たない）。
+緊急度が `BLOCKED` の問い合わせは、種類にかかわらず、入口の質問を終えた時点で担当者に渡す（言い直しの確認と調査を待たない）。調査は、渡した後に裏で行う（「調査の状況と、裏での調査」の節）。
 
 ### 担当者に渡す
 
 「担当者に渡す」とは、番を担当者にすること（`turn: OPERATOR`、`awaiting: HANDLING`）。問い合わせは終わらない。
 
 - 渡したときの区間は、種類で決まる。`HOW_TO`、`HOW_IT_WORKS`、種類が決まっていない場合は `KNOW`（知識の不足のまま、担当者が答える）。`LOOKS_WRONG`、`DO_FOR_ME`、`CHANGE_REQUEST` は `DECIDE`（意図どおりか、受けるか、採るかを決める）。
+- 渡した理由を `handoverReason` に持つ（直近に渡したときの理由。InquiryView と担当者向けの詳細が返す。渡したことがなければ `null`）。
+
+  | `handoverReason` | 意味 |
+  | --- | --- |
+  | `SENT_NOW` | 本人が、答えを待たずに送った（8） |
+  | `UNRESOLVED` | 本人が、解決していないと答えた（7。結果への追記を含む） |
+  | `BLOCKED` | 業務が止まっている |
+  | `ROUTE` | 種類の経路（`LOOKS_WRONG`、`DO_FOR_ME`、`CHANGE_REQUEST`） |
+  | `NO_ANSWER` | AI が答えられなかった（`HOW_TO`、`HOW_IT_WORKS`、種類が決まっていない場合） |
+  | `TIMEOUT` | 調査が時間内に終わらなかった |
+  | `REOPENED` | 本人が、終わった件に追記した |
+
 - 初めて渡したときに、担当者に通知する（「オペレータへの通知」の節）。その時刻を `handedOverAt` に持つ。2回目以降は通知しない（担当者のボードには、番が戻ったことが即時に届く）。
 - 担当者の側の未読（`read`）を `false` にする。
 
@@ -163,6 +175,7 @@ InquiryView と担当者向けの詳細は、`noReply` を持つ。
   "canSendNow": false,
   "sentImmediately": false,
   "handedOverAt": null,
+  "handoverReason": null,
   "unreadReply": false,
   "noReply": null,
   "messages": [],
@@ -178,7 +191,8 @@ InquiryView と担当者向けの詳細は、`noReply` を持つ。
 - `intake.next.kind` は `TYPE`、`SYSTEM`、`FUNCTION`、`DETAIL`、`NOTE` のいずれか。`options` が空の質問は文章で答える。`allowsText` が `true` の質問は、選択肢のほかに文章でも答えられる。`canSkip` は `NOTE` だけが `true` になりうる。「わからない」は、`NOTE` 以外のすべての質問で選べる（画面が常に出す）。
 - `phase`、`turn`、`awaiting`、`ending` は「状態」の節のとおり。`declined` は、見送りで終わった件だけが持つ（`{ "reasonKind": "KNOWN_LIMITATION", "reason": "理由の文章" }`）。`handedOverAt` は、担当者に初めて渡した時刻（渡していなければ `null`）。
 - `structured` は、問いを組み立てた後（`awaiting` が `QUESTION_CONFIRMATION` になった時点）から非 null。項目は `summary`（本人に見せる言い直しの文章。必須）、`targetSystem`、`goal`、`whatHappened`、`expectedResult`。`urgency` は `structured` から外し、問い合わせの `urgency` に一本化する。
-- `answer` は、答えの完了後に非 null。形は従来どおり（`grounded`、`answered`、`askerExplanation`、`memo`、`citations`）。
+- `answer` は、答えの完了後に非 null。形は従来どおり（`grounded`、`answered`、`askerExplanation`、`memo`、`citations`）。裏での調査の結果（担当者だけに見せるもの）は、本人向けの InquiryView では `null` のまま（「調査の状況と、裏での調査」の節）。
+- `handoverReason` は、直近に担当者へ渡した理由（「担当者に渡す」の節）。
 - `canSendNow` は、いま「答えを待たずに担当者へ送る」（8）を実行できるか。
 - `noReply` は、本人の返事を待っている間（結果の確かめ、聞き返しへの返事）だけ非 null（「返事がないとき」の節）。
 - `closedBy` は、問い合わせを終わらせた人。`ASKER`、`OPERATOR`、`TIME`（返事がないまま期間が過ぎた）のいずれか。終わっていない件は `null`。開き直すと `null` に戻る。
@@ -409,7 +423,8 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | `done` | InquiryView | 完了。この後ストリームを閉じる |
 | `failed` | `{ "code": "AI_REFUSED", "message": "…" }` | 失敗。この後ストリームを閉じる |
 
-- 完了時: 種類ごとの経路の表のとおり。`HOW_TO` と `HOW_IT_WORKS` は、本人が確かめる（`turn: ASKER`、`awaiting: RESULT_CONFIRMATION`）。`LOOKS_WRONG` は担当者に渡す。`DO_FOR_ME` は、`answer.grounded` と `answer.answered` がともに `true` なら本人が確かめる、そうでなければ担当者に渡す。
+- 完了時: 種類ごとの経路の表のとおり。`LOOKS_WRONG` は担当者に渡す（`handoverReason: ROUTE`）。それ以外の種類は、`answer.grounded` と `answer.answered` がともに `true` なら本人が確かめ（`turn: ASKER`、`awaiting: RESULT_CONFIRMATION`）、そうでなければ担当者に渡す（`DO_FOR_ME` は `ROUTE`、ほかは `NO_ANSWER`）。担当者に渡した場合も、`done` の InquiryView の `answer` には結果が入る（本人は、調べた結果を見たうえで、引き継がれたことを知る）。
+- **時間切れ**: 調査が `inquiry.rules.answer-timeout`（既定 `60s`）を超えたら、その時点で担当者に渡し（`handoverReason: TIMEOUT`。履歴の出来事は `HANDED_OVER`、起こしたのは `TIME`）、`done` を流してストリームを閉じる。この InquiryView の `answer` は `null`。調査は打ち切らずに裏で続け、結果は担当者だけに渡す（「調査の状況と、裏での調査」の節）。長く待たせた末に、失敗を見せないため。時間切れの前に失敗した場合は、従来どおり `failed` を流す。
 - 失敗時の `code`: `AI_REFUSED`／`AI_UNAVAILABLE`／`INVALID_STATE`（`awaiting` が `INVESTIGATION` でない、または同じ問い合わせの生成が進行中）。失敗しても `awaiting` は `INVESTIGATION` のままで、再購読による再試行と「答えを待たずに担当者へ送る」（8）ができる。
 - 画面は `done` か `failed` を受けたら接続を閉じる（EventSource の自動再接続を止める）。
 
@@ -433,7 +448,7 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 
 `200` InquiryView。担当者に渡す（`sentImmediately: true`）。
 
-答えを待たずに送った後も AI の調査を裏で続け、材料を担当者に渡すのは、段階2で作る（RC-8）。いまは、送った時点で調査を行わない。
+答えを待たずに送った後も、AI の調査は裏で行い、結果を担当者に渡す（「調査の状況と、裏での調査」の節）。`handoverReason` は `SENT_NOW`。
 
 ### 9. `GET /api/inquiries/{id}`
 
@@ -486,7 +501,7 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | `[根拠なし]` | 調査 | 事実を1件も返さない。根拠なし（`grounded: false`）になる |
 | `[幽霊出典]` | 調査 | すべての事実の根拠が実在しない。照合で全部落ち、根拠なしになる。事実は `memo.unconfirmed` に残る |
 | `[一部幽霊]` | 調査 | 事実2件のうち1件は実在する根拠、1件は実在しない根拠を持つ。根拠ありになり、説明は確かめられた1件だけから書かれ、もう1件は `memo.unconfirmed` に入る |
-| `[遅延]` | 調査 | 進捗の各段階で待つ（既定2秒、設定 `inquiry.mock.slow-step-delay` で変更） |
+| `[遅延]` | 調査 | 進捗の各段階で待つ（既定2秒、設定 `inquiry.mock.slow-step-delay` で変更）。進捗は3段階なので、既定では6秒かかる。時間切れと裏での調査を確かめるときは、`inquiry.rules.answer-timeout` をこれより短くする |
 | `[エラー]` | 調査 | 進捗を流した後に `AI_UNAVAILABLE` |
 | `[拒否]` | 調査 | 進捗を流した後に `AI_REFUSED` |
 | `[説明エラー]` | 説明 | 調査と照合は成功し、説明が `AI_UNAVAILABLE` で失敗する。調査の結果は保存される |
@@ -587,7 +602,7 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 ### `GET /api/operator/inquiries/{id}`
 
-`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
+`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`handoverReason`、`investigation`（「調査の状況と、裏での調査」の節）、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
 
 `followUps` は廃止し、`intake` に置き換える。入力を終える前に担当者へ送られることがなくなったため、「未回答」の状態は要らなくなった。
 
@@ -635,10 +650,10 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
     | `grounded` | `answered` | 表示 |
     | --- | --- | --- |
     | `true` | `true` | 従来どおり。説明を主に示し、「解決しました」を主のボタンにする |
-    | `true` | `false` | 「ご質問への答えは、手元の資料では確認できませんでした。」と示し、その下に「関連して分かったこと」として説明を出す。「担当者に送る」を主のボタン、「解決しました」を副のボタンにする |
-    | `false` | `false` | 従来どおり。「手元の資料からは答えを見つけられませんでした。」 |
+    | `true` | `false` | 「ご質問への答えは、手元の資料では確認できませんでした。」と示し、その下に「関連して分かったこと」として説明を出す。ボタンは出さない（答えの完了と同時に、担当者に渡っている） |
+    | `false` | `false` | 「手元の資料からは答えを見つけられませんでした。」ボタンは出さない（同上） |
 
-  - 種類ごとの終わり方は変えない（`LOOKS_WRONG` は、どの場合も担当者に送る）。
+  - 答えられなかった件は、種類にかかわらず担当者に渡る（「種類ごとの経路」の節）。解決したかを選ぶボタンが出るのは、上の表の1行目だけ。
   - オペレータの詳細の `answer` にも `answered` を含める。
   - モックの説明は `answered: true` を返す。タグ `[的外れ]` を付けた場合だけ `false` を返す（調査は通常の事実を返し、説明のスキルが「問いに答えていない」と判定した場合を再現する）。
 - **スキルごとの実装**: `GET /api/config` に `skills` を加える。スキルの識別子から、動いている実装の名前（`mock` または `ollama`）への対応。例: `{ "reception": "ollama", "interviewer": "ollama", "restater": "ollama", "investigator": "mock", "explainer": "ollama" }`。`mock` は、スキルか一次情報の検索に1つでもモックがあれば `true`。画面はモックの案内枠に、どのスキルがモックかを示す。モックのシナリオのタグは、モックで動いているスキルにだけ効く（たとえば受付が実際のモデルなら、`[判定エラー]` を書いても失敗しない）。
@@ -665,6 +680,56 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 - **担当者側**（`read`）: 番が担当者に移るたび、また担当者の番の間に本人が追記するたびに、`false` に戻す。
 - **本人側**（`unreadReply`）: 担当者が発言すると `true`、本人がその問い合わせを取得（9）すると `false` になる。返事がないことを知らせたとき、期間が過ぎて終えたときも `true` にする（「返事がないとき」の節）。
 
+### 調査の状況と、裏での調査
+
+AI の調査（調査、照合、説明）は、本人が待っている間（`awaiting: INVESTIGATION`）だけでなく、担当者に渡した後にも、裏で行う。担当者に、材料のない件を渡さないため。裏での調査は、番も区間も変えない。
+
+問い合わせは、調査の状況を持つ。担当者向けの詳細が `investigation` として返す。
+
+```json
+"investigation": { "status": "RUNNING", "audience": null, "startedAt": "2026-11-22T03:00:00Z", "finishedAt": null, "unconfirmedQuestion": false }
+```
+
+| 項目 | 意味 |
+| --- | --- |
+| `status` | `NOT_RUN`（調べていない）、`RUNNING`（調べている）、`DONE`（終わった）、`FAILED`（失敗した） |
+| `audience` | 結果を誰に見せるか。`ASKER`（本人が待っている間に出た答え。本人にも見せる）、`OPERATOR`（裏での調査の結果。担当者だけに見せる）。`DONE` のときだけ非 null |
+| `startedAt`、`finishedAt` | 直近の調査を始めた時刻、終わった（または失敗した）時刻 |
+| `unconfirmedQuestion` | 調査のもとにした問い（言い直し）を、本人が確かめていない場合に `true`（業務が止まっている件） |
+
+**結果を誰に見せるか**は、調査が終わった時点の状態で決まる。
+
+| 終わった時点 | 扱い |
+| --- | --- |
+| 本人が待っている（`awaiting: INVESTIGATION`） | 従来どおり。`audience: ASKER`。種類ごとの経路で、本人が確かめるか、担当者に渡す |
+| それ以外（担当者に渡した後） | `audience: OPERATOR`。結果を保存し、状態は変えない。本人向けの InquiryView の `answer` は `null` のまま。担当者の側を未読に戻し、担当者のストリームに `updated` を流す（問い合わせが終わっている場合は、保存だけ） |
+
+- 裏での調査の結果を本人に見せないのは、本人から見た窓口を担当者に一本化するため。担当者が確かめていない答えが、担当者の返事と食い違って届くことを防ぐ。伝えるかどうかは、担当者が決める。
+- 担当者向けの詳細の `answer` は、`audience` がどちらでも、保存されている結果を返す。
+
+**裏での調査を始めるとき**:
+
+| きっかけ | 条件 |
+| --- | --- |
+| 本人が、答えを待たずに送った（8） | 送る前の `awaiting` が `INVESTIGATION` だった場合。調査が既に走っていればそのまま続け、走っていなければ始める。AI の答えが既にある場合（`RESULT_CONFIRMATION` から送った）、言い直しを作れなかった場合、本人が言い直しを合っていないとしたまま送った場合（`QUESTION_CONFIRMATION` から送った）は、始めない |
+| 業務が止まっている件を、担当者に渡した | 言い直しがあり、種類が `CHANGE_REQUEST` でない場合。本人は言い直しを確かめていないので、`unconfirmedQuestion` を `true` にする |
+| 調査が時間切れになった（6） | 走っている調査を、そのまま続ける |
+| 担当者が、調べ直すように頼んだ（下の「担当者の操作」） | 終わっていない、言い直しがある、いま調べていない |
+
+- 同じ問い合わせの調査は、同時に1つだけ走らせる。
+- 調査は、誰が頼んだ場合も、本人の閲覧権限（`AccessScope`）で行う。結果が本人に伝わりうるため。
+- 裏での調査が失敗したら `status: FAILED` にして、担当者のストリームに `updated` を流す（未読には戻さない）。本人には何も見せない。説明だけが失敗した場合は、従来どおり調査の結果を保存し、`status` は `DONE` にする（`answer.grounded` は `false`、`askerExplanation` は `null`）。
+- 裏での調査は、API のプロセスの中で走る。API を止めると失われるので、起動時に、`RUNNING` のまま残っている件を `FAILED` にする。本人が待っている件（`INVESTIGATION`）は、従来どおりストリームの再購読でやり直せる。担当者に渡した件は、担当者が調べ直せる。
+- 調査の開始と終了は、状態の履歴に入れない（番が変わらないため）。時刻は `investigation` が持つ。
+- 本人や担当者の操作が、裏での調査の結果を保存する瞬間と重なると、操作が `INVALID_STATE`（他の操作と競合しました）になることがある。取得し直してやり直せば通る。
+- 種類が `CHANGE_REQUEST` の件を担当者が調べ直すとき、調査のスキルには、種類を決めずに渡す（調査のスキルは、調べない種類を受け付けないため）。
+
+設定:
+
+| キー | 既定 | 意味 |
+| --- | --- | --- |
+| `inquiry.rules.answer-timeout` | `60s` | 本人が待つ調査を、担当者に引き継ぐまでの時間。プロファイル `local-ai` では `10m`（手元のモデルは、調査に60秒以上かかるのが普通のため） |
+
 ### 担当者の操作
 
 すべて、担当者に渡したことのある問い合わせが対象。そうでない問い合わせは `NOT_FOUND`。`200` で、詳細（`GET /api/operator/inquiries/{id}`）と同じ全内容を返す。
@@ -676,6 +741,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 | 見送る | `POST /api/operator/inquiries/{id}/decline` | `{ "reasonKind": "KNOWN_LIMITATION", "reason": "1〜2000文字" }` | 担当者の番 | 理由をメッセージ（`kind: DECLINE`）として足し、終わる（`ending: DECLINED`）。`declined` に理由を持つ |
 | 区間を変える | `PUT /api/operator/inquiries/{id}/phase` | `{ "phase": "ACT" }` | 担当者の番 | 区間を `KNOW`、`DECIDE`、`ACT` のいずれかにする。番は変えない |
 | 置き直す | `PUT /api/operator/inquiries/{id}/placement` | `{ "type": "DO_FOR_ME", "systemId": "system-a", "functionId": "a-1" }`（どれも `null` にできる） | 終わっていない | 置き場所を変える。置いた人（`by`）は `OPERATOR` になる。種類が変わった場合は、区間を新しい種類の「担当者に渡す」の決まりに合わせる。番は変えない |
+| 調べ直す | `POST /api/operator/inquiries/{id}/investigation` | 本文なし | 終わっていない。言い直しがある。いま調べていない（`investigation.status` が `RUNNING` でない） | 裏での調査を始める（`investigation.status: RUNNING`）。番は変えない。種類が `CHANGE_REQUEST` でも、担当者が頼めば調べる。結果は担当者だけに見せる（`audience: OPERATOR`）。前の結果は、新しい結果が出た時点で置き換える（失敗した場合は、前の結果を残す） |
 | 既読にする | `POST /api/operator/inquiries/{id}/read` | 本文なし | いつでも | `read: true` |
 
 - `reasonKind` は `NOT_REPRODUCIBLE`（再現しない）、`KNOWN_LIMITATION`（既知の制限）、`OUT_OF_SCOPE`（対象外）、`DUPLICATE`（重複）、`OTHER`（その他）のいずれか。
@@ -745,7 +811,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 | `REOPENED_INTAKE` | 本人 | 入口の質問へ戻った |
 | `QUESTION_CONFIRMED` | 本人 | 問いを確かめた |
 | `ANSWERED_BY_AI` | AI | AI が答えた（本人が確かめる） |
-| `HANDED_OVER` | 本人、AI | 担当者に渡した（答えを待たずに送った、解決していないと答えた、種類の経路で渡った、業務が止まっている） |
+| `HANDED_OVER` | 本人、AI、時間 | 担当者に渡した（答えを待たずに送った、解決していないと答えた、種類の経路で渡った、AI が答えられなかった、業務が止まっている）。調査の時間切れで渡した場合は、起こしたのは時間（`TIME`） |
 | `ASKED_BACK` | 担当者 | 本人に聞き返した |
 | `REPLIED` | 本人 | 聞き返しに答えた |
 | `RESULT_DELIVERED` | 担当者 | 結果を伝えた |

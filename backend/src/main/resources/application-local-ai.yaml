@@ -1,6 +1,9 @@
 # 手元のモデル（Ollama）で、5つのスキルをすべて動かす。一次情報の検索はモックのまま（見本の資料を調べる）。
 # 使い方: npm run dev:backend:local-ai（Ollama とモデルが手元で動いていること）
 inquiry:
+  rules:
+    # 本人が待つ調査を担当者に引き継ぐまでの時間。手元のモデルは、調査に60秒以上かかるのが普通なので、既定の60秒より長くする
+    answer-timeout: 10m
   skills:
     reception:
       provider: ollama

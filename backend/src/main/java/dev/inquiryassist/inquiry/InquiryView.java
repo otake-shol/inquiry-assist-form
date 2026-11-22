@@ -8,6 +8,7 @@ import dev.inquiryassist.core.lifecycle.Actor;
 import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.Ending;
+import dev.inquiryassist.core.lifecycle.HandoverReason;
 import dev.inquiryassist.core.lifecycle.Phase;
 import dev.inquiryassist.core.lifecycle.Turn;
 import dev.inquiryassist.core.intake.AnswerKind;
@@ -38,10 +39,11 @@ import java.util.UUID;
  * @param intake 入口の質問の状態
  * @param revisionsLeft 言い直しを作り直せる残り回数
  * @param structured 整形後の問い。{@code STRUCTURED} 以降で非 null
- * @param answer 0次回答。完了後に非 null
+ * @param answer 0次回答。完了後に非 null。裏での調査の結果（担当者だけに見せるもの）は、本人向けには null のまま
  * @param canSendNow いま「答えを待たずに担当者へ送る」を実行できるか
  * @param sentImmediately 答えを待たずに担当者へ送られたか
  * @param handedOverAt 担当者に初めて渡した時刻。渡していなければ null
+ * @param handoverReason 直近に担当者へ渡した理由。渡したことがなければ null
  * @param unreadReply 本人がまだ読んでいない知らせがあるか（担当者の発言、返事がないことの知らせ、期間が過ぎて終えたこと）
  * @param noReply 返事がないときの決まりの予定。本人の返事（結果の確かめ、聞き返しへの返事）を待っている間だけ非 null
  * @param messages 担当者の発言と本人の追記（古い順）。なければ空
@@ -70,6 +72,7 @@ public record InquiryView(
         boolean canSendNow,
         boolean sentImmediately,
         Instant handedOverAt,
+        HandoverReason handoverReason,
         boolean unreadReply,
         NoReplyView noReply,
         List<MessageView> messages,

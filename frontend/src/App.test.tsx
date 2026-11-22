@@ -1272,21 +1272,18 @@ describe("種類ごとの結果", () => {
     return calls;
   }
 
-  it("(j) 根拠なしの結果は見つからなかったと示し、担当者に送るが主のボタンになる", async () => {
+  it("(j) 根拠なしの結果は、done が担当者の番（HANDLING）で届き、見つからなかったと示し、引き継いだ理由を添える。本人に送らせるボタンは出さない", async () => {
     const user = userEvent.setup();
     const calls = await reachResult(
       user,
       {},
-      makeStructuredView({ ...RESULT_STATE, answer: ungroundedAnswer }),
-      {
-        "POST /api/inquiries/inq-1/resolution": {
-          body: makeFiledView({
-            structured: makeStructuredView().structured,
-            sentImmediately: false,
-            answer: ungroundedAnswer,
-          }),
-        },
-      },
+      makeFiledView({
+        structured: makeStructuredView().structured,
+        sentImmediately: false,
+        handoverReason: "NO_ANSWER",
+        answer: ungroundedAnswer,
+        messages: [],
+      }),
     );
 
     expect(
@@ -1299,22 +1296,73 @@ describe("種類ごとの結果", () => {
       within(memo).getByText("調べたが見つからなかったこと"),
     ).toBeInTheDocument();
     expect(within(memo).getByText("該当する仕様の記述")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "担当者に送る" })).toHaveClass(
-      "primary",
-    );
-
-    await user.click(screen.getByRole("button", { name: "担当者に送る" }));
+    // 調べている画面から、引き継いだ画面に切り替わる（届いた状態だけで決まる）
     expect(
-      findCall(calls, "POST", "/api/inquiries/inq-1/resolution")?.body,
-    ).toEqual({ resolved: false });
+      screen.queryByRole("heading", { name: "調べています" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("担当者が確認しています")).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
+      screen.getByText(
+        "調べましたが、はっきりした答えが見つかりませんでした。担当者に引き継ぎました。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText("担当者が内容を確認して連絡します。"),
     ).toBeInTheDocument();
+    // 本人に、送るかどうかを選ばせない
+    for (const name of [
+      "担当者に送る",
+      "解決しました",
+      "まだ解決していません（担当者に送る）",
+    ]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    expect(
+      screen.queryByText("やりたかったことは、進められそうですか。"),
+    ).not.toBeInTheDocument();
+    expect(
+      findCall(calls, "POST", "/api/inquiries/inq-1/resolution"),
+    ).toBeUndefined();
+  });
+
+  it("時間切れは、done が HANDLING・answer なしで届き、調べた結果は出さずに、引き継いだ状態を出す", async () => {
+    const user = userEvent.setup();
+    await reachResult(
+      user,
+      {},
+      makeFiledView({
+        structured: makeStructuredView().structured,
+        sentImmediately: false,
+        handoverReason: "TIMEOUT",
+        answer: null,
+        messages: [],
+      }),
+    );
+
+    expect(
+      await screen.findByText("担当者が確認しています"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "調べるのに時間がかかっているため、担当者に引き継ぎました。調べた内容は、担当者に渡します。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "調べた結果" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "調べています" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "解決しました" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("追加で伝える")).toBeInTheDocument();
+    expectNoInternalWords();
   });
 
   it("「やってほしい」で自分でできる手順が見つかったときは、「自分でできました」と「担当者に頼む」を出す", async () => {
@@ -2227,11 +2275,16 @@ describe("問いに答えられたか", () => {
     );
   });
 
-  it("(a) 根拠はあるが答えていない場合は、答えを確認できなかったと先に示し、説明は関連として控えめに出す", async () => {
-    const user = userEvent.setup();
+  it("(a) 根拠はあるが答えていない場合は、答えを確認できなかったと先に示し、説明は関連として控えめに出す。担当者に渡った後なので、送らせるボタンは出さない", async () => {
     await showResult(
-      user,
-      makeStructuredView({ ...RESULT_STATE, answer: relatedAnswer }),
+      userEvent.setup(),
+      makeFiledView({
+        structured: makeStructuredView().structured,
+        sentImmediately: false,
+        handoverReason: "NO_ANSWER",
+        answer: relatedAnswer,
+        messages: [],
+      }),
     );
 
     const off = screen.getByText(OFF_TOPIC);
@@ -2255,26 +2308,29 @@ describe("問いに答えられたか", () => {
     ).not.toHaveAttribute("open");
     expectNoInternalWords();
 
-    // 担当者に送るが主、解決しましたが副（根拠なしの場合と同じ並び）
-    const sendButton = screen.getByRole("button", { name: "担当者に送る" });
-    const solved = screen.getByRole("button", { name: "解決しました" });
-    expect(sendButton).toHaveClass("primary");
-    expect(solved).not.toHaveClass("primary");
-    expect(follows(sendButton, solved)).toBe(true);
-
-    await user.click(sendButton);
     expect(
-      await screen.findByText(/担当者に送りました。ここまでの内容と調べた結果/),
+      screen.getByText(
+        "調べましたが、はっきりした答えが見つかりませんでした。担当者に引き継ぎました。",
+      ),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "担当者に送る" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "解決しました" }),
+    ).not.toBeInTheDocument();
   });
 
   it("(a) 根拠なしの場合は見つからなかったと示し、関連の見出しは出ない", async () => {
     const user = userEvent.setup();
     await showResult(
       user,
-      makeStructuredView({
-        ...RESULT_STATE,
+      makeFiledView({
+        structured: makeStructuredView().structured,
+        sentImmediately: false,
+        handoverReason: "NO_ANSWER",
         answer: { ...ungroundedAnswer, answered: false },
+        messages: [],
       }),
     );
 

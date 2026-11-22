@@ -31,6 +31,32 @@ describe("handoverText", () => {
     );
   });
 
+  it("AI が引き継いだ件は、送ったことを繰り返さず、添えた内容だけを伝える", () => {
+    const timedOut = makeView({
+      handedOverAt: HANDED_OVER_AT,
+      handoverReason: "TIMEOUT",
+    });
+    expect(handoverText(timedOut, null, ja.asker.handover).lead).toBe(
+      "ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
+    );
+    const noAnswer = makeView({
+      handedOverAt: HANDED_OVER_AT,
+      handoverReason: "NO_ANSWER",
+      answer: {
+        grounded: false,
+        askerExplanation: null,
+        memo: { findings: [], notFound: [], nextChecks: [] },
+        citations: [],
+      },
+    });
+    expect(handoverText(noAnswer, null, ja.asker.handover).lead).toBe(
+      "ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
+    );
+    expect(handoverText(noAnswer, null, en.asker.handover).lead).toBe(
+      "I attached what you have told me so far and what I found. You do not need to explain it again.",
+    );
+  });
+
   it("調べた結果の有無で、添えた内容の言い方が変わる", () => {
     const filed = makeView({ handedOverAt: HANDED_OVER_AT });
     expect(handoverText(filed, null, ja.asker.handover).lead).toBe(

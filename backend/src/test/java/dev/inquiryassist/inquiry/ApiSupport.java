@@ -175,8 +175,21 @@ abstract class ApiSupport {
         return mvc.perform(put("/api/inquiries/" + id + "/structured").contentType(MediaType.APPLICATION_JSON).content("{}"));
     }
 
+    /**
+     * 答えを待たずに送る。調査を待っている間に送ると、AI の調査が裏で続くので、その保存が済むまで待つ
+     * （続けて担当者の操作をするテストが、保存と競合して不安定にならないように）。
+     */
     ResultActions sendNow(String id) throws Exception {
-        return mvc.perform(post("/api/inquiries/" + id + "/send-now"));
+        ResultActions sent = mvc.perform(post("/api/inquiries/" + id + "/send-now"));
+        awaitInvestigationIdle(id);
+        return sent;
+    }
+
+    /** 調査が走っていない状態（{@code RUNNING} でない）になるまで待つ。 */
+    void awaitInvestigationIdle(String id) throws InterruptedException {
+        boolean idle = waitFor(
+                () -> !"RUNNING".equals(row(id).get("investigation_status")), 15_000);
+        org.assertj.core.api.Assertions.assertThat(idle).as("調査が終わらない: " + id).isTrue();
     }
 
     ResultActions resolve(String id, boolean resolved) throws Exception {
@@ -209,8 +222,14 @@ abstract class ApiSupport {
         return started.getResponse().getContentAsString(StandardCharsets.UTF_8);
     }
 
-    /** 利用量に記録されたスキルの識別子を、呼んだ順に返す。 */
+    /** 利用量に記録されたスキルの識別子を、呼んだ順に返す。裏での調査が走っていれば、終わるまで待つ。 */
     List<String> usageSteps(String id) {
+        try {
+            awaitInvestigationIdle(id);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
         return jdbc.queryForList(
                 "select u->>'step' from inquiries, jsonb_array_elements(usages) with ordinality as t(u, ord)"
                         + " where id = ?::uuid order by ord",

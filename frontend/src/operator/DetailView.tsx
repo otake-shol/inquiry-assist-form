@@ -3,6 +3,7 @@ import type { PlacementInput, ReplyKind } from "../api/client.ts";
 import type {
   ConfigSystem,
   DeclineReasonKind,
+  Investigation,
   OperatorDetail,
   Phase,
   Placement,
@@ -66,6 +67,8 @@ interface DetailViewProps {
   onPlacement: (placement: PlacementInput) => Promise<boolean>;
   /** 本人に聞き返す、または結果を伝える。成功したら true */
   onReply: (kind: ReplyKind, body: string) => Promise<boolean>;
+  /** AI に調べさせる（調べ直す）。成功したら true */
+  onInvestigate: () => Promise<boolean>;
   /** 見送りとして終える。成功したら true */
   onDecline: (kind: DeclineReasonKind, reason: string) => Promise<boolean>;
 }
@@ -97,6 +100,24 @@ function List({
       </ul>
     </>
   );
+}
+
+/**
+ * 調査の状況の1行。結果を本人に見せたかどうか（`DONE`）まで含めて示す。
+ * @param investigation 調査の状況
+ * @param op 辞書の、担当者の画面の文言（`messages.op`）
+ */
+function investigationLine(
+  investigation: Investigation,
+  op: Messages["op"],
+): string {
+  const texts = op.investigationStatus;
+  if (investigation.status === "DONE") {
+    return investigation.audience === "OPERATOR"
+      ? texts.DONE_OPERATOR
+      : texts.DONE_ASKER;
+  }
+  return texts[investigation.status];
 }
 
 /**
@@ -139,6 +160,7 @@ export function DetailView({
   onPhase,
   onPlacement,
   onReply,
+  onInvestigate,
   onDecline,
 }: DetailViewProps) {
   const dict = useMessages();
@@ -148,6 +170,9 @@ export function DetailView({
   const askerLang = detail.language;
   const ended = detail.ending !== null;
   const operatorsTurn = !ended && detail.turn === "OPERATOR";
+  // 調べ直せるのは、終わっていない、言い直しがある、いま調べていない件
+  const canInvestigate =
+    !ended && structured !== null && detail.investigation.status !== "RUNNING";
 
   // ドラッグで落とされたら、対応する入力欄にフォーカスを移す（見送るは、折りたたみを開いてから）
   const sendRef = useRef<HTMLTextAreaElement | null>(null);
@@ -217,6 +242,13 @@ export function DetailView({
           <span className="op-state-label">{OP_TEXT.stateLabel}</span>
           <strong>{stateLine(detail, dict)}</strong>
         </p>
+        {operatorsTurn && detail.handoverReason !== null && (
+          <p className="op-handover-reason">
+            {OP_TEXT.handoverReasonLabel(
+              OP_TEXT.handoverReasons[detail.handoverReason],
+            )}
+          </p>
+        )}
         {detail.noReply !== null && (
           <p className="op-no-reply">
             {detail.noReply.remindedAt !== null &&
@@ -317,6 +349,26 @@ export function DetailView({
 
       <section>
         <h3>{OP_TEXT.result}</h3>
+        <p className="op-investigation" aria-live="polite">
+          {investigationLine(detail.investigation, OP_TEXT)}
+        </p>
+        {detail.investigation.unconfirmedQuestion && (
+          <p className="op-muted">{OP_TEXT.investigationUnconfirmed}</p>
+        )}
+        {canInvestigate && (
+          <div className="op-investigate">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onInvestigate()}
+            >
+              {detail.investigation.status === "NOT_RUN"
+                ? OP_TEXT.investigationStart
+                : OP_TEXT.investigationRetry}
+            </button>
+            <p className="op-muted">{OP_TEXT.investigationHint}</p>
+          </div>
+        )}
         {answer === null ? (
           <p className="op-muted">{OP_TEXT.noResult}</p>
         ) : (

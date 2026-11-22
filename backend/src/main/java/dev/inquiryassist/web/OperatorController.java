@@ -109,6 +109,17 @@ public class OperatorController {
     }
 
     /**
+     * 担当者が、調べ直すように頼む。
+     *
+     * @param id 問い合わせの識別子
+     * @return 調査を始めた後の全内容
+     */
+    @PostMapping("/inquiries/{id}/investigation")
+    public OperatorDetail reinvestigate(@PathVariable UUID id, @ViewerLang String lang) {
+        return operators.reinvestigate(id, lang);
+    }
+
+    /**
      * 担当者が区間を変える。
      *
      * @param id 問い合わせの識別子

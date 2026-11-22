@@ -144,14 +144,15 @@ public final class InquiryStateMachine {
     public static Transition confirmed(InquiryState state, Context ctx) {
         require(state, Awaiting.QUESTION_CONFIRMATION);
         if (ctx.type() != null && ctx.type().filesOnConfirm()) {
-            return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER);
+            return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER, HandoverReason.ROUTE);
         }
         return move(state, new InquiryState(Phase.KNOW, Turn.AI, Awaiting.INVESTIGATION, null),
                 HistoryEvent.QUESTION_CONFIRMED, Actor.ASKER);
     }
 
     /**
-     * AI の答えが出た。種類ごとの経路に従い、担当者に渡すか、本人が確かめる。
+     * AI の答えが出た。種類ごとの経路に従い、担当者に渡すか、本人が確かめる。担当者に渡す理由は、{@code LOOKS_WRONG} と
+     * {@code DO_FOR_ME} は経路（{@code ROUTE}）、それ以外は AI が答えられなかった（{@code NO_ANSWER}）。
      *
      * @param state いまの状態（{@code INVESTIGATION}）
      * @param ctx 文脈
@@ -161,8 +162,12 @@ public final class InquiryStateMachine {
      */
     public static Transition answeredByAi(InquiryState state, Context ctx, boolean grounded, boolean answered) {
         require(state, Awaiting.INVESTIGATION);
-        if (InquiryType.routeOf(ctx.type()).filesAfterAnswer(grounded, answered)) {
-            return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.AI);
+        InquiryType route = InquiryType.routeOf(ctx.type());
+        if (route.filesAfterAnswer(grounded, answered)) {
+            HandoverReason reason = route == InquiryType.LOOKS_WRONG || route == InquiryType.DO_FOR_ME
+                    ? HandoverReason.ROUTE
+                    : HandoverReason.NO_ANSWER;
+            return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.AI, reason);
         }
         return move(state, new InquiryState(Phase.KNOW, Turn.ASKER, Awaiting.RESULT_CONFIRMATION, null),
                 HistoryEvent.ANSWERED_BY_AI, Actor.AI);
@@ -177,7 +182,7 @@ public final class InquiryStateMachine {
      */
     public static Transition handedOverBecauseBlocked(InquiryState state, Context ctx) {
         require(state, Awaiting.INTAKE_ANSWER, Awaiting.QUESTION_CONFIRMATION);
-        return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER);
+        return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER, HandoverReason.BLOCKED);
     }
 
     /**
@@ -192,7 +197,7 @@ public final class InquiryStateMachine {
         if (!canSendNow(state, ctx)) {
             throw new IllegalTransitionException("いまは担当者に送れません（現在: " + describe(state) + "）");
         }
-        return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER);
+        return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER, HandoverReason.SENT_NOW);
     }
 
     /**
@@ -209,7 +214,21 @@ public final class InquiryStateMachine {
         if (resolved) {
             return move(state, new InquiryState(Phase.CLOSED, null, null, Ending.RESOLVED), HistoryEvent.RESOLVED, Actor.ASKER);
         }
-        return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER);
+        return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER, HandoverReason.UNRESOLVED);
+    }
+
+    /**
+     * 本人が待つ調査が時間切れになったので、担当者に渡す（出来事は {@code HANDED_OVER}。起こしたのは時間。理由は {@code TIMEOUT}）。
+     * 調査は止めない（止めるかどうかは、この遷移では決めない）。
+     *
+     * @param state いまの状態（{@code INVESTIGATION}）
+     * @param ctx 文脈
+     * @return 遷移
+     * @throws IllegalTransitionException 調査を待っている状態でない場合
+     */
+    public static Transition investigationTimedOut(InquiryState state, Context ctx) {
+        require(state, Awaiting.INVESTIGATION);
+        return handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.TIME, HandoverReason.TIMEOUT);
     }
 
     /**
@@ -364,7 +383,7 @@ public final class InquiryStateMachine {
             if (state.closed() && state.ending() == Ending.ANSWERED) {
                 // 初めて渡すので、区間は「担当者に渡す」の決まり（種類）で決める。終わる前の区間には戻さない
                 return move(state, new InquiryState(handOverPhase(ctx.type()), Turn.OPERATOR, Awaiting.HANDLING, null),
-                        HistoryEvent.REOPENED, Actor.ASKER);
+                        HistoryEvent.REOPENED, Actor.ASKER, HandoverReason.REOPENED);
             }
             throw new IllegalTransitionException("担当者に渡した問い合わせにだけ追記できます");
         }
@@ -375,14 +394,15 @@ public final class InquiryStateMachine {
             }
             Phase phase = ctx.phaseBeforeClose() != null ? ctx.phaseBeforeClose() : handOverPhase(ctx.type());
             return move(state, new InquiryState(phase, Turn.OPERATOR, Awaiting.HANDLING, null),
-                    HistoryEvent.REOPENED, Actor.ASKER);
+                    HistoryEvent.REOPENED, Actor.ASKER, HandoverReason.REOPENED);
         }
         return switch (state.awaiting()) {
             case HANDLING -> new Transition(state, null, Actor.ASKER, false, null);
             case ASKER_REPLY -> move(state, new InquiryState(state.phase(), Turn.OPERATOR, Awaiting.HANDLING, null),
                     HistoryEvent.REPLIED, Actor.ASKER);
             // 担当者の結果に追記するのは、「解決していない」と答えたのと同じ
-            case RESULT_CONFIRMATION -> handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER);
+            case RESULT_CONFIRMATION ->
+                handOver(state, ctx, HistoryEvent.HANDED_OVER, Actor.ASKER, HandoverReason.UNRESOLVED);
             default -> throw new IllegalTransitionException("この操作はいまの状態では実行できません（現在: " + describe(state) + "）");
         };
     }
@@ -401,14 +421,21 @@ public final class InquiryStateMachine {
     }
 
     /** 番を担当者にする。担当者に渡したことがなければ種類で区間を決め、あれば、いまの区間のままにする。 */
-    private static Transition handOver(InquiryState state, Context ctx, HistoryEvent event, Actor actor) {
+    private static Transition handOver(
+            InquiryState state, Context ctx, HistoryEvent event, Actor actor, HandoverReason reason) {
         Phase phase = ctx.handedOver() && !state.closed() && state.phase() != Phase.INTAKE
                 ? state.phase()
                 : handOverPhase(ctx.type());
-        return move(state, new InquiryState(phase, Turn.OPERATOR, Awaiting.HANDLING, null), event, actor);
+        return move(state, new InquiryState(phase, Turn.OPERATOR, Awaiting.HANDLING, null), event, actor, reason);
     }
 
     private static Transition move(InquiryState from, InquiryState to, HistoryEvent event, Actor actor) {
-        return new Transition(to, event, actor, to.turn() == Turn.OPERATOR && from.turn() != Turn.OPERATOR, null);
+        return move(from, to, event, actor, null);
+    }
+
+    private static Transition move(
+            InquiryState from, InquiryState to, HistoryEvent event, Actor actor, HandoverReason reason) {
+        return new Transition(
+                to, event, actor, to.turn() == Turn.OPERATOR && from.turn() != Turn.OPERATOR, null, reason);
     }
 }

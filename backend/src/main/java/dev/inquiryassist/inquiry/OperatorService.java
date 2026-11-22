@@ -37,6 +37,7 @@ public class OperatorService {
     private final InquiryPresenter presenter;
     private final IntakeLocales locales;
     private final ApplicationEventPublisher events;
+    private final InvestigationRunner runner;
 
     /**
      * @param repository 問い合わせ記録の保存先
@@ -45,6 +46,7 @@ public class OperatorService {
      * @param presenter 一覧と詳細の項目を作る
      * @param locales 置き直しの入力を確かめる、システムと機能の一覧（言語ごと）
      * @param events 更新の確定後にイベントを発行する
+     * @param runner 調べ直しの実行
      */
     OperatorService(
             InquiryRepository repository,
@@ -52,13 +54,15 @@ public class OperatorService {
             SkillImplementations implementations,
             InquiryPresenter presenter,
             IntakeLocales locales,
-            ApplicationEventPublisher events) {
+            ApplicationEventPublisher events,
+            InvestigationRunner runner) {
         this.repository = repository;
         this.properties = properties;
         this.implementations = implementations;
         this.presenter = presenter;
         this.locales = locales;
         this.events = events;
+        this.runner = runner;
     }
 
     /**
@@ -199,6 +203,32 @@ public class OperatorService {
         return toDetail(saveAndPublish(inquiry), lang);
     }
 
+    /**
+     * 担当者が、調べ直すように頼む。AI の調査を裏で始める（番は変えない）。種類が {@code CHANGE_REQUEST} でも、頼まれれば調べる。
+     * 結果は担当者だけに見せる。前の結果は、新しい結果が出た時点で置き換わる（失敗した場合は残る）。
+     *
+     * @param id 問い合わせの識別子
+     * @return 調査を始めた後の全内容（{@code investigation.status} は {@code RUNNING}）
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
+     * @throws InvalidStateException 終わっている、言い直しがない、またはいま調べている場合
+     */
+    public OperatorDetail reinvestigate(UUID id, String lang) {
+        InquiryEntity inquiry = loadHandedOver(id);
+        if (inquiry.state().closed()) {
+            throw new InvalidStateException("終わった問い合わせは調べ直せません");
+        }
+        if (inquiry.structured() == null) {
+            throw new InvalidStateException("言い直しがないため、調べ直せません");
+        }
+        if (inquiry.investigationStatus == InvestigationStatus.RUNNING) {
+            throw new InvalidStateException("いま調べている最中です");
+        }
+        if (!runner.startBackground(id)) {
+            throw new InvalidStateException("調べ直せません。最新の状態を取得し直してください");
+        }
+        return toDetail(loadHandedOver(id), lang);
+    }
+
     /** 置き場所を、既定の言語の名前にする。決まっていない項目は null。 */
     private java.util.Map<String, String> namesOf(Placement placement) {
         java.util.Map<String, String> names = new java.util.LinkedHashMap<>();
@@ -312,6 +342,8 @@ public class OperatorService {
                 e.ending,
                 e.closedBy,
                 e.declined,
+                e.handoverReason,
+                presenter.investigationOf(e),
                 presenter.noReplyOf(e),
                 MessageBodies.viewsOf(e),
                 List.copyOf(e.history),

@@ -63,18 +63,69 @@ class InquiryStateMachineTest {
     }
 
     @Test
-    void AIの答えは_使い方と仕組みと種類なしは本人が確かめ_おかしいかもしれないは担当者に渡る() {
+    void AIの答えは_使い方と仕組みと種類なしは根拠があり答えていれば本人が確かめ_答えられなければ担当者に渡る() {
         for (InquiryType type : new InquiryType[] {InquiryType.HOW_TO, InquiryType.HOW_IT_WORKS, null}) {
             Transition t = InquiryStateMachine.answeredByAi(INVESTIGATING, ctx(type), true, true);
             assertThat(t.to()).isEqualTo(RESULT);
             assertThat(t.event()).isEqualTo(HistoryEvent.ANSWERED_BY_AI);
-            // 根拠がなくても的外れでも、これらの種類は本人が確かめる
-            assertThat(InquiryStateMachine.answeredByAi(INVESTIGATING, ctx(type), false, false).to()).isEqualTo(RESULT);
+            assertThat(t.handoverReason()).isNull();
+            // 根拠がない、または的外れなら、本人に選ばせず担当者に渡す（区間は KNOW）
+            for (boolean[] noAnswer : new boolean[][] {{false, false}, {true, false}}) {
+                Transition filed = InquiryStateMachine.answeredByAi(INVESTIGATING, ctx(type), noAnswer[0], noAnswer[1]);
+                assertThat(filed.to()).isEqualTo(handling(Phase.KNOW));
+                assertThat(filed.event()).isEqualTo(HistoryEvent.HANDED_OVER);
+                assertThat(filed.actor()).isEqualTo(Actor.AI);
+                assertThat(filed.handoverReason()).isEqualTo(HandoverReason.NO_ANSWER);
+            }
         }
         Transition wrong = InquiryStateMachine.answeredByAi(INVESTIGATING, ctx(InquiryType.LOOKS_WRONG), true, true);
         assertThat(wrong.to()).isEqualTo(handling(Phase.DECIDE));
         assertThat(wrong.event()).isEqualTo(HistoryEvent.HANDED_OVER);
         assertThat(wrong.actor()).isEqualTo(Actor.AI);
+        assertThat(wrong.handoverReason()).isEqualTo(HandoverReason.ROUTE);
+    }
+
+    @Test
+    void 渡した理由は遷移ごとに決まる() {
+        assertThat(InquiryStateMachine.answeredByAi(INVESTIGATING, ctx(InquiryType.DO_FOR_ME), true, false).handoverReason())
+                .isEqualTo(HandoverReason.ROUTE);
+        assertThat(InquiryStateMachine.confirmed(CONFIRMING, ctx(InquiryType.CHANGE_REQUEST)).handoverReason())
+                .isEqualTo(HandoverReason.ROUTE);
+        assertThat(InquiryStateMachine.handedOverBecauseBlocked(INTAKE, ctx(null)).handoverReason())
+                .isEqualTo(HandoverReason.BLOCKED);
+        assertThat(InquiryStateMachine.sentNow(INVESTIGATING, ctx(InquiryType.HOW_TO)).handoverReason())
+                .isEqualTo(HandoverReason.SENT_NOW);
+        assertThat(InquiryStateMachine.resolved(RESULT, ctx(InquiryType.HOW_TO), false).handoverReason())
+                .isEqualTo(HandoverReason.UNRESOLVED);
+        // 結果への追記は「解決していない」と同じ
+        assertThat(InquiryStateMachine.noted(RESULT, handedOver(InquiryType.HOW_TO)).handoverReason())
+                .isEqualTo(HandoverReason.UNRESOLVED);
+        // 終わった件への追記は開き直し
+        assertThat(InquiryStateMachine.noted(closed(Ending.RESOLVED), handedOver(InquiryType.HOW_TO)).handoverReason())
+                .isEqualTo(HandoverReason.REOPENED);
+        // 渡さない遷移は理由を持たない（聞き返しへの返事、担当者の番の間の追記、本人が確かめて解決した）
+        InquiryState asked = new InquiryState(Phase.KNOW, Turn.ASKER, Awaiting.ASKER_REPLY, null);
+        assertThat(InquiryStateMachine.noted(asked, handedOver(InquiryType.HOW_TO)).handoverReason()).isNull();
+        assertThat(InquiryStateMachine.noted(handling(Phase.KNOW), handedOver(InquiryType.HOW_TO)).handoverReason()).isNull();
+        assertThat(InquiryStateMachine.resolved(RESULT, ctx(InquiryType.HOW_TO), true).handoverReason()).isNull();
+    }
+
+    @Test
+    void 調査の時間切れは時間が担当者に渡し_理由はTIMEOUTで区間は種類で決まる() {
+        Transition t = InquiryStateMachine.investigationTimedOut(INVESTIGATING, ctx(InquiryType.HOW_TO));
+
+        assertThat(t.to()).isEqualTo(handling(Phase.KNOW));
+        assertThat(t.event()).isEqualTo(HistoryEvent.HANDED_OVER);
+        assertThat(t.actor()).isEqualTo(Actor.TIME);
+        assertThat(t.handsOver()).isTrue();
+        assertThat(t.handoverReason()).isEqualTo(HandoverReason.TIMEOUT);
+        assertThat(InquiryStateMachine.investigationTimedOut(INVESTIGATING, ctx(InquiryType.LOOKS_WRONG)).to())
+                .isEqualTo(handling(Phase.DECIDE));
+        // 調査を待っている状態だけ
+        for (InquiryState other : List.of(INTAKE, CONFIRMING, RESULT, handling(Phase.KNOW), closed(Ending.RESOLVED))) {
+            assertThatThrownBy(() -> InquiryStateMachine.investigationTimedOut(other, ctx(InquiryType.HOW_TO)))
+                    .isInstanceOf(IllegalTransitionException.class);
+        }
     }
 
     @Test

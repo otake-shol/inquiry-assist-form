@@ -99,6 +99,8 @@ inquiry:
       close-after-business-days: 5
     sweep-enabled: true
     sweep-interval: 15m
+    # 本人が待つ調査を、担当者に引き継ぐまでの時間。超えたら担当者に渡し、調査は裏で続ける
+    answer-timeout: 60s
   # スキルの実行記録（trace）を画面に見せるか。本番では false にする（内部の言葉とモデルの名前を本人に見せないため）
   trace:
     enabled: true

@@ -197,7 +197,7 @@ class SkillFlowTest extends ApiSupport {
     }
 
     @Test
-    void 的外れでも根拠ありなら説明と出典と技術メモは従来どおり返す() throws Exception {
+    void 的外れでも根拠ありなら説明と出典と技術メモは返し_担当者に渡る() throws Exception {
         String id = toAnswering("[的外れ] " + SPEC, null);
 
         String done = doneOf(stream(id));
@@ -205,8 +205,10 @@ class SkillFlowTest extends ApiSupport {
         assertThat((String) JsonPath.read(done, "$.answer.askerExplanation")).isNotBlank();
         assertThat((List<?>) JsonPath.read(done, "$.answer.citations")).hasSize(2);
         assertThat((List<?>) JsonPath.read(done, "$.answer.memo.findings")).hasSize(2);
-        // 種類ごとの終わり方は変わらない: 仕組みを知りたいは本人の判定を待つ
-        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
+        // 的外れ（問いに答えていない）なので、本人に選ばせず担当者に渡す。調べた結果は、本人にも見せる
+        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("HANDLING");
+        assertThat((String) JsonPath.read(done, "$.handoverReason")).isEqualTo("NO_ANSWER");
+        assertThat((Boolean) JsonPath.read(done, "$.answer.answered")).isFalse();
     }
 
     @Test

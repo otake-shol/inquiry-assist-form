@@ -158,6 +158,12 @@ export const en: Messages = {
       DECLINE: "Notice of decline",
       NOTE: null,
     },
+    handoverReasonNote: {
+      NO_ANSWER:
+        "I looked into it but couldn't find a clear answer, so I've handed this over to the support team.",
+      TIMEOUT:
+        "This is taking a while to look into, so I've handed it over to the support team. What I find will be passed on to them.",
+    },
     endingTextTimeWithdrawn:
       "This inquiry was closed as withdrawn because there was no reply. You can continue by sending a message from this page.",
     handover: {
@@ -169,6 +175,10 @@ export const en: Messages = {
         "I sent this to the support team. I attached what you have told me so far and what I found. You do not need to explain it again.",
       plain:
         "I sent this to the support team. I attached what you have told me so far. You do not need to explain it again.",
+      attachedWithAnswer:
+        "I attached what you have told me so far and what I found. You do not need to explain it again.",
+      attachedPlain:
+        "I attached what you have told me so far. You do not need to explain it again.",
     },
     columns: {
       YOURS: "Your turn",
@@ -322,6 +332,30 @@ export const en: Messages = {
     },
     waitingClosed: (ending) =>
       `This inquiry is closed (${ending}). If the requester adds a message, it reopens on staff's turn.`,
+    handoverReasonLabel: (reason) => `Why it came to staff: ${reason}`,
+    handoverReasons: {
+      SENT_NOW: "The requester sent it without waiting for an answer",
+      UNRESOLVED: "The requester said it was not resolved",
+      BLOCKED: "Work is blocked",
+      ROUTE: "Staff decide on this type of inquiry",
+      NO_ANSWER: "AI could not answer",
+      TIMEOUT: "AI did not finish looking into it in time",
+      REOPENED: "The requester added to a closed inquiry",
+    },
+    investigationStatus: {
+      NOT_RUN: "AI has not looked into this.",
+      RUNNING:
+        "AI is looking into this. The result will appear here when it finishes.",
+      DONE_ASKER: "The requester has seen this result too.",
+      DONE_OPERATOR: "The requester has not been shown this result.",
+      FAILED: "AI's investigation failed.",
+    },
+    investigationUnconfirmed:
+      "This is based on a restatement the requester has not confirmed.",
+    investigationStart: "Have AI look into it",
+    investigationRetry: "Look into it again",
+    investigationHint:
+      "The turn does not change. Only staff can see the result.",
     noReplyPlanned: (remindDate) =>
       `If there is no reply, the requester will be reminded on ${remindDate}.`,
     noReplyReminded: (remindedDate, closeDate) =>

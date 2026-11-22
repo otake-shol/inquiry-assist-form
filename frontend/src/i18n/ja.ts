@@ -1,5 +1,6 @@
 import type {
   Awaiting,
+  HandoverReason,
   DeclineReasonKind,
   Ending,
   HistoryActor,
@@ -194,6 +195,13 @@ export const ja = {
       DECLINE: "見送りの連絡",
       NOTE: null,
     } as Record<MessageKind, string | null>,
+    /** AI が引き継いだ理由を本人に伝える1文（「担当者が確認しています」のすぐ下）。それ以外の理由では添えない */
+    handoverReasonNote: {
+      NO_ANSWER:
+        "調べましたが、はっきりした答えが見つかりませんでした。担当者に引き継ぎました。",
+      TIMEOUT:
+        "調べるのに時間がかかっているため、担当者に引き継ぎました。調べた内容は、担当者に渡します。",
+    } as Partial<Record<HandoverReason, string>>,
     /** 返事がないまま期間が過ぎて、時間で「取り下げ」になった件の終わりの文言 */
     endingTextTimeWithdrawn:
       "お返事がなかったため、取り下げとして終了しました。続ける場合は、このページから送れます。",
@@ -207,6 +215,11 @@ export const ja = {
         "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
       plain:
         "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
+      /** AI が引き継いだ件（引き継いだことは、理由の文で伝える） */
+      attachedWithAnswer:
+        "ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
+      attachedPlain:
+        "ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
     },
     /** 本人のボードの列の見出し */
     columns: {
@@ -369,6 +382,30 @@ export const ja = {
     waitingClosed: (ending: string) =>
       `この問い合わせは終わっています（${ending}）。本人が追記すると、担当者の番で開き直します。`,
     /** 返事がないときの予定（結果を本人が確かめている件）。日付は月と日 */
+    /** 渡った理由の行（担当者の番のとき） */
+    handoverReasonLabel: (reason: string) => `渡った理由: ${reason}`,
+    handoverReasons: {
+      SENT_NOW: "本人が、答えを待たずに送った",
+      UNRESOLVED: "本人が、解決していないと答えた",
+      BLOCKED: "業務が止まっている",
+      ROUTE: "この種類は、担当者が判断する",
+      NO_ANSWER: "AI が答えられなかった",
+      TIMEOUT: "AI の調査が、時間内に終わらなかった",
+      REOPENED: "本人が、終わった件に追記した",
+    } as Record<HandoverReason, string>,
+    /** 調査の状況の行（「調べた結果」の見出しのすぐ下） */
+    investigationStatus: {
+      NOT_RUN: "AI は調べていません。",
+      RUNNING: "AI が調べています。終わると、ここに結果が出ます。",
+      DONE_ASKER: "本人も、この結果を見ています。",
+      DONE_OPERATOR: "この結果は、本人には見せていません。",
+      FAILED: "AI の調査は失敗しました。",
+    },
+    investigationUnconfirmed:
+      "本人が確かめていない言い直しをもとに調べています。",
+    investigationStart: "AI に調べさせる",
+    investigationRetry: "調べ直す",
+    investigationHint: "番は変わりません。結果は、担当者だけに見えます。",
     noReplyPlanned: (remindDate: string) =>
       `返事がなければ、${remindDate}に本人へ知らせます`,
     noReplyReminded: (remindedDate: string, closeDate: string) =>

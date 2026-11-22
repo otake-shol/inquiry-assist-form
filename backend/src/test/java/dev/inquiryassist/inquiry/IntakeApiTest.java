@@ -440,7 +440,8 @@ class IntakeApiTest extends ApiSupport {
             assertThat(n.sentImmediately()).isTrue();
             assertThat(n.structured()).isNotNull();
         });
-        assertThat(usageSteps(id)).containsExactly("restater");
+        // 渡した後に、AI の調査が裏で行われる（本人が確かめていない言い直しで調べる）
+        assertThat(usageSteps(id)).containsExactly("restater", "investigator", "explainer");
     }
 
     @Test

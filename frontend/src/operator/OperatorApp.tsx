@@ -589,6 +589,9 @@ export function OperatorApp({
                 onReply={(kind, body) =>
                   operate(detail.id, () => api.postReply(detail.id, kind, body))
                 }
+                onInvestigate={() =>
+                  operate(detail.id, () => api.investigate(detail.id))
+                }
                 onDecline={(kind, reason) =>
                   operate(detail.id, () =>
                     api.declineInquiry(detail.id, kind, reason),

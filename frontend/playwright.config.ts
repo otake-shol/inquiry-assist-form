@@ -25,7 +25,11 @@ export default defineConfig({
     {
       command: "bash ../scripts/gradle.sh bootRun --console=plain",
       url: "http://localhost:8080/api/config",
-      env: { SPRING_PROFILES_ACTIVE: "mock" },
+      env: {
+        SPRING_PROFILES_ACTIVE: "mock",
+        // 調査の時間切れ（既定60秒）を、待たずに確かめるため。モックの [遅延] の調査は6秒かかる
+        INQUIRY_RULES_ANSWER_TIMEOUT: "3s",
+      },
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,
     },

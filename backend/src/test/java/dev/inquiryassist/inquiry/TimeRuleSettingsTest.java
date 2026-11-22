@@ -28,6 +28,7 @@ class TimeRuleSettingsTest {
             assertThat(rules.noReply().closeAfterBusinessDays()).isEqualTo(5);
             assertThat(rules.sweepEnabled()).isTrue();
             assertThat(rules.sweepInterval()).isEqualTo(Duration.ofMinutes(15));
+            assertThat(rules.answerTimeout()).isEqualTo(Duration.ofSeconds(60));
             assertThat(rules).isEqualTo(InquiryProperties.Rules.defaults());
         });
     }
@@ -39,7 +40,8 @@ class TimeRuleSettingsTest {
                         "inquiry.rules.no-reply.remind-after-business-days=3",
                         "inquiry.rules.no-reply.close-after-business-days=7",
                         "inquiry.rules.sweep-enabled=false",
-                        "inquiry.rules.sweep-interval=1h")
+                        "inquiry.rules.sweep-interval=1h",
+                        "inquiry.rules.answer-timeout=10m")
                 .run(context -> {
                     InquiryProperties.Rules rules = context.getBean(InquiryProperties.class).rules();
                     assertThat(rules.zone()).isEqualTo(ZoneId.of("UTC"));
@@ -47,6 +49,7 @@ class TimeRuleSettingsTest {
                     assertThat(rules.periods().closeAfterBusinessDays()).isEqualTo(7);
                     assertThat(rules.sweepEnabled()).isFalse();
                     assertThat(rules.sweepInterval()).isEqualTo(Duration.ofHours(1));
+                    assertThat(rules.answerTimeout()).isEqualTo(Duration.ofMinutes(10));
                 });
     }
 
@@ -82,5 +85,17 @@ class TimeRuleSettingsTest {
         dev.run(context -> assertThat(context).hasSingleBean(dev.inquiryassist.web.DevRulesController.class));
         dev.withInitializer(context -> context.getEnvironment().setActiveProfiles("production"))
                 .run(context -> assertThat(context).doesNotHaveBean(dev.inquiryassist.web.DevRulesController.class));
+    }
+
+    @Test
+    void 手元のモデルのプロファイルは本人が待つ調査の時間切れを10分にする() {
+        runner.withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
+                .withPropertyValues("spring.profiles.active=local-ai")
+                .run(context -> assertThat(context.getBean(InquiryProperties.class).rules().answerTimeout())
+                        .isEqualTo(Duration.ofMinutes(10)));
+        // プロファイルがなければ、既定の60秒
+        runner.withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
+                .run(context -> assertThat(context.getBean(InquiryProperties.class).rules().answerTimeout())
+                        .isEqualTo(Duration.ofSeconds(60)));
     }
 }
