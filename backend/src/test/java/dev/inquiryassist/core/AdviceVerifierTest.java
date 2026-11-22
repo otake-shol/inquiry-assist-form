@@ -108,10 +108,65 @@ class AdviceVerifierTest {
 
     @Test
     void 下書きの依頼は種類が必須で_事実とやり取りは空にできる() {
-        assertThatThrownBy(() -> new DraftRequest(null, null, null, null, null, null, "ja"))
+        assertThatThrownBy(() -> new DraftRequest(null, null, null, null, null, null, null, "ja"))
                 .isInstanceOf(IllegalArgumentException.class);
-        DraftRequest request = new DraftRequest(ReplyKind.ASK, null, null, null, null, null, "ja");
+        DraftRequest request = new DraftRequest(ReplyKind.ASK, null, null, null, null, null, null, "ja");
         assertThat(request.confirmedFindings()).isEmpty();
         assertThat(request.messages()).isEmpty();
+    }
+
+    // ---- 先例 ----
+
+    private static Advice.Judgment judgmentOn(List<Integer> facts, List<Integer> precedents) {
+        return new Advice.Judgment("判断の案", false, null, facts, precedents);
+    }
+
+    private static Advice.Procedure procedureOn(List<Integer> facts, List<Integer> precedents) {
+        return new Advice.Procedure(List.of(new Advice.Step("対象", "操作", "確かめ方")), null, facts, precedents);
+    }
+
+    @Test
+    void 事実だけに基づく案と先例だけに基づく案はどちらも残る() {
+        Advice verified = AdviceVerifier.verify(
+                new Advice(judgmentOn(List.of(1), List.of()), procedureOn(List.of(), List.of(2))), 1, 2);
+
+        assertThat(verified.judgment().basedOn()).containsExactly(1);
+        assertThat(verified.judgment().basedOnPrecedents()).isEmpty();
+        assertThat(verified.procedure().basedOn()).isEmpty();
+        assertThat(verified.procedure().basedOnPrecedents()).containsExactly(2);
+    }
+
+    @Test
+    void 事実と先例の番号は別々に確かめる() {
+        Advice verified = AdviceVerifier.verify(new Advice(judgmentOn(List.of(1, 3), List.of(1, 2, 9)), null), 2, 2);
+
+        assertThat(verified.judgment().basedOn()).containsExactly(1);
+        assertThat(verified.judgment().basedOnPrecedents()).containsExactly(1, 2);
+        // 先例を渡していなければ、先例の番号はどれも存在しない
+        assertThat(AdviceVerifier.verify(new Advice(judgmentOn(List.of(1), List.of(1)), null), 1).judgment().basedOnPrecedents())
+                .isEmpty();
+    }
+
+    @Test
+    void 事実と先例の番号がどちらも存在しなければ案を捨てる_片方が残れば残る() {
+        Advice neither = AdviceVerifier.verify(
+                new Advice(judgmentOn(List.of(5), List.of(7)), procedureOn(List.of(0), List.of(8))), 2, 2);
+        assertThat(neither.judgment()).isNull();
+        assertThat(neither.procedure()).isNull();
+
+        Advice factKept = AdviceVerifier.verify(new Advice(judgmentOn(List.of(1), List.of(9)), null), 1, 1);
+        assertThat(factKept.judgment().basedOn()).containsExactly(1);
+        assertThat(factKept.judgment().basedOnPrecedents()).isEmpty();
+        Advice precedentKept = AdviceVerifier.verify(new Advice(judgmentOn(List.of(9), List.of(1)), null), 1, 1);
+        assertThat(precedentKept.judgment().basedOn()).isEmpty();
+        assertThat(precedentKept.judgment().basedOnPrecedents()).containsExactly(1);
+    }
+
+    @Test
+    void 先例に対応する前の作り方は先例なしの案になる() {
+        assertThat(new Advice.Judgment("案", false, null, List.of(1)).basedOnPrecedents()).isEmpty();
+        assertThat(new Advice.Procedure(List.of(new Advice.Step("a", "b", "c")), null, List.of(1)).basedOnPrecedents())
+                .isEmpty();
+        assertThat(new Advice.Judgment("案", false, null, null, null).basedOnPrecedents()).isEmpty();
     }
 }

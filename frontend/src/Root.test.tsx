@@ -135,6 +135,41 @@ describe("パスによる画面の切り替え", () => {
     ).toBeInTheDocument();
   });
 
+  it("(l) /precedents では先例の一覧が出る。/precedentsx は本人向けの画面", async () => {
+    window.history.pushState({}, "", "/precedents?type=HOW_TO");
+    installFakeFetch({
+      "GET /api/precedents?type=HOW_TO": { body: { items: [] } },
+    });
+    const view = render(
+      <Root
+        subscribeAnswers={new FakeStream().subscribe}
+        subscribeOperator={new FakeOperatorStream().subscribe}
+      />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "先例の一覧", level: 1 }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("先例は、まだありません。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "何をしたいですか" }),
+    ).not.toBeInTheDocument();
+    view.unmount();
+
+    window.history.pushState({}, "", "/precedentsx");
+    installFakeFetch({});
+    render(
+      <Root
+        subscribeAnswers={new FakeStream().subscribe}
+        subscribeOperator={new FakeOperatorStream().subscribe}
+      />,
+    );
+    expect(
+      await screen.findByRole("group", { name: "何をしたいですか" }),
+    ).toBeInTheDocument();
+  });
+
   it("(j) /operator 以外では本人向けの画面が出る", async () => {
     installFakeFetch({});
     render(

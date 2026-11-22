@@ -4,6 +4,7 @@ import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.lifecycle.DeclineReason;
 import dev.inquiryassist.core.lifecycle.Phase;
 import dev.inquiryassist.core.lifecycle.ReplyKind;
+import dev.inquiryassist.inquiry.DecisionService;
 import dev.inquiryassist.inquiry.DraftResult;
 import dev.inquiryassist.inquiry.OperatorDetail;
 import dev.inquiryassist.inquiry.OperatorList;
@@ -51,16 +52,23 @@ public class OperatorController {
     private final OperatorService operators;
     private final OperatorStreamHub hub;
     private final TranslationService translations;
+    private final DecisionService decisions;
 
     /**
      * @param operators 一覧・詳細・既読化
      * @param hub ツール内の通知の配信
      * @param translations 訳
+     * @param decisions 決定の記録
      */
-    public OperatorController(OperatorService operators, OperatorStreamHub hub, TranslationService translations) {
+    public OperatorController(
+            OperatorService operators,
+            OperatorStreamHub hub,
+            TranslationService translations,
+            DecisionService decisions) {
         this.operators = operators;
         this.hub = hub;
         this.translations = translations;
+        this.decisions = decisions;
     }
 
     /**
@@ -166,6 +174,27 @@ public class OperatorController {
     @PostMapping("/inquiries/{id}/consultations/cancel")
     public OperatorDetail cancelConsultation(@PathVariable UUID id, @ViewerLang String lang) {
         return operators.cancelConsultation(id, lang);
+    }
+
+    /**
+     * 担当者が、仕様の持ち主の代わりに決定を記録する（担当者の番か、相談している間）。
+     *
+     * @param id 問い合わせの識別子
+     * @param request 決定（持ち主の「決める」と同じ本文。{@code decidedBy} は、決めた人の名前）
+     * @param lang 見る人の言語
+     * @return 記録後の全内容
+     */
+    @PostMapping("/inquiries/{id}/decision")
+    public OperatorDetail recordDecision(
+            @PathVariable UUID id, @Valid @RequestBody OwnerController.DecisionRequest request, @ViewerLang String lang) {
+        return decisions.recordByOperator(
+                id,
+                request.decisionKind(),
+                request.decision(),
+                request.reason(),
+                request.situation(),
+                request.decidedBy(),
+                lang);
     }
 
     /**

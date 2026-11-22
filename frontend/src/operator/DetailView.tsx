@@ -3,6 +3,7 @@ import type { PlacementInput, ReplyKind } from "../api/client.ts";
 import type {
   ConfigSystem,
   DeclineReasonKind,
+  DecisionRequest,
   DraftResult,
   OperatorDetail,
   Translation,
@@ -17,6 +18,7 @@ import { languageName } from "../i18n/messages.ts";
 import {
   ConsultForm,
   ConsultationWaiting,
+  DecisionRecordFold,
   DecisionsSection,
 } from "./Consultation.tsx";
 import { openConsultationOf } from "./consultations.ts";
@@ -88,6 +90,8 @@ interface DetailViewProps {
   onConsult: (to: string[], question: string) => Promise<boolean>;
   /** 相談を取り下げる。成功したら true */
   onCancelConsultation: () => Promise<boolean>;
+  /** 会議などで決まった決定を記録する。成功したら true */
+  onRecordDecision: (request: DecisionRequest) => Promise<boolean>;
 }
 
 /**
@@ -118,6 +122,7 @@ export function DetailView({
   onDecline,
   onConsult,
   onCancelConsultation,
+  onRecordDecision,
 }: DetailViewProps) {
   const dict = useMessages();
   const OP_TEXT = dict.op;
@@ -273,6 +278,12 @@ export function DetailView({
               questionRef={consultRef}
               onSubmit={onConsult}
             />
+            <DecisionRecordFold
+              detail={detail}
+              busy={busy}
+              failed={false}
+              onSubmit={onRecordDecision}
+            />
             <DeclineForm
               open={declineOpen}
               onToggle={setDeclineOpen}
@@ -282,11 +293,19 @@ export function DetailView({
             />
           </>
         ) : detail.ending === null && detail.awaiting === "CONSULTATION" ? (
-          <ConsultationWaiting
-            consultation={openConsultationOf(detail)}
-            busy={busy}
-            onCancel={onCancelConsultation}
-          />
+          <>
+            <ConsultationWaiting
+              consultation={openConsultationOf(detail)}
+              busy={busy}
+              onCancel={onCancelConsultation}
+            />
+            <DecisionRecordFold
+              detail={detail}
+              busy={busy}
+              failed={false}
+              onSubmit={onRecordDecision}
+            />
+          </>
         ) : (
           <p className="op-waiting">{waitingText(detail, OP_TEXT)}</p>
         )}

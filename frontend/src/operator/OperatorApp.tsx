@@ -21,8 +21,8 @@ import type {
   Translation,
 } from "../api/types.ts";
 import { BoardColumn } from "../components/BoardColumn.tsx";
-import { DevLinks } from "../components/Navigation.tsx";
-import { NEW_INQUIRY_PATH, OWNER_PATH } from "../path.ts";
+import { DevLinks, NavLink } from "../components/Navigation.tsx";
+import { NEW_INQUIRY_PATH, OWNER_PATH, PRECEDENTS_PATH } from "../path.ts";
 import { useI18n, useMessages } from "../i18n/context.ts";
 import { LanguageSwitch } from "../components/LanguageSwitch.tsx";
 import { DetailView, type FocusRequest } from "./DetailView.tsx";
@@ -506,6 +506,7 @@ export function OperatorApp({
     <div className="operator">
       <header className="op-head">
         <h1>{OP_TEXT.title}</h1>
+        <NavLink to={PRECEDENTS_PATH}>{OP_TEXT.precedentsNav}</NavLink>
         {unread > 0 && (
           <span className="op-unread" aria-label={OP_TEXT.unreadCount(unread)}>
             {OP_TEXT.unread} {unread}
@@ -675,6 +676,11 @@ export function OperatorApp({
                 }
                 onCancelConsultation={() =>
                   operate(detail.id, () => api.cancelConsultation(detail.id))
+                }
+                onRecordDecision={(request) =>
+                  operate(detail.id, () =>
+                    api.recordDecision(detail.id, request),
+                  )
                 }
               />
             )}

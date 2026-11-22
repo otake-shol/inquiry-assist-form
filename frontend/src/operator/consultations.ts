@@ -30,11 +30,11 @@ const SITUATION_HEAD_LENGTH = 200;
  */
 export function initialSituationOf(
   detail: Pick<OperatorDetail, "structured" | "utterance">,
-  consultation: Pick<Consultation, "question">,
+  consultation: Pick<Consultation, "question"> | null,
 ): string {
   if (detail.structured !== null) return detail.structured.summary;
   if (detail.utterance !== null) {
     return detail.utterance.slice(0, SITUATION_HEAD_LENGTH);
   }
-  return consultation.question;
+  return consultation === null ? "" : consultation.question;
 }

@@ -160,6 +160,35 @@ describe("英語の言葉の対応表（docs/ux-principles.md）", () => {
     );
   });
 
+  it("先例の言葉が、表に揃っている", () => {
+    expect(en.op.precedentsTitle).toBe("Precedents for the same place");
+    expect(en.op.precedentsEmpty).toBe(
+      "There are no precedents for the same place yet.",
+    );
+    expect(en.op.precedentUnconfirmed).toBe(
+      "Not yet confirmed by the person who decided",
+    );
+    expect(en.op.precedentsNav).toBe("Precedents");
+    expect(en.op.adviceBasedOnPrecedents).toBe("Based on precedents");
+    expect(en.op.recordDecisionSummary).toBe(
+      "Record a decision (made in a meeting or elsewhere)",
+    );
+    expect(en.op.recordDecisionNote).toBe(
+      "It will appear on the spec owner's screen so that the person who decided can confirm it.",
+    );
+    expect(ja.op.recordDecisionSummary).toBe(
+      "決定を記録する（会議などで決まった場合）",
+    );
+    expect(en.owner.confirm).toBe("This is correct");
+    expect(en.owner.edit).toBe("Edit");
+    expect(en.owner.unconfirmedTitle).toBe("Precedents to confirm");
+    expect(ja.owner.confirm).toBe("このとおりです");
+    expect(en.precedents.title).toBe("Precedents");
+    expect(en.precedents.empty).toBe("There are no precedents yet.");
+    expect(en.precedents.openOriginal).toBe("Open the original inquiry");
+    expect(ja.precedents.empty).toBe("先例は、まだありません。");
+  });
+
   it("担当者の画面の主な言葉が、表に揃っている", () => {
     expect(en.op.columns).toEqual({
       OPERATOR: "Staff's turn",

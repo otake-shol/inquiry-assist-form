@@ -13,6 +13,10 @@ import type {
   OperatorList,
   OwnerList,
   Phase,
+  Precedent,
+  PrecedentFilter,
+  PrecedentList,
+  PrecedentUpdate,
   Translation,
   Urgency,
 } from "./types.ts";
@@ -414,6 +418,67 @@ export function createClient(language: Language) {
   }
 
   /**
+   * `POST /api/operator/inquiries/{id}/decision`。担当者が、会議などで決まった決定を記録する。
+   * 先例が1つできる（確かめられていない状態）。相談している間なら、担当者の番に戻る。応答は担当者向けの詳細。
+   * @param id 問い合わせ ID
+   * @param decision 決定の内容（`decidedBy` は決めた人の名前）
+   */
+  function recordDecision(
+    id: string,
+    decision: DecisionRequest,
+  ): Promise<OperatorDetail> {
+    return request<OperatorDetail>(
+      "POST",
+      `/api/operator/inquiries/${id}/decision`,
+      decision,
+    );
+  }
+
+  /**
+   * `GET /api/precedents`。先例の一覧（新しい順、最大100件）。
+   * @param filter 置き場所の絞り込みと、確かめられていないものだけ
+   */
+  function getPrecedents(filter: PrecedentFilter = {}): Promise<PrecedentList> {
+    const query = new URLSearchParams();
+    if (filter.systemId) query.set("systemId", filter.systemId);
+    if (filter.functionId) query.set("functionId", filter.functionId);
+    if (filter.type) query.set("type", filter.type);
+    if (filter.unconfirmedOnly) query.set("unconfirmedOnly", "true");
+    const text = query.toString();
+    return request<PrecedentList>(
+      "GET",
+      text === "" ? "/api/precedents" : `/api/precedents?${text}`,
+    );
+  }
+
+  /**
+   * `PUT /api/precedents/{id}`。先例を直す（直すと、確かめたことになる）。
+   * @param id 先例の id
+   * @param update 直した内容
+   */
+  function updatePrecedent(
+    id: string,
+    update: PrecedentUpdate,
+  ): Promise<Precedent> {
+    return request<Precedent>(
+      "PUT",
+      `/api/precedents/${encodeURIComponent(id)}`,
+      update,
+    );
+  }
+
+  /**
+   * `POST /api/precedents/{id}/confirm`。先例を確かめた（本文なし）。
+   * @param id 先例の id
+   */
+  function confirmPrecedent(id: string): Promise<Precedent> {
+    return request<Precedent>(
+      "POST",
+      `/api/precedents/${encodeURIComponent(id)}/confirm`,
+    );
+  }
+
+  /**
    * `POST /api/operator/inquiries/{id}/translation`。本人の言語で書かれた文章の訳を見る。
    * 訳す先は見る人の言語（`Accept-Language`）。状態は変えず、原文は置き換えない。
    * @param id 問い合わせ ID
@@ -486,6 +551,10 @@ export function createClient(language: Language) {
     getOwnerList,
     getOwnerDetail,
     decide,
+    recordDecision,
+    getPrecedents,
+    updatePrecedent,
+    confirmPrecedent,
     setPhase,
     setPlacement,
   };

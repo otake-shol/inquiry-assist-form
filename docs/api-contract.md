@@ -527,6 +527,8 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 
 ### 助言と下書き
 
+- **助言（先例があるとき）**: 同じ置き場所の先例が渡されたら、判断の案の文章を「同じ置き場所の先例を当てはめられそうです。先例の決定: （1件目の先例の決定）」にし、1件目の先例に基づかせる（事実があれば、1件目の事実にも基づかせる）。`needsConsultation` は `false`（`[相談]` を付けた場合は `true`）。
+- **下書き（決定があるとき）**: `RESULT` の文章は、`note` がなければ、その問い合わせについての決定の内容を使う（決定がなければ、これまでどおり判断の案、事実の順）。
 - **助言**: タグがなければ、判断の案を1つ返す（1件目の事実に基づく。`needsConsultation` は `false`。文章は「資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。」）。種類が `DO_FOR_ME` か `CHANGE_REQUEST` のときは、手順の案も返す（手順2つと、元に戻す方法。最後の事実に基づく）。
 - **下書き**: 種類（`kind`）と本人の言語で、決まった文章を返す。`note` があれば、文章の中にそのまま入れる。
   - `ASK`、`ja`: 「確認させてください。（note、なければ「起きている場面を、もう少し詳しく教えていただけますか。」）」
@@ -633,7 +635,7 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 ### `GET /api/operator/inquiries/{id}`
 
-`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`handoverReason`、`investigation`（「調査の状況と、裏での調査」の節）、`advice`（「AI の案」の節）、`defaultConsultants`・`consultations`・`decisions`（「仕様の持ち主への相談」の節）、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
+`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`handoverReason`、`investigation`（「調査の状況と、裏での調査」の節）、`advice`（「AI の案」の節）、`defaultConsultants`・`consultations`・`decisions`・`precedents`（「仕様の持ち主への相談」の節）、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
 
 `followUps` は廃止し、`intake` に置き換える。入力を終える前に担当者へ送られることがなくなったため、「未回答」の状態は要らなくなった。
 
@@ -655,9 +657,11 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 | `/operator` | ボード。問い合わせは未選択 |
 | `/operator/{id}` | ボードと、その問い合わせの詳細のパネルを開いた状態 |
 
+先例の一覧の画面は `/precedents`（担当者と仕様の持ち主の両方が見る）。
+
 仕様の持ち主の画面は `/owner`（決定を待っている相談の一覧）と `/owner/{id}`（その問い合わせの材料と、決定の入力）。`{id}` が存在しない、または相談したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。
 
-一覧で問い合わせを選ぶと URL が `/operator/{id}` に変わり、ブラウザの「戻る」で前の選択に戻れる。`{id}` が存在しない、または担当者に渡したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。`/operator` でも `/owner` でも始まらないパスは本人向けの画面。
+一覧で問い合わせを選ぶと URL が `/operator/{id}` に変わり、ブラウザの「戻る」で前の選択に戻れる。`{id}` が存在しない、または担当者に渡したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。`/operator`、`/owner`、`/precedents` のどれでも始まらないパスは本人向けの画面。
 
 ### `POST /api/operator/inquiries/{id}/read`
 
@@ -789,9 +793,10 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 | `status` | `NOT_RUN`（作っていない。確かめられた事実がない場合を含む）、`RUNNING`、`DONE`、`FAILED` |
 | `judgment` | 判断の案。なければ `null`。`needsConsultation` は、仕様の持ち主への相談が要りそうか。`consultationReason` は、その理由（要らなければ `null`） |
 | `procedure` | 作業の手順の案。なければ `null`。`steps` は、行う順。`rollback` は、元に戻す方法（なければ `null`） |
-| `basedOn` | その案が基づく事実の文（`answer.memo.findings` の文と同じもの）。1件以上。基づく事実のない案は、API が返さない |
+| `basedOn` | その案が基づく事実の文（`answer.memo.findings` の文と同じもの）。なければ空配列 |
+| `basedOnPrecedents` | その案が基づく先例（「仕様の持ち主への相談」の節）。なければ空配列。`basedOn` と合わせて1件以上。どちらもない案は、API が返さない |
 
-- 案は、担当者の番の問い合わせに、確かめられた事実が1つ以上あるときに、裏で作る。調べ直して調査の結果が置き換わると、前の案は消え、作り直される。
+- 案は、担当者の番の問い合わせに、確かめられた事実か、同じ置き場所の先例が1つ以上あるときに、裏で作る。調べ直して調査の結果が置き換わると、前の案は消え、作り直される。
 - 案ができたとき、失敗したときは、担当者のストリームに `updated` を流す（未読には戻さない。未読に戻すのは、調査の結果が届いたとき）。
 - 案の文章は、既定の言語で書かれる（書かれた内容なので、見る人の言語では切り替わらない）。
 - 担当者の操作が、案を保存する瞬間と重なると、操作が `INVALID_STATE`（他の操作と競合しました）になることがある。やり直せば通る（裏での調査の結果の保存と同じ）。
@@ -895,9 +900,45 @@ inquiry:
 
 - 先例のマス（`type`、`system`、`function`）は、決めた時点の問い合わせの置き場所。後から問い合わせを置き直しても、先例のマスは変えない。名前（`label`）は、見る人の言語で返す。
 - `situation`、`decision`、`reason` は、書かれた内容。書かれたときのまま持ち、訳さない。`language` は、決めたときの見る人の言語。
-- `recordedBy` は、記録した人（`OWNER`。担当者が代わりに記録する場合は、後の区切りで加える）。`confirmed` は、決めた人が内容を確かめたか（持ち主が自分で記録した先例は、最初から `true`）。
+- `recordedBy` は、記録した人。`OWNER`（仕様の持ち主が、相談に答えて記録した）か `OPERATOR`（担当者が、代わりに記録した。下の「担当者が決定を記録する」）。`confirmed` は、決めた人が内容を確かめたか。持ち主が自分で記録した先例は、最初から `true`。担当者が記録した先例は `false` で始まり、持ち主が確かめるか直すと `true` になる。
 - 担当者向けの詳細は、その問い合わせから生まれた先例を `decisions`（古い順の配列）として返す。
 - 先例と相談は、担当者と持ち主にだけ返す。本人向けの InquiryView には含めない。本人には、`turn: OWNER`、`awaiting: CONSULTATION` であることだけが見える。
+
+**担当者が決定を記録する**（`POST /api/operator/inquiries/{id}/decision`）: 決定が、会議や別の連絡手段で下された場合に、担当者が、決めた人の名前を添えて記録する。本文は、持ち主の「決める」と同じ（`decidedBy` は、決めた人の名前）。
+
+- 実行できるのは、担当者の番（`HANDLING`）か、相談している間（`CONSULTATION`）。
+- 先例を1つ作る（`recordedBy: OPERATOR`、`confirmed: false`）。
+- 相談している間なら、相談を `DECIDED` にして、担当者の番に戻す（履歴の `DECIDED` の起こした人は `OPERATOR`。`handoverReason: DECIDED`）。担当者の番のときは、状態を変えない（履歴にも入れない）。
+- 応答は、担当者向けの詳細。
+- 決めた人が後から確かめられるように、確かめられていない先例は、持ち主の画面に出す（下の「先例の一覧」の `unconfirmedOnly`）。
+
+**先例の一覧と、直すこと**（担当者と仕様の持ち主の両方が使う。`/api/precedents`）:
+
+| エンドポイント | 内容 |
+| --- | --- |
+| `GET /api/precedents` | 先例の一覧。新しい順、最大100件。クエリ `systemId`、`functionId`、`type` で置き場所を絞る（指定した項目が一致するものだけ）。`unconfirmedOnly=true` で、確かめられていない先例だけ。`200` `{ "items": [先例] }` |
+| `PUT /api/precedents/{id}` | 直す。本文は `{ "situation", "decisionKind", "decision", "reason", "decidedBy" }`（すべて必須。決まりは「決める」と同じ）。直すと `confirmed: true` になる（直すのは、決めた人か、その人に確かめた人のため）。置き場所と、元の問い合わせは変えられない。`200` 先例 |
+| `POST /api/precedents/{id}/confirm` | 確かめた。本文なし。`confirmed: true` にする。`200` 先例 |
+
+存在しない id は `NOT_FOUND`。入力の誤りは `VALIDATION`。先例は消せない（後の決定で上書きする仕組みは、次の版）。
+
+**同じ置き場所の先例**（`precedents`）: 担当者向けの詳細は、その問い合わせと同じ置き場所の先例を、材料として返す。
+
+- 同じ置き場所とは、システムと種類が同じこと。問い合わせのシステムか種類が決まっていなければ、空。
+- 並びは、機能が同じ先例を先に、それ以外（機能が違う、決まっていない）を後に。その中は新しい順。最大5件。
+- その問い合わせ自身から生まれた先例は、含めない（`decisions` にある）。
+- 確かめられていない先例も含める（`confirmed: false` で見分けられる）。
+- 言語は問わない。先例は、書かれた言語のまま返す。
+- 取得のたびに引き直す（別の件で新しい先例ができれば、次に開いたときに出る）。
+
+**AI の案と先例**: 助言には、確かめられた事実に加えて、同じ置き場所の先例を渡す。案は、基づく事実か、基づく先例の、どちらかを1つ以上持つ（どちらもない案は、コードが捨てる）。助言を呼ぶ条件は、確かめられた事実が1つ以上あること、または同じ置き場所の先例が1つ以上あること（調べない種類の件でも、先例があれば案が出る）。`advice` の `judgment` と `procedure` は、`basedOn`（事実の文）に加えて、`basedOnPrecedents` を持つ。
+
+```json
+"basedOnPrecedents": [{ "id": "9c1d…", "decision": "期限ちょうどの時刻から期限切れとして扱うのは、意図した仕様です。", "decidedBy": "仕様の持ち主（開発用）", "decidedAt": "2026-11-22T04:00:00Z" }]
+```
+
+- 案を作った後に新しい先例ができても、案は作り直さない。担当者が調べ直すと、その時点の先例で作り直す。
+- 返信の下書きには、その問い合わせについての決定（`decisions` の最後のもの）があれば、それを渡す。
 
 **相談している間の、ほかの操作**:
 

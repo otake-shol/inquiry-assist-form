@@ -489,6 +489,20 @@ export const ja = {
       DEFER: "見送る",
       OTHER: "その他",
     } as Record<DecisionKind, string>,
+    /** 同じ置き場所の先例（「調べた結果」のすぐ下の節） */
+    precedentsTitle: "同じ置き場所の先例",
+    precedentsEmpty: "同じ置き場所の先例は、まだありません。",
+    precedentsLink: "先例の一覧を見る",
+    precedentUnconfirmed: "決めた人が、まだ確かめていません",
+    precedentFunction: (name: string) => `機能: ${name}`,
+    /** 担当者のボードと持ち主の画面の上部の、先例の一覧へのリンク */
+    precedentsNav: "先例",
+    /** AI の案が基づく先例 */
+    adviceBasedOnPrecedents: "基づく先例",
+    /** 決定を記録する（会議などで決まった場合） */
+    recordDecisionSummary: "決定を記録する（会議などで決まった場合）",
+    recordDecisionNote:
+      "決めた人が後から確かめられるように、仕様の持ち主の画面に出ます。",
   },
 
   /** 仕様の持ち主の画面の文言 */
@@ -519,6 +533,26 @@ export const ja = {
     note: "決定は先例として残り、次の同じ種類の問い合わせで、担当者と AI が参照します。本人への連絡は、担当者が行います。",
     recorded: "決定を記録しました。担当者の番に戻りました。",
     notWaiting: "この相談は、すでに決まったか、取り下げられています。",
+    unconfirmedTitle: "確かめてほしい先例",
+    confirm: "このとおりです",
+    edit: "直す",
+    save: "保存",
+    cancel: "やめる",
+  },
+
+  /** 先例の一覧の画面の文言 */
+  precedents: {
+    title: "先例の一覧",
+    filterLabel: "絞り込み",
+    system: "システム",
+    function: "機能",
+    type: "種類",
+    all: "すべて",
+    empty: "先例は、まだありません。",
+    openOriginal: "元の問い合わせを見る",
+    toOperator: "担当者のボードへ",
+    toOwner: "仕様の持ち主の画面へ",
+    listLabel: "先例",
   },
 
   /** モックの案内枠（開発者向け） */

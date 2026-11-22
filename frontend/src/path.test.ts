@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { inquiryPathOf, ownerPathOf, parseRoute } from "./path.ts";
+import {
+  inquiryPathOf,
+  ownerPathOf,
+  parsePrecedentQuery,
+  parseRoute,
+  precedentsPathOf,
+} from "./path.ts";
 
 describe("parseRoute", () => {
   it("/ は新しい問い合わせ、/inquiries は一覧", () => {
@@ -50,6 +56,26 @@ describe("parseRoute", () => {
     expect(ownerPathOf("op-1")).toBe("/owner/op-1");
   });
 
+  it("/precedents は先例の一覧。絞り込みはクエリから別に読む（パスの判定には含めない）", () => {
+    expect(parseRoute("/precedents")).toEqual({ kind: "precedents" });
+    expect(parseRoute("/precedents/")).toEqual({ kind: "precedents" });
+  });
+
+  it("先例の一覧のパスは、指定のある項目だけをクエリに入れ、読み取りと往復できる", () => {
+    expect(precedentsPathOf()).toBe("/precedents");
+    expect(precedentsPathOf({ systemId: "s", type: "HOW_TO" })).toBe(
+      "/precedents?systemId=s&type=HOW_TO",
+    );
+    const query = { systemId: "a b", functionId: "f&1", type: "LOOKS_WRONG" };
+    expect(parsePrecedentQuery(precedentsPathOf(query).split("?")[1])).toEqual(
+      query,
+    );
+    expect(parsePrecedentQuery("")).toEqual({});
+    expect(parsePrecedentQuery("?systemId=&type=x&other=1")).toEqual({
+      type: "x",
+    });
+  });
+
   it("別の単語や深いパスは新しい問い合わせ（本人向けの入力）として扱う", () => {
     for (const path of [
       "/inquiriesx",
@@ -59,6 +85,8 @@ describe("parseRoute", () => {
       "/operatorx",
       "/operator/a/b",
       "/ownerx",
+      "/precedentsx",
+      "/precedents/a",
       "/owner/a/b",
       "/x/owner",
     ]) {

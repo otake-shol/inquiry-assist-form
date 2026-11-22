@@ -528,7 +528,7 @@ class MockSkillsTest {
 
     @Test
     void 助言はタグがなければ判断の案を1つ返し_1件目の事実に基づく() {
-        var advice = advisor.advise(inquiry(InquiryType.HOW_IT_WORKS, "期限"), InquiryType.HOW_IT_WORKS, twoFindings(), "ja")
+        var advice = advisor.advise(inquiry(InquiryType.HOW_IT_WORKS, "期限"), InquiryType.HOW_IT_WORKS, twoFindings(), List.of(), "ja")
                 .value();
 
         assertThat(advice.judgment().text()).isEqualTo("資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。");
@@ -542,7 +542,7 @@ class MockSkillsTest {
     @Test
     void 助言はDO_FOR_MEとCHANGE_REQUESTで手順の案も返し_最後の事実に基づく() {
         for (InquiryType type : List.of(InquiryType.DO_FOR_ME, InquiryType.CHANGE_REQUEST)) {
-            var procedure = advisor.advise(inquiry(type, "延長"), type, twoFindings(), "ja").value().procedure();
+            var procedure = advisor.advise(inquiry(type, "延長"), type, twoFindings(), List.of(), "ja").value().procedure();
 
             assertThat(procedure.steps()).hasSize(2);
             assertThat(procedure.rollback()).isEqualTo("掲載期限を、元の日付に戻す");
@@ -552,20 +552,20 @@ class MockSkillsTest {
 
     @Test
     void 助言の相談_手順_根拠なしの案のタグ() {
-        var consult = advisor.advise(inquiry(InquiryType.HOW_TO, "[相談] 期限"), InquiryType.HOW_TO, twoFindings(), "ja")
+        var consult = advisor.advise(inquiry(InquiryType.HOW_TO, "[相談] 期限"), InquiryType.HOW_TO, twoFindings(), List.of(), "ja")
                 .value()
                 .judgment();
         assertThat(consult.needsConsultation()).isTrue();
         assertThat(consult.consultationReason()).isNotBlank();
 
         // [手順] は、種類にかかわらず手順の案を返す
-        var withProcedure = advisor.advise(inquiry(InquiryType.HOW_TO, "[手順] 期限"), InquiryType.HOW_TO, twoFindings(), "ja")
+        var withProcedure = advisor.advise(inquiry(InquiryType.HOW_TO, "[手順] 期限"), InquiryType.HOW_TO, twoFindings(), List.of(), "ja")
                 .value();
         assertThat(withProcedure.procedure()).isNotNull();
 
         // [根拠なしの案] は、存在しない番号だけに基づく案を返す（コードが捨てる）
         var ungrounded = advisor.advise(
-                        inquiry(InquiryType.HOW_TO, "[根拠なしの案] 期限"), InquiryType.HOW_TO, twoFindings(), "ja")
+                        inquiry(InquiryType.HOW_TO, "[根拠なしの案] 期限"), InquiryType.HOW_TO, twoFindings(), List.of(), "ja")
                 .value();
         assertThat(ungrounded.judgment().basedOn()).containsExactly(999);
         var verified = dev.inquiryassist.core.AdviceVerifier.verify(ungrounded, 2);
@@ -575,13 +575,13 @@ class MockSkillsTest {
     @Test
     void 助言のエラータグはAI利用不可になる() {
         assertThatThrownBy(() -> advisor.advise(
-                        inquiry(InquiryType.HOW_TO, "[案エラー] 期限"), InquiryType.HOW_TO, twoFindings(), "ja"))
+                        inquiry(InquiryType.HOW_TO, "[案エラー] 期限"), InquiryType.HOW_TO, twoFindings(), List.of(), "ja"))
                 .isInstanceOf(AiUnavailableException.class);
     }
 
     @Test
     void 助言は英語なら英語で書く() {
-        var advice = advisor.advise(inquiry(InquiryType.DO_FOR_ME, "x"), InquiryType.DO_FOR_ME, twoFindings(), "en").value();
+        var advice = advisor.advise(inquiry(InquiryType.DO_FOR_ME, "x"), InquiryType.DO_FOR_ME, twoFindings(), List.of(), "en").value();
 
         assertThat(advice.judgment().text()).matches("^[\\x00-\\x7F]+$");
         assertThat(advice.procedure().steps()).allSatisfy(s -> assertThat(s.action()).matches("^[\\x00-\\x7F]+$"));
@@ -589,12 +589,27 @@ class MockSkillsTest {
     }
 
     private dev.inquiryassist.core.skill.DraftRequest draftRequest(
-            dev.inquiryassist.core.lifecycle.ReplyKind kind, String goal, String note, String judgment, String language) {
+            dev.inquiryassist.core.lifecycle.ReplyKind kind,
+            String goal,
+            String note,
+            String judgment,
+            String language) {
+        return draftRequest(kind, goal, note, judgment, null, language);
+    }
+
+    private dev.inquiryassist.core.skill.DraftRequest draftRequest(
+            dev.inquiryassist.core.lifecycle.ReplyKind kind,
+            String goal,
+            String note,
+            String judgment,
+            String decision,
+            String language) {
         return new dev.inquiryassist.core.skill.DraftRequest(
                 kind,
                 goal == null ? null : inquiry(InquiryType.HOW_IT_WORKS, goal),
                 twoFindings(),
                 judgment,
+                decision,
                 List.of(),
                 note,
                 language);
@@ -738,5 +753,91 @@ class MockSkillsTest {
         var restated = restater.restate("[訳エラー] 期限", InquiryType.HOW_TO, null, null, List.of(), List.of(), "ja").value();
 
         assertThat(restated.summary()).doesNotContain("[訳エラー]");
+    }
+
+    // ---- 先例（契約書「助言（先例があるとき）」「下書き（決定があるとき）」） ----
+
+    private static List<dev.inquiryassist.core.skill.PrecedentNote> precedents() {
+        return List.of(
+                new dev.inquiryassist.core.skill.PrecedentNote("状況1", "AS_INTENDED", "決定1", "理由1"),
+                new dev.inquiryassist.core.skill.PrecedentNote("状況2", "DEFECT", "決定2", "理由2"));
+    }
+
+    @Test
+    void 助言は先例があれば先例を当てはめる案にし_1件目の先例と1件目の事実に基づく() {
+        var advice = advisor.advise(inquiry(InquiryType.HOW_TO, "期限"), InquiryType.HOW_TO, twoFindings(), precedents(), "ja")
+                .value();
+
+        assertThat(advice.judgment().text()).isEqualTo("同じ置き場所の先例を当てはめられそうです。先例の決定: 決定1");
+        assertThat(advice.judgment().needsConsultation()).isFalse();
+        assertThat(advice.judgment().basedOn()).containsExactly(1);
+        assertThat(advice.judgment().basedOnPrecedents()).containsExactly(1);
+        // 相談のタグでは、先例があっても相談が要る
+        var consult = advisor.advise(
+                        inquiry(InquiryType.HOW_TO, "[相談] 期限"), InquiryType.HOW_TO, twoFindings(), precedents(), "ja")
+                .value();
+        assertThat(consult.judgment().needsConsultation()).isTrue();
+    }
+
+    @Test
+    void 助言は事実がなく先例だけがあるとき_先例にだけ基づき_手順の案も先例に基づく() {
+        var advice = advisor.advise(
+                        inquiry(InquiryType.CHANGE_REQUEST, "改善"), InquiryType.CHANGE_REQUEST, List.of(), precedents(), "ja")
+                .value();
+
+        assertThat(advice.judgment().basedOn()).isEmpty();
+        assertThat(advice.judgment().basedOnPrecedents()).containsExactly(1);
+        assertThat(advice.procedure().basedOn()).isEmpty();
+        assertThat(advice.procedure().basedOnPrecedents()).containsExactly(1);
+        // コードの確かめを通っても、残る
+        var verified = dev.inquiryassist.core.AdviceVerifier.verify(advice, 0, 2);
+        assertThat(verified.judgment()).isNotNull();
+        assertThat(verified.procedure()).isNotNull();
+    }
+
+    @Test
+    void 助言の根拠なしの案のタグは先例があっても存在しない番号だけに基づく() {
+        var advice = advisor.advise(
+                        inquiry(InquiryType.HOW_TO, "[根拠なしの案] 期限"),
+                        InquiryType.HOW_TO,
+                        twoFindings(),
+                        precedents(),
+                        "ja")
+                .value();
+
+        assertThat(advice.judgment().basedOn()).containsExactly(999);
+        assertThat(advice.judgment().basedOnPrecedents()).containsExactly(999);
+        assertThat(dev.inquiryassist.core.AdviceVerifier.verify(advice, 2, 2).judgment()).isNull();
+    }
+
+    @Test
+    void 助言は先例がなければこれまでどおり_先例の英語() {
+        var plain = advisor.advise(inquiry(InquiryType.HOW_TO, "期限"), InquiryType.HOW_TO, twoFindings(), List.of(), "ja").value();
+        assertThat(plain.judgment().text()).isEqualTo("資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。");
+        assertThat(plain.judgment().basedOnPrecedents()).isEmpty();
+
+        var en = advisor.advise(inquiry(InquiryType.HOW_TO, "x"), InquiryType.HOW_TO, twoFindings(), precedents(), "en").value();
+        assertThat(en.judgment().text()).startsWith("A precedent for the same place may apply. Precedent decision: ");
+    }
+
+    @Test
+    void 下書きの結果はnote_決定_判断の案_事実の順で使う() {
+        var kind = dev.inquiryassist.core.lifecycle.ReplyKind.RESULT;
+        String lead = "お待たせしました。確認した結果をお伝えします。";
+
+        assertThat(drafter.draft(draftRequest(kind, "期限", "メモ", "判断の案", "決定の内容", "ja")).value().text())
+                .isEqualTo(lead + "メモ");
+        assertThat(drafter.draft(draftRequest(kind, "期限", null, "判断の案", "決定の内容", "ja")).value().text())
+                .isEqualTo(lead + "決定の内容");
+        assertThat(drafter.draft(draftRequest(kind, "期限", null, "判断の案", null, "ja")).value().text())
+                .isEqualTo(lead + "判断の案");
+        assertThat(drafter.draft(draftRequest(kind, "期限", null, null, null, "ja")).value().text()).isEqualTo(lead + "事実1");
+        assertThat(drafter.draft(draftRequest(kind, "期限", null, "判断の案", "The decision.", "en")).value().text())
+                .isEqualTo("Thank you for waiting. Here is what we found. The decision.");
+        // 聞き返しは、決定を使わない
+        assertThat(drafter.draft(draftRequest(dev.inquiryassist.core.lifecycle.ReplyKind.ASK, "期限", null, null, "決定の内容", "ja"))
+                        .value()
+                        .text())
+                .doesNotContain("決定の内容");
     }
 }

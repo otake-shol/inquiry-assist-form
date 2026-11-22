@@ -48,6 +48,7 @@ import java.util.UUID;
  * @param defaultConsultants 既定の相談先（置き場所から決まる）。なければ空
  * @param consultations 仕様の持ち主への相談（古い順）
  * @param decisions この問い合わせから生まれた先例（古い順）
+ * @param precedents 同じ置き場所の先例（機能が同じものが先、新しい順、最大5件。その問い合わせ自身の先例は含めない）
  * @param noReply 返事がないときの決まりの予定。本人の返事（結果の確かめ、聞き返しへの返事）を待っている間だけ非 null
  * @param messages 担当者の発言と本人の追記（古い順）
  * @param history 状態の履歴（起きた順）
@@ -83,6 +84,7 @@ public record OperatorDetail(
         List<String> defaultConsultants,
         List<Consultation> consultations,
         List<PrecedentView> decisions,
+        List<PrecedentView> precedents,
         InquiryView.NoReplyView noReply,
         List<MessageView> messages,
         List<HistoryEntry> history,

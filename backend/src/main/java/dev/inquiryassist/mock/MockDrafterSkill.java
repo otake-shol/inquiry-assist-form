@@ -21,7 +21,7 @@ public class MockDrafterSkill implements DrafterSkill {
     /**
      * @param request 依頼
      * @return 下書き。聞き返しは「確認させてください。（note、なければ決まった質問）」、結果は「お待たせしました。確認した結果を
-     *     お伝えします。（note、なければ判断の案、それもなければ1件目の事実）」（{@code en} は同じ組み立ての英語）
+     *     お伝えします。（note、なければ決定の内容、なければ判断の案、それもなければ1件目の事実）」（{@code en} は同じ組み立ての英語）
      * @throws AiUnavailableException {@code [下書きエラー]} の場合
      */
     @Override
@@ -40,7 +40,11 @@ public class MockDrafterSkill implements DrafterSkill {
                             : "起きている場面を、もう少し詳しく教えていただけますか。");
             text = (en ? "Let me check one thing. " : "確認させてください。") + body;
         } else {
+            // note → 決定 → 判断の案 → 事実の順
             String body = note;
+            if (body == null) {
+                body = request.decision();
+            }
             if (body == null) {
                 body = request.judgment();
             }

@@ -431,6 +431,16 @@ export const en: Messages = {
       DEFER: "Not now",
       OTHER: "Other",
     },
+    precedentsTitle: "Precedents for the same place",
+    precedentsEmpty: "There are no precedents for the same place yet.",
+    precedentsLink: "See all precedents",
+    precedentUnconfirmed: "Not yet confirmed by the person who decided",
+    precedentFunction: (name) => `Function: ${name}`,
+    precedentsNav: "Precedents",
+    adviceBasedOnPrecedents: "Based on precedents",
+    recordDecisionSummary: "Record a decision (made in a meeting or elsewhere)",
+    recordDecisionNote:
+      "It will appear on the spec owner's screen so that the person who decided can confirm it.",
   },
 
   owner: {
@@ -460,6 +470,25 @@ export const en: Messages = {
     note: "The decision is kept as a precedent that staff and AI refer to for similar inquiries. Staff will tell the requester.",
     recorded: "The decision was recorded. It is staff's turn again.",
     notWaiting: "This consultation has already been decided or was withdrawn.",
+    unconfirmedTitle: "Precedents to confirm",
+    confirm: "This is correct",
+    edit: "Edit",
+    save: "Save",
+    cancel: "Cancel",
+  },
+
+  precedents: {
+    title: "Precedents",
+    filterLabel: "Filter",
+    system: "System",
+    function: "Function",
+    type: "Type",
+    all: "All",
+    empty: "There are no precedents yet.",
+    openOriginal: "Open the original inquiry",
+    toOperator: "Staff board",
+    toOwner: "Spec owner screen",
+    listLabel: "Precedents",
   },
 
   mock: {

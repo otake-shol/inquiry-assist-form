@@ -146,6 +146,14 @@ async function openPanel(
   return panel;
 }
 
+/** 「見送る」の折りたたみの中の、理由の入力欄（「決定を記録する」にも「理由」がある）。 */
+const declineReason = (panel: HTMLElement) =>
+  within(
+    within(panel)
+      .getByText("見送る", { selector: "summary" })
+      .closest("details")!,
+  ).getByLabelText("理由");
+
 const callsTo = (calls: RecordedCall[], method: string, path: string) =>
   calls.filter((c) => c.method === method && c.path === path);
 
@@ -377,7 +385,8 @@ describe("担当者のボード: ドラッグは操作を始める合図", () =>
     const panel = await screen.findByRole("region", {
       name: "問い合わせの詳細",
     });
-    const reason = await within(panel).findByLabelText("理由");
+    await within(panel).findByText("見送る", { selector: "summary" });
+    const reason = declineReason(panel);
     await waitFor(() => expect(reason).toHaveFocus());
     expect(reason.closest("details")).toHaveAttribute("open");
     expect(writes(calls)).toHaveLength(0);
@@ -686,7 +695,7 @@ describe("担当者のパネル", () => {
     });
     const panel = await openPanel(user, card);
 
-    const reason = within(panel).getByLabelText("理由");
+    const reason = declineReason(panel);
     const details = reason.closest("details")!;
     expect(details).not.toHaveAttribute("open");
     await user.click(within(details).getByText("見送る"));
@@ -1498,7 +1507,7 @@ describe("担当者のパネル: 調査の状況と調べ直す", () => {
     await user.click(
       within(panel).getByText("見送る", { selector: "summary" }),
     );
-    await user.type(within(panel).getByLabelText("理由"), "仕様です");
+    await user.type(declineReason(panel), "仕様です");
 
     act(() => stream.latest.handlers.onUpdated({ ...mine1 }));
 
@@ -1511,7 +1520,7 @@ describe("担当者のパネル: 調査の状況と調べ直す", () => {
     expect(within(panel).getByLabelText("本人に送る")).toHaveValue(
       "確認中です",
     );
-    expect(within(panel).getByLabelText("理由")).toHaveValue("仕様です");
+    expect(declineReason(panel)).toHaveValue("仕様です");
   });
 });
 
@@ -1692,7 +1701,12 @@ describe("担当者のパネル: AI の案", () => {
     const exchange = within(panel)
       .getByRole("heading", { name: "やり取り" })
       .closest("section")!;
-    expect(result.nextElementSibling).toBe(section);
+    // 調べた結果 → 同じ置き場所の先例 → AI の案 → やり取り
+    const precedents = within(panel)
+      .getByRole("heading", { name: "同じ置き場所の先例" })
+      .closest("section")!;
+    expect(result.nextElementSibling).toBe(precedents);
+    expect(precedents.nextElementSibling).toBe(section);
     expect(section.nextElementSibling).toBe(exchange);
   });
 

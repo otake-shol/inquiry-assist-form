@@ -4,12 +4,14 @@ import type {
   Investigation,
   OperatorDetail,
   Placement,
+  PrecedentRef,
   SystemOption,
 } from "../api/types.ts";
 import { MessageThread } from "../components/Exchange.tsx";
 import { AnswerSteps } from "../components/Outcome.tsx";
 import { useMessages } from "../i18n/context.ts";
 import type { Messages } from "../i18n/messages.ts";
+import { PrecedentsSection } from "./Consultation.tsx";
 import { formatFiledAt, opAnswerLabel, opUrgencyLabel } from "./labels.ts";
 
 /**
@@ -64,21 +66,46 @@ function AdviceSection({
   factsLanguage?: string;
   op: Messages["op"];
 }) {
+  const { meta } = useMessages();
   const { status, judgment, procedure } = advice;
   const hasSuggestion = judgment !== null || procedure !== null;
   if (status === "NOT_RUN" || (status === "DONE" && !hasSuggestion)) {
     return null;
   }
-  const basedOn = (facts: string[]) => (
+  const basedOn = (facts: string[], precedents: PrecedentRef[] = []) => (
     <>
-      <h5>{op.adviceBasedOn}</h5>
-      <ul>
-        {facts.map((fact) => (
-          <li key={fact} lang={factsLanguage}>
-            {fact}
-          </li>
-        ))}
-      </ul>
+      {facts.length > 0 && (
+        <>
+          <h5>{op.adviceBasedOn}</h5>
+          <ul>
+            {facts.map((fact) => (
+              <li key={fact} lang={factsLanguage}>
+                {fact}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {precedents.length > 0 && (
+        <>
+          <h5>{op.adviceBasedOnPrecedents}</h5>
+          <ul className="op-based-precedents">
+            {precedents.map((precedent) => (
+              <li key={precedent.id}>
+                <span>{precedent.decision}</span>
+                <span className="op-muted">
+                  {meta.separator}
+                  {precedent.decidedBy}
+                  {meta.separator}
+                  <time dateTime={precedent.decidedAt}>
+                    {formatFiledAt(precedent.decidedAt, meta.locale)}
+                  </time>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </>
   );
   return (
@@ -108,7 +135,7 @@ function AdviceSection({
               op.consultationNotNeeded
             )}
           </p>
-          {basedOn(judgment.basedOn)}
+          {basedOn(judgment.basedOn, judgment.basedOnPrecedents)}
         </div>
       )}
       {status === "DONE" && procedure !== null && (
@@ -134,7 +161,7 @@ function AdviceSection({
               <p lang={adviceLanguage}>{procedure.rollback}</p>
             </>
           )}
-          {basedOn(procedure.basedOn)}
+          {basedOn(procedure.basedOn, procedure.basedOnPrecedents)}
           <p className="op-muted">{op.adviceStaffCarryOut}</p>
         </div>
       )}
@@ -407,6 +434,8 @@ export function MaterialSections({
           </>
         )}
       </section>
+
+      <PrecedentsSection detail={detail} />
 
       <AdviceSection
         advice={detail.advice}

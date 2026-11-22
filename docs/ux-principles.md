@@ -209,6 +209,8 @@ AI が担当者に引き継いだ件では、本人が自分で送っていな�
    - `unconfirmedQuestion` が `true` のときは、続けて「本人が確かめていない言い直しをもとに調べています。」／ "This is based on a restatement the requester has not confirmed." を出す。
    - 調べ直せるとき（終わっていない、言い直しがある、調べている最中でない）は、ボタンを出す。調べたことがなければ「AI に調べさせる」／ "Have AI look into it"、あれば「調べ直す」／ "Look into it again"。ボタンの下に「番は変わりません。結果は、担当者だけに見えます。」／ "The turn does not change. Only staff can see the result." を添える。
    - 開いているパネルの件に、担当者のストリームの `updated` が届いたら、詳細を取り直す（裏での調査が終わると、開いたままのパネルに結果が出る）。
+   **同じ置き場所の先例**（「調べた結果」のすぐ下、「AI の案」の上。`precedents`）: 見出し「同じ置き場所の先例」／ "Precedents for the same place"。先例ごとに、決定の種類、決定の内容、状況、理由、決めた人と日付。機能が違う先例には、その機能の名前を添える。確かめられていない先例には「決めた人が、まだ確かめていません」／ "Not yet confirmed by the person who decided" の印。人が下した決定なので、実線の枠で示す（「仕様の持ち主の決定」と同じ見た目）。なければ「同じ置き場所の先例は、まだありません。」／ "There are no precedents for the same place yet."。節の末尾に、先例の一覧（`/precedents`。この置き場所で絞った状態）へのリンク。
+
    **AI の案**（「調べた結果」のすぐ下。`advice`）: 事実と見分けがつくように、枠を点線にし、見出しに「案」の印をつける。見出しは「AI の案」／ "AI's suggestion"。見出しのすぐ下に「AI が、上の事実から考えた案です。決めるのは担当者です。」／ "This is a suggestion AI drew from the facts above. The decision is yours." を添える。
 
    | 状況 | 出すもの |
@@ -218,7 +220,7 @@ AI が担当者に引き継いだ件では、本人が自分で送っていな�
    | `NOT_RUN`、または `DONE` で案が1つもない | 節を出さない |
    | `DONE` で案がある | 下の2つのうち、あるもの |
 
-   - **判断の案**（見出し「判断の案」／ "Suggested decision"）: 案の文章。続けて、相談が要りそうなら「仕様の持ち主への相談が要りそうです: （理由）」／ "Consulting the spec owner looks necessary: …"、要らなそうなら「相談は要らなそうです。」／ "Consultation does not look necessary."。最後に「基づく事実」／ "Based on" として、事実の文を並べる。
+   - **判断の案**（見出し「判断の案」／ "Suggested decision"）: 案の文章。続けて、相談が要りそうなら「仕様の持ち主への相談が要りそうです: （理由）」／ "Consulting the spec owner looks necessary: …"、要らなそうなら「相談は要らなそうです。」／ "Consultation does not look necessary."。最後に「基づく事実」／ "Based on" として、事実の文を並べる。先例に基づく案では、「基づく先例」／ "Based on precedents" として、先例の決定の内容と、決めた人、日付を並べる（手順の案も同じ）。
    - **手順の案**（見出し「手順の案」／ "Suggested steps"）: 手順を番号つきで並べる。手順ごとに、対象、操作、確かめ方（「対象」「操作」「確かめ方」／ "Target" "Action" "How to check"）。その下に「元に戻す方法」／ "How to undo"（あれば）と、「基づく事実」。末尾に「実行するのは担当者です。」／ "Staff carry this out." を添える。
    - 案の文章は、書かれたときの言語のまま出す（`lang` 属性は、既定の言語）。
 
@@ -227,6 +229,8 @@ AI が担当者に引き継いだ件では、本人が自分で送っていな�
 
 6. **本人に送る**（担当者の番のときだけ）: 入力欄1つと、2つのボタン「聞き返す」「結果を伝える」。押したボタンで、本人の番になったときに本人が何を求められるかが決まる。ボタンの下に、違いを1行で添える（「聞き返す: 本人の返事を待ちます」「結果を伝える: 本人が解決したかを確かめます」）。
    **相談する**（担当者の番のときだけ。折りたたみ。6 のすぐ下）: 相談先（既定の相談先を、チェックの入った状態で並べる。外すことも、「ほかの人」の1行の入力欄で名前を足すこともできる）、相談したいこと（入力欄）、ボタン「仕様の持ち主に相談する」／ "Consult the spec owner"。説明を添える: 「相談している間は、仕様の持ち主の番になります。調べた結果や AI の案は、相談先にも見えます。」／ "While you consult, it is the spec owner's turn. They can see what was found and AI's suggestion."。既定の相談先がなく、名前も足していないときは押せない。
+
+   **決定を記録する**（担当者の番のときと、相談している間。折りたたみ）: 見出し「決定を記録する（会議などで決まった場合）」／ "Record a decision (made in a meeting or elsewhere)"。持ち主の画面の「決める」と同じ項目（状況、決定の種類、決定の内容、理由、決めた人）。決めた人は、名前を書く（相談先の名前を候補に出す）。説明を添える: 「決めた人が後から確かめられるように、仕様の持ち主の画面に出ます。」／ "It will appear on the spec owner's screen so that the person who decided can confirm it."
 
    **相談している間**（`awaiting: CONSULTATION`）: 6 と 7 の代わりに、「仕様の持ち主の決定を待っています（相談先: 名前、名前）」／ "Waiting for the spec owner's decision (consulted: …)"、相談した文章、ボタン「相談を取り下げる」／ "Withdraw the consultation" を出す。取り下げると、担当者の番に戻る。
 
@@ -248,6 +252,7 @@ AI が担当者に引き継いだ件では、本人が自分で送っていな�
   1. **相談**: 相談した人、日時、相談先、相談した文章。
   2. **材料**: 担当者の詳細のパネルと同じ内容を、読み取り専用で出す（置き場所、本人が書いた文章、入口の質問と答え、言い直し、調べた結果、AI の案、やり取り）。担当者の操作（区間、置き直す、本人に送る、見送る、調べ直す、下書き）は出さない。
   3. **決める**: 状況（入力欄。最初から、言い直しの文章を入れておく。「どんな状況についての決定かを、後から読む人に分かるように書きます」／ "Describe the situation so that later readers understand what this decision is about."）、決定の種類（意図どおり、不具合、受ける、受けない、採用する、見送る、その他）、決定の内容、理由、決めた人（相談先の名前から選ぶ。相談先が1人なら、最初から選んでおく。「ほかの人」で名前を書ける）、ボタン「決定を記録する」／ "Record the decision"。説明を添える: 「決定は先例として残り、次の同じ種類の問い合わせで、担当者と AI が参照します。本人への連絡は、担当者が行います。」／ "The decision is kept as a precedent that staff and AI refer to for similar inquiries. Staff will tell the requester."
+- **確かめてほしい先例**（相談の一覧の下）: 担当者が代わりに記録した、確かめられていない先例を並べる。先例ごとに、内容と、「このとおりです」／ "This is correct"（確かめた）、「直す」／ "Edit"（その場で項目を直して保存する）。なければ、この節を出さない。
 - 決めると、その相談は一覧から消え、「決定を記録しました。担当者の番に戻りました。」／ "The decision was recorded. It is staff's turn again." と示す。
 - 言語の切り替え、開発用の画面の行き来（本人の画面、担当者の画面、仕様の持ち主の画面）は、ほかの画面と同じ。
 
@@ -262,6 +267,16 @@ AI が担当者に引き継いだ件では、本人が自分で送っていな�
 | `ADOPT` | 採用する | Adopt |
 | `DEFER` | 見送る | Not now |
 | `OTHER` | その他 | Other |
+
+## 先例の一覧
+
+担当者と仕様の持ち主が、置き場所ごとに先例を見る画面（`/precedents`）。担当者のボードと、仕様の持ち主の画面の上部に、「先例」／ "Precedents" のリンクを置く。
+
+- 上部に絞り込み: システム、機能（選んだシステムのもの）、種類。URL のクエリ（`?systemId=…&functionId=…&type=…`）に持ち、開き直しても、リンクで渡しても同じ絞り込みになる。
+- 先例は新しい順。先例ごとに、置き場所（種類、システム、機能）、決定の種類、決定の内容、状況、理由、決めた人と日付、確かめられていない場合の印、元の問い合わせへのリンク（「元の問い合わせを見る」／ "Open the original inquiry"。担当者の詳細 `/operator/{id}`）。
+- 先例の文章は、書かれたときの言語のまま出す（`lang` 属性）。置き場所の名前と決定の種類は、見る人の言語。
+- なければ「先例は、まだありません。」／ "There are no precedents yet."。
+- この画面では、直せない（直すのは、仕様の持ち主の画面の「確かめてほしい先例」から）。
 
 ## スキルの実行記録の表示
 

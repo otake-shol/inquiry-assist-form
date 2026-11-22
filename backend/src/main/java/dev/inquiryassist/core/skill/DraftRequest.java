@@ -11,6 +11,7 @@ import java.util.List;
  * @param inquiry 言い直した問い。言い直しがなければ {@code null}
  * @param confirmedFindings 確かめられた事実。なければ空
  * @param judgment 判断の案の文章。なければ {@code null}
+ * @param decision その問い合わせについての決定（仕様の持ち主などが下したもの）の内容。複数あれば最後のもの。なければ {@code null}
  * @param messages それまでのやり取り（古い順）
  * @param note 担当者が伝えたいこと。なければ {@code null}
  * @param language 本人の言語。下書きはこの言語で書く
@@ -20,6 +21,7 @@ public record DraftRequest(
         StructuredInquiry inquiry,
         List<Finding> confirmedFindings,
         String judgment,
+        String decision,
         List<Message> messages,
         String note,
         String language) {

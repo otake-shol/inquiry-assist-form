@@ -73,6 +73,46 @@ export function ownerPathOf(id: string | null): string {
   return id === null ? OWNER_PATH : `${OWNER_PATH}/${encodeURIComponent(id)}`;
 }
 
+/** 先例の一覧の画面のパス。 */
+export const PRECEDENTS_PATH = "/precedents";
+
+/** 先例の一覧の絞り込み（URL のクエリに持つ）。 */
+export interface PrecedentQuery {
+  systemId?: string;
+  functionId?: string;
+  /** 種類の id */
+  type?: string;
+}
+
+/**
+ * 先例の一覧のパスを、絞り込みつきで作る。指定のない項目はクエリに入れない。
+ * @param query 絞り込み
+ */
+export function precedentsPathOf(query: PrecedentQuery = {}): string {
+  const params = new URLSearchParams();
+  if (query.systemId) params.set("systemId", query.systemId);
+  if (query.functionId) params.set("functionId", query.functionId);
+  if (query.type) params.set("type", query.type);
+  const text = params.toString();
+  return text === "" ? PRECEDENTS_PATH : `${PRECEDENTS_PATH}?${text}`;
+}
+
+/**
+ * URL のクエリ（`location.search`）から、先例の一覧の絞り込みを読み取る。
+ * @param search `location.search` の値
+ */
+export function parsePrecedentQuery(search: string): PrecedentQuery {
+  const params = new URLSearchParams(search);
+  const query: PrecedentQuery = {};
+  const systemId = params.get("systemId");
+  const functionId = params.get("functionId");
+  const type = params.get("type");
+  if (systemId) query.systemId = systemId;
+  if (functionId) query.functionId = functionId;
+  if (type) query.type = type;
+  return query;
+}
+
 /** パスから読み取った画面の指定。 */
 export type Route =
   /** 新しい問い合わせの入力（`/`、および下記のどれにも当たらないパス） */
@@ -84,11 +124,13 @@ export type Route =
   /** 担当者の画面。id が null なら一覧だけ */
   | { kind: "operator"; id: string | null }
   /** 仕様の持ち主の画面。id が null なら一覧だけ */
-  | { kind: "owner"; id: string | null };
+  | { kind: "owner"; id: string | null }
+  /** 先例の一覧（絞り込みは、クエリから別に読む） */
+  | { kind: "precedents" };
 
 /**
  * `location.pathname` から開く画面を決める。
- * `/inquiries` と `/inquiries/{id}` は本人向けの一覧と1件、`/operator` 系は担当者の画面、`/owner` 系は仕様の持ち主の画面。
+ * `/inquiries` と `/inquiries/{id}` は本人向けの一覧と1件、`/operator` 系は担当者の画面、`/owner` 系は仕様の持ち主の画面、`/precedents` は先例の一覧。
  * それ以外（`/inquiriesx` や `/inquiries/a/b` を含む）は新しい問い合わせの入力。
  * `{id}` を復元できないときは、API を呼ばずに「見つからない」と示せるよう id を null にする。
  * @param pathname `location.pathname` の値
@@ -98,6 +140,7 @@ export function parseRoute(pathname: string): Route {
   if (operator.operator) return { kind: "operator", id: operator.id };
   const owner = parseOwnerPath(pathname);
   if (owner.owner) return { kind: "owner", id: owner.id };
+  if (/^\/precedents\/?$/.test(pathname)) return { kind: "precedents" };
   const match = /^\/inquiries(?:\/([^/]+))?\/?$/.exec(pathname);
   if (match === null) return { kind: "new" };
   if (match[1] === undefined) return { kind: "inquiries" };

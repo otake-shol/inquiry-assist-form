@@ -109,6 +109,12 @@ header {
   white-space: nowrap;
 }
 
+/* 色の指定を持たないリンクが、ブラウザの既定の青にならないようにする */
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+
 a:focus-visible {
   outline: 3px solid #e6a700;
   outline-offset: 2px;
@@ -1818,11 +1824,77 @@ button.small {
   margin-top: 20px;
 }
 
-.owner-decide-form {
+/* 決定を記録するフォームと、先例を直すフォーム。選択欄は、「置き直す」の選択欄と同じ見た目にする */
+.decision-form {
   display: grid;
   gap: 6px;
 }
 
+.decision-form label {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+}
+
+.decision-form select,
+.decision-form input[type="text"],
+.precedent-filter select {
+  max-width: 100%;
+  min-height: 44px;
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: inherit;
+}
+
+.decision-form .op-muted {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
 .dev-link + .dev-link {
   margin-left: 16px;
+}
+
+/* 先例の一覧、確かめてほしい先例 */
+.precedent-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 16px;
+}
+
+.precedent-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.precedent-list {
+  max-width: 760px;
+}
+
+.owner-unconfirmed {
+  margin-top: 28px;
+}
+
+.owner-unconfirmed h2 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.op-decision-unconfirmed {
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.op-based-precedents {
+  margin: 4px 0 0;
+}
+
+.op-head > a {
+  font-size: 0.9rem;
 }

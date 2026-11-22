@@ -69,13 +69,27 @@ export type InvestigationStatus = "NOT_RUN" | "RUNNING" | "DONE" | "FAILED";
 /** AI の案の状況。 */
 export type AdviceStatus = "NOT_RUN" | "RUNNING" | "DONE" | "FAILED";
 
-/** 判断の案。`basedOn` は、案が基づく事実の文（`answer.memo.findings` と同じもの）。 */
+/** 案が基づく先例（仕様の持ち主の決定）の要点。 */
+export interface PrecedentRef {
+  id: string;
+  /** 決定の内容 */
+  decision: string;
+  /** 決めた人 */
+  decidedBy: string;
+  decidedAt: string;
+}
+
+/**
+ * 判断の案。`basedOn` は、案が基づく事実の文（`answer.memo.findings` と同じもの）、
+ * `basedOnPrecedents` は基づく先例。古い応答では `basedOnPrecedents` が欠ける。
+ */
 export interface AdviceJudgment {
   text: string;
   /** 仕様の持ち主への相談が要りそうか */
   needsConsultation: boolean;
   consultationReason: string | null;
   basedOn: string[];
+  basedOnPrecedents?: PrecedentRef[];
 }
 
 /** 作業の手順の案の、1つの手順。 */
@@ -95,6 +109,7 @@ export interface AdviceProcedure {
   /** 元に戻す方法 */
   rollback: string | null;
   basedOn: string[];
+  basedOnPrecedents?: PrecedentRef[];
 }
 
 /** 担当者向けの、AI の案（`GET /api/operator/inquiries/{id}` の `advice`）。 */
@@ -505,8 +520,10 @@ export interface OperatorDetail extends StateFields {
   defaultConsultants?: string[];
   /** 仕様の持ち主への相談（古い順。古い API では欠ける） */
   consultations?: Consultation[];
-  /** 仕様の持ち主の決定（先例。古い順。古い API では欠ける） */
+  /** この問い合わせから生まれた、仕様の持ち主の決定（先例。古い順。古い API では欠ける） */
   decisions?: Precedent[];
+  /** 同じ置き場所の先例（材料。機能が同じものが先。古い API では欠ける） */
+  precedents?: Precedent[];
   /** 返事がないときの予定（本人の返事を待っている間だけ非 null） */
   noReply: NoReply | null;
   filedAt: string;
@@ -610,6 +627,7 @@ export interface Precedent {
   decision: string;
   reason: string;
   decidedBy: string;
+  /** 記録した人（`OWNER`：仕様の持ち主、`OPERATOR`：担当者が代わりに） */
   recordedBy: string;
   /** 決めた人が内容を確かめたか */
   confirmed: boolean;
@@ -647,4 +665,28 @@ export interface DecisionRequest {
   reason: string;
   situation: string;
   decidedBy: string;
+}
+
+/** `PUT /api/precedents/{id}` のリクエスト（すべて必須）。直すと、確かめたことになる。 */
+export interface PrecedentUpdate {
+  situation: string;
+  decisionKind: DecisionKind;
+  decision: string;
+  reason: string;
+  decidedBy: string;
+}
+
+/** `GET /api/precedents` の絞り込み。指定した項目が一致するものだけが返る。 */
+export interface PrecedentFilter {
+  systemId?: string;
+  functionId?: string;
+  /** 種類の id */
+  type?: string;
+  /** 確かめられていない先例だけ */
+  unconfirmedOnly?: boolean;
+}
+
+/** `GET /api/precedents` の応答。新しい順、最大100件。 */
+export interface PrecedentList {
+  items: Precedent[];
 }

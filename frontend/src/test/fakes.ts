@@ -430,6 +430,7 @@ export function makeDetail(
     defaultConsultants: ["仕様の持ち主（開発用）"],
     consultations: [],
     decisions: [],
+    precedents: [],
     noReply: null,
     filedAt: "2026-11-21T05:00:00Z",
     askerId: "local-user",

@@ -27,3 +27,28 @@ export function usePathname(): string {
   }, []);
   return pathname;
 }
+
+/**
+ * 現在の `location.search`（先頭の `?` を含む。なければ空文字）。ブラウザの「戻る」「進む」と
+ * `replaceSearch` に追従する。
+ */
+export function useSearch(): string {
+  const [search, setSearch] = useState(() => window.location.search);
+  useEffect(() => {
+    const onPop = () => setSearch(window.location.search);
+    window.addEventListener("popstate", onPop);
+    onPop();
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  return search;
+}
+
+/**
+ * パスはそのままに、クエリだけを置き換える（履歴は積まない）。絞り込みの変更に使う。
+ * @param search 新しいクエリ（`?` なし。空なら、クエリを外す）
+ */
+export function replaceSearch(search: string): void {
+  const url = window.location.pathname + (search === "" ? "" : `?${search}`);
+  window.history.replaceState({}, "", url);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}

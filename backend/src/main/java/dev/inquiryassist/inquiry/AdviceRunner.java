@@ -11,6 +11,7 @@ import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.skill.Advice;
 import dev.inquiryassist.core.skill.AdvisorSkill;
 import dev.inquiryassist.core.skill.Finding;
+import dev.inquiryassist.core.skill.PrecedentNote;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.core.skill.SkillUsage;
 import java.util.List;
@@ -25,7 +26,7 @@ import org.springframework.stereotype.Component;
  * (1) 始める（案の状況を {@code RUNNING} にする）、(2) スキルを実行する（トランザクションの外。記録を持ち越さない）、
  * (3) 記録を読み直して保存する、の順に進め、競合したら読み直してやり直す。
  *
- * <p>呼ぶきっかけは、記録が「担当者の番で、確かめられた事実が1つ以上あり、案がまだない」状態で保存されること
+ * <p>呼ぶきっかけは、記録が「担当者の番で、確かめられた事実か同じ置き場所の先例が1つ以上あり、案がまだない」状態で保存されること
  * （{@link #claim}。保存と同じトランザクションで、案の状況を {@code RUNNING} にする）。調査の結果を保存した時点と、調査の結果を持つ問い合わせが担当者の番になった時点の両方を、
  * 同じ判定で拾う。本人が待っている間は、番が担当者でないので呼ばない。調査の結果が置き換わると、前の案を消す
  * （調査を保存する側が、案を {@code NOT_RUN} に戻す）ので、同じ判定で作り直される。
@@ -50,6 +51,7 @@ class AdviceRunner {
     private final InquiryCommitter committer;
     private final IntakeLocales locales;
     private final SkillImplementations implementations;
+    private final PrecedentFinder precedentFinder;
 
     /**
      * @param repository 問い合わせ記録の保存先
@@ -57,22 +59,25 @@ class AdviceRunner {
      * @param committer 記録の保存と、確定後の通知
      * @param locales 既定の言語（案を書く言語）
      * @param implementations スキルごとの実装（失敗した呼び出しの利用量の補完に使う）
+     * @param precedentFinder 同じ置き場所の先例を引く
      */
     AdviceRunner(
             InquiryRepository repository,
             AdvisorSkill advisor,
             InquiryCommitter committer,
             IntakeLocales locales,
-            SkillImplementations implementations) {
+            SkillImplementations implementations,
+            PrecedentFinder precedentFinder) {
         this.repository = repository;
         this.advisor = advisor;
         this.committer = committer;
         this.locales = locales;
         this.implementations = implementations;
+        this.precedentFinder = precedentFinder;
     }
 
     /**
-     * 保存しようとしている記録が、助言を呼ぶべき状態（担当者の番で、確かめられた事実が1つ以上あり、案がまだない）なら、案の状況を
+     * 保存しようとしている記録が、助言を呼ぶべき状態（担当者の番で、確かめられた事実か同じ置き場所の先例が1つ以上あり、案がまだない）なら、案の状況を
      * {@code RUNNING} にする。記録の保存と同じトランザクションで確定させるために、保存の直前に呼ぶ（調査の結果の保存と、案を作り
      * 始める印が、同時に確定する）。すでに作っている・できている・失敗した記録では、何もしない（失敗した案の作り直しは、調べ直しで行う）。
      * 本人が待っている間は、番が担当者でないので呼ばない。
@@ -84,7 +89,7 @@ class AdviceRunner {
         if (inquiry.awaiting != Awaiting.HANDLING
                 || inquiry.adviceStatus != AdviceStatus.NOT_RUN
                 || inquiry.structured() == null
-                || confirmedFindings(inquiry).isEmpty()) {
+                || (confirmedFindings(inquiry).isEmpty() && precedentFinder.find(inquiry).isEmpty())) {
             return false;
         }
         inquiry.adviceStatus = AdviceStatus.RUNNING;
@@ -148,7 +153,9 @@ class AdviceRunner {
         }
         StructuredInquiry structured = inquiry.structured();
         List<Finding> findings = confirmedFindings(inquiry);
-        if (structured == null || findings.isEmpty()) {
+        // 同じ置き場所の先例（機能が同じものが先、新しい順、最大5件）。案を作った後に新しい先例ができても、作り直さない
+        List<PrecedentEntity> precedents = precedentFinder.find(inquiry);
+        if (structured == null || (findings.isEmpty() && precedents.isEmpty())) {
             // 呼べる材料がない。作っていない状態に戻す
             save(id, findings, Mode.NOT_RUN, null, null, null, 0);
             return;
@@ -157,14 +164,21 @@ class AdviceRunner {
         RuntimeException failure = null;
         long start = System.nanoTime();
         try {
-            result = advisor.advise(structured, inquiry.type(), findings, locales.defaultLanguage());
+            result = advisor.advise(
+                    structured,
+                    inquiry.type(),
+                    findings,
+                    precedents.stream()
+                            .map(p -> new PrecedentNote(p.situation, p.decisionKind.name(), p.decision, p.reason))
+                            .toList(),
+                    locales.defaultLanguage());
         } catch (RuntimeException e) {
             failure = e;
         }
         long millis = (System.nanoTime() - start) / 1_000_000L;
         if (failure == null) {
-            Advice verified = AdviceVerifier.verify(result.value(), findings.size());
-            save(id, findings, Mode.DONE, toContent(verified, findings), result.usage(), null, millis);
+            Advice verified = AdviceVerifier.verify(result.value(), findings.size(), precedents.size());
+            save(id, findings, Mode.DONE, toContent(verified, findings, precedents), result.usage(), null, millis);
         } else {
             log.warn("案の作成が失敗しました id={} cause={}", id, failure.getClass().getSimpleName());
             save(id, findings, Mode.FAILED, null, null, failure, millis);
@@ -220,12 +234,16 @@ class AdviceRunner {
     }
 
     /** 確かめた案を、基づく事実の番号を文に置き換えて、保存する形にする。 */
-    private static AdviceContent toContent(Advice advice, List<Finding> findings) {
+    private static AdviceContent toContent(Advice advice, List<Finding> findings, List<PrecedentEntity> precedents) {
         AdviceContent.Judgment judgment = null;
         if (advice.judgment() != null) {
             Advice.Judgment j = advice.judgment();
             judgment = new AdviceContent.Judgment(
-                    j.text(), j.needsConsultation(), j.consultationReason(), sentences(j.basedOn(), findings));
+                    j.text(),
+                    j.needsConsultation(),
+                    j.consultationReason(),
+                    sentences(j.basedOn(), findings),
+                    refs(j.basedOnPrecedents(), precedents));
         }
         AdviceContent.Procedure procedure = null;
         if (advice.procedure() != null) {
@@ -235,9 +253,17 @@ class AdviceRunner {
                             .map(s -> new AdviceContent.Step(s.target(), s.action(), s.check()))
                             .toList(),
                     p.rollback(),
-                    sentences(p.basedOn(), findings));
+                    sentences(p.basedOn(), findings),
+                    refs(p.basedOnPrecedents(), precedents));
         }
         return new AdviceContent(judgment, procedure);
+    }
+
+    private static List<AdviceContent.PrecedentRef> refs(List<Integer> numbers, List<PrecedentEntity> precedents) {
+        return numbers.stream()
+                .map(n -> precedents.get(n - 1))
+                .map(p -> new AdviceContent.PrecedentRef(p.id, p.decision, p.decidedBy, p.decidedAt))
+                .toList();
     }
 
     private static List<String> sentences(List<Integer> numbers, List<Finding> findings) {

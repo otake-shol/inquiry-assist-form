@@ -1,8 +1,28 @@
-import { useId, useState, type FormEvent, type RefObject } from "react";
-import type { Consultation, Precedent } from "../api/types.ts";
+import {
+  useId,
+  useState,
+  type FormEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import type {
+  Consultation,
+  DecisionRequest,
+  OperatorDetail,
+  Precedent,
+  SystemOption,
+} from "../api/types.ts";
+import { DecisionForm } from "../components/DecisionForm.tsx";
 import { MAX_MESSAGE_LENGTH } from "../components/Exchange.tsx";
+import { NavLink } from "../components/Navigation.tsx";
 import { useMessages } from "../i18n/context.ts";
-import { MAX_CONSULTANTS, MAX_NAME_LENGTH } from "./consultations.ts";
+import { precedentsPathOf } from "../path.ts";
+import {
+  MAX_CONSULTANTS,
+  MAX_NAME_LENGTH,
+  initialSituationOf,
+  openConsultationOf,
+} from "./consultations.ts";
 import { formatFiledAt } from "./labels.ts";
 
 /** ConsultForm の props。 */
@@ -155,20 +175,49 @@ export function ConsultationWaiting({
   );
 }
 
+/** DecisionCard の props。 */
+interface DecisionCardProps {
+  decision: Precedent;
+  /** 置き場所（種類、システム、機能）の行を出すか（先例の一覧と、確かめてほしい先例） */
+  showPlace?: boolean;
+  /** 先例の機能の名前（この問い合わせの機能と違うときだけ渡す） */
+  functionName?: string | null;
+  /** 先例の下に置くもの（操作、リンク） */
+  children?: ReactNode;
+}
+
 /**
  * 仕様の持ち主の決定（先例）の1件。実線の枠で示し、AI の案（点線の枠）と見分ける。
- * 決定の文章は、書かれたときの言語のまま出す。
- * @param props 先例
+ * 決定の文章は、書かれたときの言語のまま出す。決めた人がまだ確かめていない先例には、その印を添える。
+ * @param props 先例と、添えるもの
  */
-function DecisionCard({ decision }: { decision: Precedent }) {
+export function DecisionCard({
+  decision,
+  showPlace = false,
+  functionName = null,
+  children,
+}: DecisionCardProps) {
   const { op: OP_TEXT, meta } = useMessages();
+  const place = [decision.type, decision.system, decision.function]
+    .filter((option): option is SystemOption => option !== null)
+    .map((option) => option.label)
+    .join(meta.joiner);
   return (
     <article className="op-decision">
       <h4>
         <span className="op-decision-kind">
           {OP_TEXT.decisionKinds[decision.decisionKind]}
         </span>
+        {!decision.confirmed && (
+          <span className="op-badge warn op-decision-unconfirmed">
+            {OP_TEXT.precedentUnconfirmed}
+          </span>
+        )}
       </h4>
+      {showPlace && place !== "" && <p className="op-muted">{place}</p>}
+      {functionName !== null && (
+        <p className="op-muted">{OP_TEXT.precedentFunction(functionName)}</p>
+      )}
       <dl className="op-fields" lang={decision.language}>
         <dt lang={meta.code}>{OP_TEXT.decisionContent}</dt>
         <dd className="op-pre">{decision.decision}</dd>
@@ -184,6 +233,7 @@ function DecisionCard({ decision }: { decision: Precedent }) {
           {formatFiledAt(decision.decidedAt, meta.locale)}
         </time>
       </p>
+      {children}
     </article>
   );
 }
@@ -203,5 +253,98 @@ export function DecisionsSection({ decisions }: { decisions: Precedent[] }) {
         <DecisionCard key={decision.id} decision={decision} />
       ))}
     </section>
+  );
+}
+
+/** PrecedentsSection の props。 */
+interface PrecedentsSectionProps {
+  /** 先例を探す元になった問い合わせ（置き場所と、機能の比べ先） */
+  detail: OperatorDetail;
+}
+
+/**
+ * 同じ置き場所の先例の節（「調べた結果」のすぐ下、「AI の案」の上）。先例ごとに、決定の種類、内容、
+ * 状況、理由、決めた人と日付。機能が違う先例には、その機能の名前を添える。確かめられていない先例には印を付ける。
+ * なければ「まだありません」と示す。節の末尾に、この置き場所で絞った先例の一覧へのリンク。
+ * @param props 問い合わせ
+ */
+export function PrecedentsSection({ detail }: PrecedentsSectionProps) {
+  const OP_TEXT = useMessages().op;
+  const precedents = detail.precedents ?? [];
+  const link = precedentsPathOf({
+    systemId: detail.system?.id,
+    functionId: detail.function?.id,
+    type: detail.type?.id,
+  });
+  return (
+    <section className="op-decisions op-precedents">
+      <h3>{OP_TEXT.precedentsTitle}</h3>
+      {precedents.length === 0 ? (
+        <p className="op-muted">{OP_TEXT.precedentsEmpty}</p>
+      ) : (
+        precedents.map((precedent) => (
+          <DecisionCard
+            key={precedent.id}
+            decision={precedent}
+            functionName={
+              precedent.function !== null &&
+              precedent.function.id !== detail.function?.id
+                ? precedent.function.label
+                : null
+            }
+          />
+        ))
+      )}
+      <p>
+        <NavLink to={link}>{OP_TEXT.precedentsLink}</NavLink>
+      </p>
+    </section>
+  );
+}
+
+/** DecisionRecordFold の props。 */
+interface DecisionRecordFoldProps {
+  detail: OperatorDetail;
+  busy: boolean;
+  /** 直近の操作が失敗したか */
+  failed: boolean;
+  /** 決定を記録する。成功したら true */
+  onSubmit: (request: DecisionRequest) => Promise<boolean>;
+}
+
+/**
+ * 決定を記録する（会議などで決まった場合。担当者の番のときと、相談している間。折りたたみ）。
+ * 持ち主の「決める」と同じ項目で、決めた人は名前を書く（相談先の名前を候補に出す）。
+ * 記録した先例は、決めた人が後から確かめられるよう、仕様の持ち主の画面に出る。
+ * @param props 詳細と、送る処理
+ */
+export function DecisionRecordFold({
+  detail,
+  busy,
+  failed,
+  onSubmit,
+}: DecisionRecordFoldProps) {
+  const OP_TEXT = useMessages().op;
+  const consultation = openConsultationOf(detail);
+  const candidates = [
+    ...new Set([
+      ...(detail.defaultConsultants ?? []),
+      ...(consultation?.to ?? []),
+    ]),
+  ];
+  return (
+    <details className="op-fold op-record-decision">
+      <summary>{OP_TEXT.recordDecisionSummary}</summary>
+      <DecisionForm
+        // 記録できたら、入力を空に戻す
+        key={(detail.decisions ?? []).length}
+        initialSituation={initialSituationOf(detail, consultation)}
+        people={{ mode: "write", candidates }}
+        note={OP_TEXT.recordDecisionNote}
+        busy={busy}
+        failed={failed}
+        onSubmit={onSubmit}
+      />
+    </details>
   );
 }

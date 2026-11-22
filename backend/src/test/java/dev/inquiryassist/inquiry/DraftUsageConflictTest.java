@@ -65,7 +65,8 @@ class DraftUsageConflictTest {
                 mock(InvestigationRunner.class),
                 drafter,
                 committer,
-                mock(PrecedentRepository.class));
+                mock(PrecedentRepository.class),
+                mock(PrecedentFinder.class));
 
         DraftResult result = service.draft(inquiry.id, ReplyKind.ASK, null);
 

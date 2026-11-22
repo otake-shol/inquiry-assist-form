@@ -6,12 +6,17 @@ import type {
   DecisionRequest,
   OperatorDetail,
   OwnerConsultationItem,
+  Precedent,
+  PrecedentUpdate,
   SystemOption,
 } from "../api/types.ts";
 import { DevLinks } from "../components/Navigation.tsx";
 import { LanguageSwitch } from "../components/LanguageSwitch.tsx";
 import { useI18n, useMessages } from "../i18n/context.ts";
-import { openConsultationOf } from "../operator/consultations.ts";
+import {
+  initialSituationOf,
+  openConsultationOf,
+} from "../operator/consultations.ts";
 import {
   formatFiledAt,
   opTypeLabel,
@@ -22,8 +27,10 @@ import {
   MaterialSections,
   PlacementBadges,
 } from "../operator/Material.tsx";
-import { NEW_INQUIRY_PATH } from "../path.ts";
-import { DecisionForm } from "./DecisionForm.tsx";
+import { NavLink } from "../components/Navigation.tsx";
+import { NEW_INQUIRY_PATH, PRECEDENTS_PATH } from "../path.ts";
+import { UnconfirmedPrecedents } from "./UnconfirmedPrecedents.tsx";
+import { DecisionForm } from "../components/DecisionForm.tsx";
 
 /** OwnerApp の props。 */
 interface OwnerAppProps {
@@ -152,6 +159,8 @@ export function OwnerApp({ routeId, onNavigate }: OwnerAppProps) {
   const { op: OP_TEXT, owner: OWNER_TEXT, user: USER_TEXT } = messages;
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [items, setItems] = useState<OwnerConsultationItem[] | null>(null);
+  // 担当者が代わりに記録した、確かめられていない先例
+  const [unconfirmed, setUnconfirmed] = useState<Precedent[]>([]);
   const [listFailed, setListFailed] = useState(false);
   const [panel, dispatch] = useReducer(panelReducer, {
     detail: null,
@@ -187,6 +196,13 @@ export function OwnerApp({ routeId, onNavigate }: OwnerAppProps) {
   const listRequest = useRef(0);
   const loadList = useCallback(() => {
     const request = ++listRequest.current;
+    // 先例が取れなくても、相談の一覧は出す（先例の節を出さないだけ）
+    api
+      .getPrecedents({ unconfirmedOnly: true })
+      .then((list) => {
+        if (request === listRequest.current) setUnconfirmed(list.items);
+      })
+      .catch(() => {});
     api
       .getOwnerList()
       .then((list) => {
@@ -285,6 +301,38 @@ export function OwnerApp({ routeId, onNavigate }: OwnerAppProps) {
     }
   };
 
+  /**
+   * 確かめた（「このとおりです」）。成功したら、その先例を節から取り除く。
+   * @param id 先例の id
+   */
+  const confirmPrecedent = async (id: string): Promise<boolean> => {
+    try {
+      await api.confirmPrecedent(id);
+      setUnconfirmed((current) => current.filter((p) => p.id !== id));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * 先例を直して保存する（保存すると、確かめたことになる）。成功したら、その先例を節から取り除く。
+   * @param id 先例の id
+   * @param update 直した内容
+   */
+  const updatePrecedent = async (
+    id: string,
+    update: PrecedentUpdate,
+  ): Promise<boolean> => {
+    try {
+      await api.updatePrecedent(id, update);
+      setUnconfirmed((current) => current.filter((p) => p.id !== id));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const urgencies = config?.urgencies ?? [];
   const showDevLink = config !== null && (config.mock || config.trace === true);
   const consultation = detail === null ? null : openConsultationOf(detail);
@@ -294,6 +342,7 @@ export function OwnerApp({ routeId, onNavigate }: OwnerAppProps) {
     <div className="operator owner">
       <header className="op-head">
         <h1>{OWNER_TEXT.title}</h1>
+        <NavLink to={PRECEDENTS_PATH}>{OP_TEXT.precedentsNav}</NavLink>
         <LanguageSwitch />
       </header>
       <div
@@ -340,6 +389,11 @@ export function OwnerApp({ routeId, onNavigate }: OwnerAppProps) {
               ))}
             </ul>
           )}
+          <UnconfirmedPrecedents
+            items={unconfirmed}
+            onConfirm={confirmPrecedent}
+            onUpdate={updatePrecedent}
+          />
         </section>
         {selectedId !== null && !notFound && (
           <section
@@ -396,14 +450,21 @@ export function OwnerApp({ routeId, onNavigate }: OwnerAppProps) {
                 />
                 <ExchangeSection detail={detail} />
                 {consultation !== null ? (
-                  <DecisionForm
-                    key={consultation.id}
-                    detail={detail}
-                    consultation={consultation}
-                    busy={acting}
-                    failed={failed}
-                    onSubmit={(request) => decide(detail.id, request)}
-                  />
+                  <section className="owner-decide">
+                    <h3>{OWNER_TEXT.decideTitle}</h3>
+                    <DecisionForm
+                      key={consultation.id}
+                      initialSituation={initialSituationOf(
+                        detail,
+                        consultation,
+                      )}
+                      people={{ mode: "choose", names: consultation.to }}
+                      note={OWNER_TEXT.note}
+                      busy={acting}
+                      failed={failed}
+                      onSubmit={(request) => decide(detail.id, request)}
+                    />
+                  </section>
                 ) : (
                   <p className="op-muted">{OWNER_TEXT.notWaiting}</p>
                 )}

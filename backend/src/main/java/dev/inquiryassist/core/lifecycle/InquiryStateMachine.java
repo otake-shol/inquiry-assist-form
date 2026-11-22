@@ -287,6 +287,26 @@ public final class InquiryStateMachine {
     }
 
     /**
+     * 担当者が、仕様の持ち主の代わりに決定を記録した（会議や別の連絡手段で下された決定）。相談を終えて、担当者の番に戻す
+     * （区間は変えない）。渡した理由は {@code DECIDED}。担当者自身の操作なので、担当者の側を未読に戻さない。
+     * 出来事は {@code DECIDED}（起こしたのは担当者）。
+     *
+     * @param state いまの状態（{@code CONSULTATION}）
+     * @return 遷移
+     * @throws IllegalTransitionException 持ち主の決定を待っている状態でない場合
+     */
+    public static Transition decidedByOperator(InquiryState state) {
+        require(state, Awaiting.CONSULTATION);
+        return new Transition(
+                new InquiryState(state.phase(), Turn.OPERATOR, Awaiting.HANDLING, null),
+                HistoryEvent.DECIDED,
+                Actor.OPERATOR,
+                false,
+                null,
+                HandoverReason.DECIDED);
+    }
+
+    /**
      * 担当者が相談を取り下げる。担当者の番に戻す（区間は変えない）。渡した理由は変えない（担当者がもともと持っている件に戻るだけで、
      * 担当者の側の未読にも戻さない）。
      *

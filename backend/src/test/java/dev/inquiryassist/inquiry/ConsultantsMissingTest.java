@@ -51,7 +51,8 @@ class ConsultantsMissingTest {
                 mock(InvestigationRunner.class),
                 mock(dev.inquiryassist.core.skill.DrafterSkill.class),
                 mock(InquiryCommitter.class),
-                mock(PrecedentRepository.class));
+                mock(PrecedentRepository.class),
+                mock(PrecedentFinder.class));
     }
 
     private InquiryEntity handling() {

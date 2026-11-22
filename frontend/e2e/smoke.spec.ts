@@ -523,7 +523,12 @@ test("カードを落とすと対応する入力欄が開き、見送りで終�
 
   // 「終わり」に落とす: 見送りの入力欄が開く。理由を書いて終える
   await card.dragTo(closed);
-  await detail.getByLabel("理由", { exact: true }).fill(reason);
+  // 「理由」の欄は「決定を記録する」にもあるので、「見送る」の折りたたみの中で探す
+  await detail
+    .locator("details")
+    .filter({ hasText: "見送りとして終える" })
+    .getByLabel("理由", { exact: true })
+    .fill(reason);
   await detail.getByRole("button", { name: "見送りとして終える" }).click();
   await expect(
     closed.getByRole("listitem").filter({ hasText: mark }),
@@ -1041,6 +1046,87 @@ test("担当者が仕様の持ち主に相談し、決定が残って担当者�
   await page.goto(askerUrl);
   await expect(page.getByText("担当者が確認しています")).toBeVisible();
   await expect(page.getByText(decision)).toHaveCount(0);
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * 仕様の持ち主の決定は、置き場所ごとの先例として残る。次の同じ置き場所の件では、
+ * 担当者の材料に先例が出て、AI の案が先例を根拠にする。先例は一覧でも見られる。
+ */
+test("決定が先例として残り、次の同じ置き場所の件で材料と案の根拠になる", async ({
+  page,
+  request,
+}) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+  const stamp = Date.now();
+  const first = `先例のもと ${stamp}`;
+  const second = `先例を使う ${stamp}`;
+  const decision = `並び替えは見出しを押す仕様です ${stamp}`;
+  const api = "http://localhost:8080";
+
+  // 1件目: 担当者が相談し、仕様の持ち主が決める（画面での通しは、前のテストで確かめている）
+  await fileByText(page, `${first} システムAの機能A-1の使い方が分かりません。`);
+  const firstId = page.url().split("/").pop();
+  expect(
+    (
+      await request.post(
+        `${api}/api/operator/inquiries/${firstId}/consultations`,
+        {
+          data: { question: "並び替えの操作は、どれが正しい仕様でしょうか。" },
+        },
+      )
+    ).ok(),
+  ).toBe(true);
+  expect(
+    (
+      await request.post(`${api}/api/owner/inquiries/${firstId}/decision`, {
+        data: {
+          decisionKind: "AS_INTENDED",
+          decision,
+          reason: "ほかの一覧と操作を揃えるため。",
+          decidedBy: "仕様の持ち主（開発用）",
+        },
+      })
+    ).ok(),
+  ).toBe(true);
+
+  // 2件目: 同じ置き場所（システムA、機能A-1、使い方を知りたい）の件が、担当者に渡る
+  await fileByText(
+    page,
+    `${second} システムAの機能A-1の使い方を知りたいです。`,
+  );
+  await page.goto("/operator");
+  await page
+    .getByRole("region", { name: "受付一覧" })
+    .getByRole("region", { name: /^担当者の番/ })
+    .getByRole("listitem")
+    .filter({ hasText: second })
+    .getByRole("button")
+    .click();
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+
+  // 材料に、同じ置き場所の先例が出る
+  await expect(
+    detail.getByRole("heading", { name: "同じ置き場所の先例" }),
+  ).toBeVisible();
+  await expect(detail.getByText(decision).first()).toBeVisible();
+  // AI の案が、先例を根拠にする
+  await expect(
+    detail.getByText(/同じ置き場所の先例を当てはめられそうです/),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(detail.getByText("基づく先例").first()).toBeVisible();
+
+  // 先例の一覧でも、置き場所で絞って見られる
+  await page.goto("/precedents?systemId=system-a&type=HOW_TO");
+  await expect(
+    page.getByRole("heading", { name: "先例" }).first(),
+  ).toBeVisible();
+  await expect(page.getByText(decision)).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "元の問い合わせを見る" }).first(),
+  ).toBeVisible();
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);

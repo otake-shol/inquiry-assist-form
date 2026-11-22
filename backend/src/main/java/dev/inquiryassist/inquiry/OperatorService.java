@@ -55,6 +55,7 @@ public class OperatorService {
     private final DrafterSkill drafter;
     private final InquiryCommitter committer;
     private final PrecedentRepository precedents;
+    private final PrecedentFinder precedentFinder;
 
     /**
      * @param repository 問い合わせ記録の保存先
@@ -67,6 +68,7 @@ public class OperatorService {
      * @param drafter 返信の下書き
      * @param committer 下書きの利用量の保存
      * @param precedents 先例（詳細の {@code decisions}）
+     * @param precedentFinder 同じ置き場所の先例（詳細の {@code precedents}）
      */
     OperatorService(
             InquiryRepository repository,
@@ -78,7 +80,8 @@ public class OperatorService {
             InvestigationRunner runner,
             DrafterSkill drafter,
             InquiryCommitter committer,
-            PrecedentRepository precedents) {
+            PrecedentRepository precedents,
+            PrecedentFinder precedentFinder) {
         this.repository = repository;
         this.properties = properties;
         this.implementations = implementations;
@@ -89,6 +92,7 @@ public class OperatorService {
         this.drafter = drafter;
         this.committer = committer;
         this.precedents = precedents;
+        this.precedentFinder = precedentFinder;
     }
 
     /**
@@ -361,11 +365,15 @@ public class OperatorService {
         String judgment = inquiry.adviceStatus == AdviceStatus.DONE && inquiry.advice != null && inquiry.advice.judgment() != null
                 ? inquiry.advice.judgment().text()
                 : null;
+        // その問い合わせについての決定（最後のもの）の内容
+        List<PrecedentEntity> decided = precedents.findByInquiryIdOrderByDecidedAtAsc(inquiry.id);
+        String decision = decided.isEmpty() ? null : decided.get(decided.size() - 1).decision;
         DraftRequest request = new DraftRequest(
                 kind,
                 inquiry.structured(),
                 AdviceRunner.confirmedFindings(inquiry),
                 judgment,
+                decision,
                 messages,
                 trimmed,
                 inquiry.language);
@@ -537,6 +545,7 @@ public class OperatorService {
                 precedents.findByInquiryIdOrderByDecidedAtAsc(e.id).stream()
                         .map(p -> presenter.precedentOf(p, lang))
                         .toList(),
+                precedentFinder.find(e).stream().map(p -> presenter.precedentOf(p, lang)).toList(),
                 presenter.noReplyOf(e),
                 MessageBodies.viewsOf(e),
                 List.copyOf(e.history),

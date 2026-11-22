@@ -7,6 +7,7 @@ import { I18nProvider } from "./i18n/I18nProvider.tsx";
 import { navigateTo, usePathname } from "./location.ts";
 import { OperatorApp } from "./operator/OperatorApp.tsx";
 import { OwnerApp } from "./owner/OwnerApp.tsx";
+import { PrecedentsApp } from "./precedents/PrecedentsApp.tsx";
 import { operatorPathOf, ownerPathOf, parseRoute } from "./path.ts";
 
 /** Root の props。 */
@@ -16,7 +17,7 @@ interface RootProps {
 }
 
 /**
- * パスで本人向けの画面、担当者の画面、仕様の持ち主の画面を切り替える。ルーターのライブラリは使わず、
+ * パスで本人向けの画面、担当者の画面、仕様の持ち主の画面、先例の一覧を切り替える。ルーターのライブラリは使わず、
  * `location.pathname` と History API（pushState / popstate）だけで見る。
  * 担当者の画面で問い合わせを選ぶと URL が `/operator/{id}` に、仕様の持ち主の画面では `/owner/{id}` に変わる。
  * 本人向けの画面（`/`、`/inquiries`、`/inquiries/{id}`）の切り替えは `App` が受け持つ。
@@ -36,6 +37,8 @@ export default function Root({
           routeId={route.id}
           onNavigate={(id) => navigateTo(operatorPathOf(id))}
         />
+      ) : route.kind === "precedents" ? (
+        <PrecedentsApp />
       ) : route.kind === "owner" ? (
         <OwnerApp
           routeId={route.id}
