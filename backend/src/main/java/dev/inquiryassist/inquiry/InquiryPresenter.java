@@ -16,6 +16,7 @@ import dev.inquiryassist.core.intake.PlacedBy;
 import dev.inquiryassist.core.intake.QuestionKind;
 import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
+import dev.inquiryassist.core.lifecycle.NoReplyRule;
 import dev.inquiryassist.inquiry.InquiryEntity.StoredCitation;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -102,6 +103,7 @@ class InquiryPresenter {
                 e.sentImmediately,
                 e.handedOverAt,
                 e.askerUnreadReply,
+                noReplyOf(e),
                 MessageBodies.viewsOf(e),
                 TraceViews.of(e, properties, implementations),
                 e.mock);
@@ -287,6 +289,21 @@ class InquiryPresenter {
             question = new InquiryView.QuestionView(q.id(), q.kind(), q.text(), q.options(), q.allowsText(), q.canSkip());
         }
         return new InquiryView.IntakeView(entries(e, lang), question, next instanceof IntakeNext.Complete);
+    }
+
+    /**
+     * 返事がないときの決まりの予定を作る。結果を本人が確かめている間だけ。
+     *
+     * @param e 問い合わせ記録
+     * @return 予定。結果を確かめている状態でなければ null
+     */
+    InquiryView.NoReplyView noReplyOf(InquiryEntity e) {
+        if (e.awaiting != Awaiting.RESULT_CONFIRMATION || e.awaitingSince == null) {
+            return null;
+        }
+        NoReplyRule.Schedule schedule =
+                NoReplyRule.scheduleOf(e.awaitingSince, e.remindedAt, properties.rules().periods());
+        return new InquiryView.NoReplyView(schedule.remindAt(), e.remindedAt, schedule.closesAt());
     }
 
     /**

@@ -322,6 +322,21 @@ describe("canAppend と canWithdraw", () => {
     // 担当者に渡したことがなければ追記できない
     expect(canAppend(makeStructuredView(RESULT_STATE))).toBe(false);
     expect(canAppend(makeView(closedState("RESOLVED")))).toBe(false);
+    expect(canAppend(makeView(closedState("WITHDRAWN")))).toBe(false);
+  });
+
+  it("担当者に渡したことがなくても、返事がないまま「回答済み」で終わった件には、続きを送る欄を出す", () => {
+    const answered = makeStructuredView({
+      ...closedState("ANSWERED"),
+      handedOverAt: null,
+      answer: groundedAnswer,
+    });
+    expect(canAppend(answered)).toBe(true);
+    expect(kinds(pageSections(answered)).slice(-3)).toEqual([
+      "result",
+      "closing",
+      "followup",
+    ]);
   });
 
   it("取り下げられるのは、終わっていない件だけ", () => {

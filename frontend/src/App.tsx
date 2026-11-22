@@ -465,6 +465,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
             }
             doForMe={view!.type?.id === "DO_FOR_ME"}
             language={view!.language}
+            noReply={view!.noReply}
             busy={busy}
             onResolve={(resolved) =>
               void run(() => api.resolve(view!.id, resolved))
@@ -492,12 +493,13 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
             awaiting={view!.awaiting}
             canAppend={canAppend(view!)}
             ended={view!.ending !== null}
-            handover={handoverText(
-              view!,
-              filedGuidance,
-              messages.asker.handover,
-            )}
+            handover={
+              view!.handedOverAt === null
+                ? null
+                : handoverText(view!, filedGuidance, messages.asker.handover)
+            }
             language={view!.language}
+            noReply={view!.noReply}
             busy={busy}
             onSend={async (body) =>
               (await run(() => api.postMessage(view!.id, body))) !== null

@@ -114,6 +114,9 @@ export const ja = {
     stillUnresolved: "まだ解決していません",
     unresolvedNoteLabel: "どこが解決していませんか（任意）",
     unresolvedSend: "担当者に送る",
+    /** 返事がないことの知らせ。`date` は終わる予定の日（月と日） */
+    noReplyNotice: (date: string) =>
+      `お返事がないため、${date}に「回答済み」として終了します。解決したかどうかを、下から選んでください。終了した後も、このページから続きを送れます。`,
     withdrawLink: "この問い合わせを取り下げる",
     withdrawConfirm: "取り下げますか。取り下げた後は、続きを送れません。",
     withdrawDo: "取り下げる",
@@ -328,6 +331,7 @@ export const ja = {
       ASKER: "本人",
       AI: "AI",
       OPERATOR: "担当者",
+      TIME: "期間",
     } as Record<HistoryActor, string>,
     /** 状態の履歴の `event` の呼び名 */
     events: {
@@ -344,6 +348,8 @@ export const ja = {
       DECLINED: "見送った",
       WITHDRAWN: "取り下げた",
       REOPENED: "追記で開き直した",
+      REMINDED: "返事がないことを本人に知らせた",
+      ANSWERED: "返事がないまま終わった",
       PHASE_CHANGED: "区間を変えた",
       PLACEMENT_CHANGED: "置き直した",
     } as Record<string, string>,
@@ -356,6 +362,11 @@ export const ja = {
     /** 終わった件で、フォームの代わりに示す文（`{ending}` は終わり方） */
     waitingClosed: (ending: string) =>
       `この問い合わせは終わっています（${ending}）。本人が追記すると、担当者の番で開き直します。`,
+    /** 返事がないときの予定（結果を本人が確かめている件）。日付は月と日 */
+    noReplyPlanned: (remindDate: string) =>
+      `返事がなければ、${remindDate}に本人へ知らせます`,
+    noReplyReminded: (remindedDate: string, closeDate: string) =>
+      `${remindedDate}に本人へ知らせました。返事がなければ、${closeDate}に「回答済み」で終わります`,
     waitingAskerReply: "本人の返事を待っています。",
     waitingResult: "本人が結果を確かめるのを待っています。",
     waitingAi: "AI の処理を待っています。",

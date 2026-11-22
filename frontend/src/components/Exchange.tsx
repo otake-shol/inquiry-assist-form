@@ -1,7 +1,12 @@
 import { useId, useState, type FormEvent } from "react";
-import type { Awaiting, InquiryMessage, MessageAuthor } from "../api/types.ts";
+import type {
+  Awaiting,
+  InquiryMessage,
+  MessageAuthor,
+  NoReply,
+} from "../api/types.ts";
 import { useMessages } from "../i18n/context.ts";
-import { formatFiledAt } from "../operator/labels.ts";
+import { formatFiledAt, formatMonthDay } from "../operator/labels.ts";
 import type { HandoverText } from "../text/labels.ts";
 
 /** 本文の最大文字数（契約書: 1〜4000文字）。 */
@@ -118,11 +123,29 @@ export function MessageForm({
   );
 }
 
+/**
+ * 返事がないことの知らせ。知らせた後（`remindedAt` がある間）だけ、結果を確かめる選択肢のすぐ上に出す。
+ * 知らせる前は何も出さない（急かさない）。日付は終わる予定の日を、見る人の言語の書式で（月と日）。
+ * @param props 返事がないときの予定
+ */
+export function NoReplyNotice({ noReply }: { noReply: NoReply | null }) {
+  const { user: USER_TEXT, meta } = useMessages();
+  if (noReply === null || noReply.remindedAt === null) return null;
+  if (noReply.closesAt === null) return null;
+  return (
+    <p className="notice-inline no-reply-notice">
+      {USER_TEXT.noReplyNotice(formatMonthDay(noReply.closesAt, meta.locale))}
+    </p>
+  );
+}
+
 /** 担当者の結果の確かめの props。 */
 interface ResultCheckProps {
   busy: boolean;
   /** 結果を確かめる。解決していないときは、任意の一言を付けられる */
   onResolve: (resolved: boolean, note?: string) => void;
+  /** 返事がないときの予定 */
+  noReply: NoReply | null;
 }
 
 /**
@@ -131,7 +154,7 @@ interface ResultCheckProps {
  * （任意）と「担当者に送る」が出る。
  * @param props 操作の受け口
  */
-function ResultCheck({ busy, onResolve }: ResultCheckProps) {
+function ResultCheck({ busy, onResolve, noReply }: ResultCheckProps) {
   const { text: TEXT, user: USER_TEXT } = useMessages();
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -143,6 +166,7 @@ function ResultCheck({ busy, onResolve }: ResultCheckProps) {
   };
   return (
     <div className="result-check">
+      <NoReplyNotice noReply={noReply} />
       <p className="lead">{USER_TEXT.progressQuestion}</p>
       <div className="actions">
         <button
@@ -210,6 +234,8 @@ interface FollowUpProps {
   onRestart: () => void;
   /** 本人の言語（本人の追記の `lang` 属性） */
   language?: string;
+  /** 返事がないときの予定 */
+  noReply?: NoReply | null;
 }
 
 /**
@@ -231,6 +257,7 @@ export function FollowUp({
   onResolve,
   onRestart,
   language,
+  noReply = null,
 }: FollowUpProps) {
   const { user: USER_TEXT } = useMessages();
   const hasReply = messages.some((message) => message.from === "OPERATOR");
@@ -253,9 +280,11 @@ export function FollowUp({
         mine="ASKER"
         askerLanguage={language}
       />
-      {!hasReply && <p className="muted">{USER_TEXT.noReplyYet}</p>}
+      {!hasReply && handover !== null && (
+        <p className="muted">{USER_TEXT.noReplyYet}</p>
+      )}
       {awaiting === "RESULT_CONFIRMATION" && (
-        <ResultCheck busy={busy} onResolve={onResolve} />
+        <ResultCheck busy={busy} onResolve={onResolve} noReply={noReply} />
       )}
       {canAppend && (
         <>

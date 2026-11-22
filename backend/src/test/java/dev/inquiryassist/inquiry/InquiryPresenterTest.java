@@ -47,7 +47,8 @@ class InquiryPresenterTest {
                 new InquiryProperties.Ollama("http://localhost:11434", "30m", 42),
                 new InquiryProperties.Trace(true),
                 new InquiryProperties.Dev("利用者", "担当者"),
-                Map.of());
+                Map.of(),
+                InquiryProperties.Rules.defaults());
         return new InquiryPresenter(
                 new IntakeLocales(properties), properties, SkillImplementations.from(new MockEnvironment()));
     }

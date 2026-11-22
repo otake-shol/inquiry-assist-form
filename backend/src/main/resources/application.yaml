@@ -91,6 +91,14 @@ inquiry:
   filed-guidance:
     ja: 担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。
     en: "The support team will review this and reply on this page. When a reply arrives, a mark appears in “My inquiries”."
+  # 時間で動く決まり。結果を本人が確かめている件に返事がないとき、知らせてから回答済みで終える（営業日は月曜から金曜。祝日は扱わない）
+  rules:
+    zone: Asia/Tokyo
+    no-reply:
+      remind-after-business-days: 5
+      close-after-business-days: 5
+    sweep-enabled: true
+    sweep-interval: 15m
   # スキルの実行記録（trace）を画面に見せるか。本番では false にする（内部の言葉とモデルの名前を本人に見せないため）
   trace:
     enabled: true

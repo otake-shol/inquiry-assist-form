@@ -916,6 +916,113 @@ describe("担当者のパネル", () => {
   });
 });
 
+describe("担当者のパネル: 返事がないときの予定", () => {
+  const REMIND_AT = new Date(2026, 10, 24, 9, 0).toISOString();
+  const REMINDED_AT = new Date(2026, 10, 24, 12, 0).toISOString();
+  const CLOSES_AT = new Date(2026, 11, 1, 12, 0).toISOString();
+
+  const waitingForResult = (noReply: object | null) =>
+    makeDetail({
+      id: "op-2",
+      read: true,
+      ...RESULT_STATE,
+      messages: [],
+      noReply: noReply as never,
+    });
+
+  async function openWaiting(noReply: object | null) {
+    const user = userEvent.setup();
+    await renderBoard({
+      "GET /api/operator/inquiries/op-2": { body: waitingForResult(noReply) },
+    });
+    await user.click(screen.getByRole("button", { name: /返事待ちの件/ }));
+    return await screen.findByRole("region", { name: "問い合わせの詳細" });
+  }
+
+  it("知らせる前は、知らせる予定の日を1行で出す", async () => {
+    const panel = await openWaiting({
+      remindAt: REMIND_AT,
+      remindedAt: null,
+      closesAt: null,
+    });
+
+    expect(
+      await within(panel).findByText(
+        "返事がなければ、11月24日に本人へ知らせます",
+      ),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByText(/知らせました/)).not.toBeInTheDocument();
+  });
+
+  it("知らせた後は、知らせた日と、終わる予定の日を1行で出す", async () => {
+    const panel = await openWaiting({
+      remindAt: REMIND_AT,
+      remindedAt: REMINDED_AT,
+      closesAt: CLOSES_AT,
+    });
+
+    expect(
+      await within(panel).findByText(
+        "11月24日に本人へ知らせました。返事がなければ、12月1日に「回答済み」で終わります",
+      ),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByText(/知らせます$/)).not.toBeInTheDocument();
+  });
+
+  it("noReply が null の件（担当者の番など）には出さない", async () => {
+    const user = userEvent.setup();
+    const { card } = await renderBoard();
+    const panel = await openPanel(user, card);
+
+    expect(within(panel).queryByText(/本人へ知らせ/)).not.toBeInTheDocument();
+    expect(document.querySelector(".op-no-reply")).toBeNull();
+  });
+
+  it("状態の履歴に、期間が起こした「返事がないことを本人に知らせた」「返事がないまま終わった」が出る", async () => {
+    const user = userEvent.setup();
+    const { card } = await renderBoard({
+      "GET /api/operator/inquiries/op-1": {
+        body: makeDetail({
+          read: true,
+          messages: [],
+          history: [
+            {
+              at: REMINDED_AT,
+              actor: "TIME",
+              event: "REMINDED",
+              phase: "KNOW",
+              turn: "ASKER",
+              awaiting: "RESULT_CONFIRMATION",
+              ending: null,
+            },
+            {
+              at: CLOSES_AT,
+              actor: "TIME",
+              event: "ANSWERED",
+              phase: "CLOSED",
+              turn: null,
+              awaiting: null,
+              ending: "ANSWERED",
+            },
+          ],
+        }),
+      },
+    });
+    const panel = await openPanel(user, card);
+    await user.click(within(panel).getByText("状態の履歴"));
+
+    const rows = within(
+      within(panel).getByText("状態の履歴").closest("details")!,
+    ).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("期間");
+    expect(rows[0]).toHaveTextContent("返事がないことを本人に知らせた");
+    expect(rows[0]).toHaveTextContent("本人の番（結果の確かめ待ち）");
+    expect(rows[1]).toHaveTextContent("期間");
+    expect(rows[1]).toHaveTextContent("返事がないまま終わった");
+    expect(rows[1]).toHaveTextContent("終わり（回答済み）");
+  });
+});
+
 describe("担当者の画面: ストリーム", () => {
   it("filed で「担当者の番」の列の先頭にカードが足され、通知が出る", async () => {
     const { stream } = await renderBoard();

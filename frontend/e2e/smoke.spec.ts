@@ -639,6 +639,89 @@ test("英語に切り替えて通せ、書かれた内容は言語を戻して�
  * スマホの幅では、ボードの列は横にスクロールして見るが、ページ全体は横にはみ出さない。
  * （視覚的に隠した文字の位置の基準が列の外にあり、ページ全体が横に広がったことがある）
  */
+/**
+ * 返事がないとき: AI の答えを確かめないまま期間が過ぎると、1度知らせたうえで「回答済み」で終わる。
+ * 終わった後に続きを送ると、担当者に渡る。期間が過ぎるのは待てないので、開発用の口で時刻を指定して判定する。
+ */
+test("返事がないまま期間が過ぎると知らせたうえで回答済みで終わり、続きを送ると担当者に渡る", async ({
+  page,
+  request,
+}) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+  const mark = `返事なし確認 ${Date.now()}`;
+  const more = `やはり解決していません ${Date.now()}`;
+  const day = 24 * 60 * 60 * 1000;
+  /** いまから `days` 日後を現在として、期間の決まりを判定する。 */
+  const runRulesAfter = async (days: number) => {
+    const response = await request.post(
+      "http://localhost:8080/api/dev/rules/run",
+      { data: { now: new Date(Date.now() + days * day).toISOString() } },
+    );
+    expect(response.ok()).toBe(true);
+    return (await response.json()) as { reminded: number; closed: number };
+  };
+
+  await startByText(page, `${mark} 請求書の宛名を知りたい`);
+  await answerUnknownAndConfirm(page);
+  await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible({
+    timeout: 30_000,
+  });
+  const askerUrl = page.url();
+  // 知らせる前は、何も出さない
+  await expect(page.getByText(/お返事がないため/)).toHaveCount(0);
+
+  // 5営業日は、暦では長くても7日。8日後なら必ず過ぎている
+  expect((await runRulesAfter(8)).reminded).toBeGreaterThanOrEqual(1);
+  await page.goto("/inquiries");
+  const mine = page
+    .getByRole("region", { name: /^あなたの番/ })
+    .getByRole("listitem")
+    .filter({ hasText: mark });
+  await expect(mine).toBeVisible();
+  await page.goto(askerUrl);
+  await expect(
+    page.getByText(/お返事がないため、.+に「回答済み」として終了します/),
+  ).toBeVisible();
+  // 知らせた直後は、まだ終わらない（知らせた時刻から、もう一度期間を数える）
+  await expect(
+    page.getByRole("button", { name: "解決しました" }),
+  ).toBeVisible();
+
+  // 知らせた時刻（8日後）から、さらに8日後
+  expect((await runRulesAfter(16)).closed).toBeGreaterThanOrEqual(1);
+  await page.goto(askerUrl);
+  await expect(
+    page.getByText(/お返事がなかったため、いったん終了しました/),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "解決しました" })).toHaveCount(
+    0,
+  );
+
+  // 続きを送ると、担当者に初めて渡る
+  await page.getByLabel("追加で伝える").fill(more);
+  await page.getByRole("button", { name: "送る", exact: true }).click();
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+
+  await page.goto("/operator");
+  const card = page
+    .getByRole("region", { name: "受付一覧" })
+    .getByRole("region", { name: /^担当者の番/ })
+    .getByRole("listitem")
+    .filter({ hasText: mark });
+  await expect(card).toBeVisible();
+  await card.getByRole("button").click();
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+  await expect(detail.getByText(more)).toBeVisible();
+  await detail.getByText("状態の履歴").click();
+  await expect(
+    detail.getByText("返事がないことを本人に知らせた"),
+  ).toBeVisible();
+  await expect(detail.getByText("返事がないまま終わった")).toBeVisible();
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
 test("スマホの幅でボードがページの横幅からはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   for (const path of ["/operator", "/inquiries"]) {

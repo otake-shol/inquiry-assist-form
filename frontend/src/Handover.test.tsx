@@ -541,3 +541,168 @@ describe("本人のページ: 取り下げ", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+/** 12月1日（ローカルの時刻で正午）。日付の書式の確認に使う。 */
+const CLOSES_AT = new Date(2026, 11, 1, 12, 0).toISOString();
+const REMINDED_AT = new Date(2026, 10, 24, 12, 0).toISOString();
+const REMIND_AT = new Date(2026, 10, 24, 9, 0).toISOString();
+
+const NOTICE_JA =
+  "お返事がないため、12月1日に「回答済み」として終了します。解決したかどうかを、下から選んでください。終了した後も、このページから続きを送れます。";
+
+describe("本人のページ: 返事がないときの知らせ", () => {
+  const aiResult = (noReply: InquiryView["noReply"]) =>
+    makeStructuredView({
+      ...RESULT_STATE,
+      answer: groundedAnswer,
+      noReply,
+    });
+
+  it("知らせる前は、何も出さない（急かさない）", async () => {
+    openInquiry(
+      aiResult({ remindAt: REMIND_AT, remindedAt: null, closesAt: null }),
+    );
+
+    await screen.findByRole("button", { name: "解決しました" });
+    expect(screen.queryByText(/お返事がないため/)).not.toBeInTheDocument();
+    expect(document.querySelector(".no-reply-notice")).toBeNull();
+  });
+
+  it("noReply が null のときも出さない", async () => {
+    openInquiry(aiResult(null));
+
+    await screen.findByRole("button", { name: "解決しました" });
+    expect(screen.queryByText(/お返事がないため/)).not.toBeInTheDocument();
+  });
+
+  it("知らせた後は、結果を確かめる選択肢のすぐ上に、終わる予定の日（月と日）を入れて出す", async () => {
+    openInquiry(
+      aiResult({
+        remindAt: REMIND_AT,
+        remindedAt: REMINDED_AT,
+        closesAt: CLOSES_AT,
+      }),
+    );
+
+    const notice = await screen.findByText(NOTICE_JA);
+    const question = screen.getByText(
+      "やりたかったことは、進められそうですか。",
+    );
+    const solved = screen.getByRole("button", { name: "解決しました" });
+    const follows = (a: Node, b: Node) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(notice, question)).toBe(true);
+    expect(follows(notice, solved)).toBe(true);
+    // 結果より後ろ
+    expect(
+      follows(screen.getByRole("heading", { name: "調べた結果" }), notice),
+    ).toBe(true);
+    expect(document.body.textContent).not.toMatch(
+      /noReply|remindedAt|RESULT_CONFIRMATION/,
+    );
+  });
+
+  it("担当者の結果を確かめている件でも、確かめの選択肢のすぐ上に出す", async () => {
+    openInquiry(
+      resultDelivered({
+        noReply: {
+          remindAt: REMIND_AT,
+          remindedAt: REMINDED_AT,
+          closesAt: CLOSES_AT,
+        },
+      }),
+    );
+
+    const notice = await screen.findByText(NOTICE_JA);
+    const solved = screen.getByRole("button", { name: "解決しました" });
+    expect(
+      notice.compareDocumentPosition(solved) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // AI の答えの確かめはもう出さないので、知らせは1か所だけ
+    expect(screen.getAllByText(NOTICE_JA)).toHaveLength(1);
+  });
+
+  it("担当者の結果を確かめている件でも、知らせる前は出さない", async () => {
+    openInquiry(
+      resultDelivered({
+        noReply: { remindAt: REMIND_AT, remindedAt: null, closesAt: null },
+      }),
+    );
+
+    await screen.findByRole("button", { name: "解決しました" });
+    expect(screen.queryByText(/お返事がないため/)).not.toBeInTheDocument();
+  });
+});
+
+describe("本人のページ: 返事がないまま「回答済み」で終わった件", () => {
+  const unhandedAnswered = () =>
+    makeStructuredView({
+      ...closedState("ANSWERED"),
+      answer: groundedAnswer,
+      handedOverAt: null,
+      noReply: null,
+    });
+
+  it("担当者に渡したことがなくても、終わりの文言と、続きを送る欄を出す。渡したとは言わない", async () => {
+    openInquiry(unhandedAnswered());
+
+    expect(
+      await screen.findByText(
+        "お返事がなかったため、いったん終了しました。解決していなければ、このページから続きを送れます。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("回答済み", { selector: ".handling-status" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("追加で伝える")).toBeInTheDocument();
+    expect(screen.queryByText(/担当者に送りました/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("担当者からの返信は、ここに表示されます。"),
+    ).not.toBeInTheDocument();
+    // 別の問い合わせの入口は、やり取りの最後に置く
+    expect(
+      screen.getByRole("button", { name: "別の問い合わせを書く" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "新しい問い合わせを書く" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("続きを送ると POST …/messages を呼び、担当者に渡った状態になる", async () => {
+    const user = userEvent.setup();
+    const calls = openInquiry(unhandedAnswered(), {
+      "POST /api/inquiries/inq-1/messages": {
+        body: makeFiledView({
+          answer: groundedAnswer,
+          sentImmediately: false,
+          messages: [
+            makeMessage({
+              id: "m1",
+              from: "ASKER",
+              kind: "NOTE",
+              body: "まだ直っていません。",
+            }),
+          ],
+        }),
+      },
+    });
+
+    await user.type(
+      await screen.findByLabelText("追加で伝える"),
+      "まだ直っていません。",
+    );
+    await user.click(screen.getByRole("button", { name: "送る" }));
+
+    expect(
+      callsTo(calls, "POST", "/api/inquiries/inq-1/messages")[0].body,
+    ).toEqual({ body: "まだ直っていません。" });
+    expect(
+      await screen.findByText("担当者が確認しています"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
+      ),
+    ).toBeInTheDocument();
+  });
+});

@@ -217,6 +217,17 @@ export interface TraceEntry {
   failed: boolean;
 }
 
+/**
+ * 返事がないときの予定。結果を本人が確かめている間だけ非 null（それ以外は null）。
+ * `remindedAt` は実際に知らせた時刻（まだなら null）、`closesAt` は終わる予定の時刻（知らせた後だけ非 null）。
+ */
+export interface NoReply {
+  /** 知らせる予定の時刻 */
+  remindAt: string;
+  remindedAt: string | null;
+  closesAt: string | null;
+}
+
 /** 問い合わせ1件の表現。 */
 export interface InquiryView extends StateFields {
   id: string;
@@ -244,8 +255,10 @@ export interface InquiryView extends StateFields {
   mock: boolean;
   /** 担当者に初めて渡した時刻。渡していなければ null */
   handedOverAt: string | null;
-  /** 担当者の新しい発言が、まだ読まれていないか */
+  /** 担当者の新しい発言（返事がないことの知らせを含む）が、まだ読まれていないか */
   unreadReply: boolean;
+  /** 返事がないときの予定（結果を確かめている間だけ非 null） */
+  noReply: NoReply | null;
   /** 作成日時 */
   createdAt?: string;
   /** やり取り（古い順） */
@@ -360,6 +373,8 @@ export interface OperatorDetail extends StateFields {
   language: string;
   /** 見送りで終わった件だけが持つ */
   declined: Declined | null;
+  /** 返事がないときの予定（結果を本人が確かめている間だけ非 null） */
+  noReply: NoReply | null;
   filedAt: string;
   askerId: string;
   /** 投稿者の表示用の名前（古い応答では欠ける） */
@@ -388,7 +403,7 @@ export interface OperatorDetail extends StateFields {
 }
 
 /** 状態の履歴で、変化を起こした人。 */
-export type HistoryActor = "ASKER" | "AI" | "OPERATOR";
+export type HistoryActor = "ASKER" | "AI" | "OPERATOR" | "TIME";
 
 /** 置き場所の名前（既定の言語）。決まっていなければ null。 */
 export interface PlacementNames {

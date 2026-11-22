@@ -119,6 +119,17 @@ class InquiryEntity {
     @Enumerated(EnumType.STRING)
     Ending ending;
 
+    /**
+     * 待っていることが、いまのものになった時刻（返事がないときの決まりの起点）。待っていることが変わる遷移のたびに更新する。
+     * 状態が変わらない遷移（知らせる）では変えない。
+     */
+    @Column(name = "awaiting_since")
+    Instant awaitingSince;
+
+    /** 返事がないことを本人に知らせた時刻。まだなら null。待っていることが変わると消える。 */
+    @Column(name = "reminded_at")
+    Instant remindedAt;
+
     /** 終わる前の区間。終わった件を開き直したとき、この区間に戻す。 */
     @Enumerated(EnumType.STRING)
     @Column(name = "phase_before_closed")
@@ -267,6 +278,7 @@ class InquiryEntity {
         this.urgency = urgency;
         this.createdAt = now;
         this.updatedAt = now;
+        this.awaitingSince = now;
     }
 
     /**
@@ -420,10 +432,18 @@ class InquiryEntity {
         if (to.closed() && !phase.equals(Phase.CLOSED)) {
             phaseBeforeClosed = phase;
         }
+        if (to.awaiting() != awaiting) {
+            // 待っていることが変わったら、返事がないときの決まりを最初から数える。知らせる遷移は、状態が変わらないので通らない
+            awaitingSince = now;
+            remindedAt = null;
+        }
         phase = to.phase();
         turn = to.turn();
         awaiting = to.awaiting();
         ending = to.ending();
+        if (transition.event() == dev.inquiryassist.core.lifecycle.HistoryEvent.REMINDED) {
+            remindedAt = now;
+        }
         if (transition.handsOver()) {
             readAt = null;
             if (handedOverAt == null) {

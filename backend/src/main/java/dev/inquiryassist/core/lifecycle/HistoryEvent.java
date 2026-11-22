@@ -28,6 +28,10 @@ public enum HistoryEvent {
     WITHDRAWN,
     /** 終わった件を、本人の追記で開き直した。 */
     REOPENED,
+    /** 返事がないことを、本人に知らせた（状態は変わらない）。 */
+    REMINDED,
+    /** 返事がないまま期間が過ぎて、終わった。 */
+    ANSWERED,
     /** 担当者が区間を変えた。 */
     PHASE_CHANGED,
     /** 担当者が置き直した。 */

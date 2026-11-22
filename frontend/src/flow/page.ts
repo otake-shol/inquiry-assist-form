@@ -89,7 +89,10 @@ export function pageSections(view: InquiryView | null): Section[] {
   if (view.ending !== null) sections.push({ kind: "closing" });
 
   // 担当者に渡したことのある問い合わせは、「いまの状況」とやり取り、追記の入力欄を置く
-  if (view.handedOverAt !== null) sections.push({ kind: "followup" });
+  // 担当者に渡したことのない件が、返事がないまま「回答済み」で終わったときも、続きを送る欄を置く
+  if (view.handedOverAt !== null || view.ending === "ANSWERED") {
+    sections.push({ kind: "followup" });
+  }
   return sections;
 }
 
@@ -174,10 +177,12 @@ export function resultFromOperator(view: InquiryView): boolean {
 /**
  * 追記の入力欄を出せるか。担当者に渡したことがあり、取り下げていない件。
  * 終わっている件（解決済み、回答済み、見送り）でも、追記で開き直せる。
+ * 担当者に渡したことのない件も、返事がないまま「回答済み」で終わっていれば出す（送ると担当者に渡る）。
  * @param view 現在の問い合わせ
  */
 export function canAppend(view: InquiryView): boolean {
-  return view.handedOverAt !== null && view.ending !== "WITHDRAWN";
+  if (view.handedOverAt === null) return view.ending === "ANSWERED";
+  return view.ending !== "WITHDRAWN";
 }
 
 /**

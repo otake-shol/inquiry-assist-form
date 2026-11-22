@@ -59,7 +59,8 @@ class OllamaInvestigatorSkillTest {
                 new InquiryProperties.Ollama(ollama.baseUrl(), "30m", 42),
                 new InquiryProperties.Trace(true),
                 new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"),
-                java.util.Map.of());
+                java.util.Map.of(),
+                InquiryProperties.Rules.defaults());
         return new OllamaInvestigatorSkill(new OllamaClient(ollama.baseUrl(), "30m", 42, JSON), JSON, properties, knowledge);
     }
 

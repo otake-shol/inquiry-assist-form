@@ -40,7 +40,8 @@ import java.util.UUID;
  * @param canSendNow いま「答えを待たずに担当者へ送る」を実行できるか
  * @param sentImmediately 答えを待たずに担当者へ送られたか
  * @param handedOverAt 担当者に初めて渡した時刻。渡していなければ null
- * @param unreadReply 本人がまだ読んでいない担当者の発言があるか
+ * @param unreadReply 本人がまだ読んでいない知らせがあるか（担当者の発言、返事がないことの知らせ、期間が過ぎて終えたこと）
+ * @param noReply 返事がないときの決まりの予定。結果を本人が確かめている間だけ非 null
  * @param messages 担当者の発言と本人の追記（古い順）。なければ空
  * @param trace スキルの実行記録。無効にしている場合は null
  * @param mock モック実装による記録か
@@ -67,6 +68,7 @@ public record InquiryView(
         boolean sentImmediately,
         Instant handedOverAt,
         boolean unreadReply,
+        NoReplyView noReply,
         List<MessageView> messages,
         List<TraceEntry> trace,
         boolean mock) {
@@ -122,6 +124,15 @@ public record InquiryView(
      */
     public record QuestionView(
             String questionId, QuestionKind kind, String text, List<Choice> options, boolean allowsText, boolean canSkip) {}
+
+    /**
+     * 返事がないときの決まりの予定（契約書「返事がないとき」）。
+     *
+     * @param remindAt 知らせる予定の時刻
+     * @param remindedAt 実際に知らせた時刻。まだなら null
+     * @param closesAt 終わる予定の時刻。知らせた後だけ非 null
+     */
+    public record NoReplyView(Instant remindAt, Instant remindedAt, Instant closesAt) {}
 
     /**
      * 整形後の問い。緊急度は持たない（問い合わせの {@code urgency} に一本化している）。

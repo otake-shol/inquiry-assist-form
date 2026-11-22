@@ -765,6 +765,150 @@ describe("英語の本人のページ", () => {
   });
 });
 
+describe("英語の返事がないときの知らせ", () => {
+  const CLOSES_AT = new Date(2026, 11, 1, 12, 0).toISOString();
+  const REMINDED_AT = new Date(2026, 10, 24, 12, 0).toISOString();
+  const REMIND_AT = new Date(2026, 10, 24, 9, 0).toISOString();
+
+  it("本人のページ: 知らせた後だけ、英語の文言と英語の書式の日付（December 1）を出す", async () => {
+    storedEnglish();
+    installFakeFetch({
+      ...bilingualConfig(),
+      ...inquiry(
+        makeStructuredView({
+          ...RESULT_STATE,
+          language: "en",
+          answer: groundedAnswer,
+          noReply: {
+            remindAt: REMIND_AT,
+            remindedAt: REMINDED_AT,
+            closesAt: CLOSES_AT,
+          },
+        }),
+      ),
+    });
+    open("/inquiries/inq-1");
+
+    expect(
+      await screen.findByText(
+        "There has been no reply, so this inquiry will be closed as “Answered” on December 1. Please choose below whether it was resolved. You can still send a follow-up from this page after it is closed.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("本人のページ: 渡していない「回答済み」の件に、続きを送る欄が出る", async () => {
+    storedEnglish();
+    installFakeFetch({
+      ...bilingualConfig(),
+      ...inquiry(
+        makeStructuredView({
+          ...closedState("ANSWERED"),
+          language: "en",
+          handedOverAt: null,
+          answer: groundedAnswer,
+        }),
+      ),
+    });
+    open("/inquiries/inq-1");
+
+    expect(
+      await screen.findByText(
+        "This was closed because there was no reply. If it is not resolved, you can send more from this page.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Add more details")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Replies from the support team will appear here."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("担当者のパネル: 予定の2通りの行と、履歴の新しい言葉が英語で出る", async () => {
+    const user = userEvent.setup();
+    storedEnglish();
+    let detail = makeDetail({
+      read: true,
+      language: "en",
+      messages: [],
+      ...RESULT_STATE,
+      noReply: { remindAt: REMIND_AT, remindedAt: null, closesAt: null },
+      history: [
+        {
+          at: REMINDED_AT,
+          actor: "TIME",
+          event: "REMINDED",
+          phase: "KNOW",
+          turn: "ASKER",
+          awaiting: "RESULT_CONFIRMATION",
+          ending: null,
+        },
+        {
+          at: CLOSES_AT,
+          actor: "TIME",
+          event: "ANSWERED",
+          phase: "CLOSED",
+          turn: null,
+          awaiting: null,
+          ending: "ANSWERED",
+        },
+      ],
+    });
+    installFakeFetch({
+      ...bilingualConfig(),
+      "GET /api/operator/inquiries": {
+        body: {
+          unreadCount: 0,
+          items: [makeItem({ read: true, language: "en", ...RESULT_STATE })],
+        },
+      },
+      "GET /api/operator/inquiries/op-1": () => ({ body: detail }),
+    });
+    open("/operator");
+
+    await user.click(
+      await screen.findByRole("button", { name: /求人が一覧に出なくなった/ }),
+    );
+    const panel = await screen.findByRole("region", {
+      name: "Inquiry details",
+    });
+    expect(
+      await within(panel).findByText(
+        "If there is no reply, the requester will be reminded on November 24.",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(within(panel).getByText("Status history"));
+    const rows = within(
+      within(panel).getByText("Status history").closest("details")!,
+    ).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("Time limit");
+    expect(rows[0]).toHaveTextContent("Requester reminded (no reply)");
+    expect(rows[1]).toHaveTextContent("Closed after no reply");
+    expect(rows[1]).toHaveTextContent("Closed (Answered)");
+
+    detail = {
+      ...detail,
+      noReply: {
+        remindAt: REMIND_AT,
+        remindedAt: REMINDED_AT,
+        closesAt: CLOSES_AT,
+      },
+    };
+    cleanup();
+    open("/operator");
+    await user.click(
+      await screen.findByRole("button", { name: /求人が一覧に出なくなった/ }),
+    );
+    const second = await screen.findByRole("region", {
+      name: "Inquiry details",
+    });
+    expect(
+      await within(second).findByText(
+        "The requester was reminded on November 24. If there is no reply, this will be closed as “Answered” on December 1.",
+      ),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("書かれた内容の言語（lang 属性）", () => {
   it("本人の文章、言い直し、説明、AI が書いた事実には問い合わせの language、根拠の引用には ja が付く。画面の言語とは別", async () => {
     storedEnglish();

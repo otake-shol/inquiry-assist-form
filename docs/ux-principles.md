@@ -98,6 +98,20 @@ AIは門番ではなく伴走者。使えば早く答えが出るが、使わな
 - AI の答えを確かめる画面（担当者に渡す前）の言葉も、目的の側に寄せる。調べた結果の下に「やりたかったことは、進められそうですか。」と添え、ボタンは「解決しました」「まだ解決していません（担当者に送る）」のまま。
 - 途中でページを閉じても、同じ URL を開けば続きから再開できる。
 
+### 返事がないとき
+
+結果を本人が確かめている件は、返事がないまま期間が過ぎると、1度知らせたうえで「回答済み」で終わる（`api-contract.md` の「返事がないとき」）。
+
+- **本人のページ**: 知らせた後（`noReply.remindedAt` がある間）だけ、結果を確かめる選択肢のすぐ上に知らせを出す。知らせる前は何も出さない（急かさない）。
+  - 日本語: 「お返事がないため、{日付}に「回答済み」として終了します。解決したかどうかを、下から選んでください。終了した後も、このページから続きを送れます。」
+  - 英語: "There has been no reply, so this inquiry will be closed as “Answered” on {date}. Please choose below whether it was resolved. You can still send a follow-up from this page after it is closed."
+  - `{日付}` は `noReply.closesAt` の日付。見る人の言語の書式で、月と日を出す（「12月1日」「December 1」）。
+- **「回答済み」で終わった件**: 担当者に渡したことのない件（AI の答えに返事がなかった件）にも、続きを送る欄を出す。送ると担当者に渡る。
+- **担当者の詳細のパネル**: 結果を本人が確かめている件に、1行で予定を出す。
+  - 知らせる前: 「返事がなければ、{日付}に本人へ知らせます」／ "If there is no reply, the requester will be reminded on {date}."
+  - 知らせた後: 「{日付}に本人へ知らせました。返事がなければ、{日付}に「回答済み」で終わります」／ "The requester was reminded on {date}. If there is no reply, this will be closed as “Answered” on {date}."
+- **履歴の言葉**（担当者のパネル）: `REMINDED` は「返事がないことを本人に知らせた」／ "Requester reminded (no reply)"、`ANSWERED` は「返事がないまま終わった」／ "Closed after no reply"。起こした人の `TIME` は「期間」／ "Time limit"。
+
 ## ボード
 
 担当者の画面（`/operator`）と、本人の「送った問い合わせ」（`/inquiries`）は、課題管理ツールのカンバンと同じ形にする。列は「誰の番か」で分ける。全体でいま何がどこで止まっているかを、一目で見られるようにするため。

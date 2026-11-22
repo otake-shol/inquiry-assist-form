@@ -142,7 +142,8 @@ final class EvalRunner {
                 new InquiryProperties.Ollama(config.ollamaUrl(), "30m", config.seed()),
                 new InquiryProperties.Trace(true),
                 new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"),
-                java.util.Map.of());
+                java.util.Map.of(),
+                InquiryProperties.Rules.defaults());
         OllamaClient client = new OllamaClient(config.ollamaUrl(), "30m", config.seed(), JSON);
         return new EvalExecutor(
                 new OllamaReceptionSkill(client, JSON, properties),

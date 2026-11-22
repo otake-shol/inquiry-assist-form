@@ -38,6 +38,7 @@ import java.util.UUID;
  * @param awaiting 待っていること。終わった件は null
  * @param ending 終わり方。終わっていない件は null
  * @param declined 見送りの内容。見送りで終わった件だけ非 null
+ * @param noReply 返事がないときの決まりの予定。結果を本人が確かめている間だけ非 null
  * @param messages 担当者の発言と本人の追記（古い順）
  * @param history 状態の履歴（起きた順）
  * @param trace スキルの実行記録。無効にしている場合は null
@@ -65,6 +66,7 @@ public record OperatorDetail(
         Awaiting awaiting,
         Ending ending,
         Declined declined,
+        InquiryView.NoReplyView noReply,
         List<MessageView> messages,
         List<HistoryEntry> history,
         List<TraceEntry> trace) {

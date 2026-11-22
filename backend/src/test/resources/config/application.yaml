@@ -2,6 +2,9 @@
 # 本体の既定は仮の名前（システムA など）だが、テストでは業務らしい名前の一覧を使う。
 # 文章に含まれる名前から置き場所を置く動きを、意味のある名前で確かめるため。
 inquiry:
+  # 時間で動く決まりは、定期的には回さない。テストは run(now) を直接呼ぶ
+  rules:
+    sweep-enabled: false
   systems:
     - id: job-admin
       label: { ja: 求人管理画面, en: Job admin }

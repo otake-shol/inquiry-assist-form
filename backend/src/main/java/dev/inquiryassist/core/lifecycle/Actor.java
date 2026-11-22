@@ -7,5 +7,7 @@ public enum Actor {
     /** AI。 */
     AI,
     /** 担当者。 */
-    OPERATOR
+    OPERATOR,
+    /** 時間。返事がないまま期間が過ぎたことで起きた。 */
+    TIME
 }

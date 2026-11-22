@@ -349,4 +349,76 @@ class InquiryStateMachineTest {
         assertThatThrownBy(() -> InquiryStateMachine.require(closed(Ending.RESOLVED), Awaiting.INTAKE_ANSWER))
                 .isInstanceOf(IllegalTransitionException.class);
     }
+
+    // ---- 返事がないとき（時間） ----
+
+    @Test
+    void 知らせる遷移は状態を変えず_履歴の出来事はREMINDEDで起こしたのは時間() {
+        Transition t = InquiryStateMachine.reminded(RESULT);
+
+        assertThat(t.to()).isEqualTo(RESULT);
+        assertThat(t.event()).isEqualTo(HistoryEvent.REMINDED);
+        assertThat(t.actor()).isEqualTo(Actor.TIME);
+        assertThat(t.handsOver()).isFalse();
+    }
+
+    @Test
+    void 期間が過ぎて終える遷移は回答済みで終わり_起こしたのは時間() {
+        Transition t = InquiryStateMachine.answeredByTime(RESULT);
+
+        assertThat(t.to()).isEqualTo(closed(Ending.ANSWERED));
+        assertThat(t.event()).isEqualTo(HistoryEvent.ANSWERED);
+        assertThat(t.actor()).isEqualTo(Actor.TIME);
+        assertThat(t.handsOver()).isFalse();
+    }
+
+    @Test
+    void 担当者の結果を確かめている件も同じ() {
+        InquiryState operatorResult = new InquiryState(Phase.DECIDE, Turn.ASKER, Awaiting.RESULT_CONFIRMATION, null);
+        assertThat(InquiryStateMachine.reminded(operatorResult).to()).isEqualTo(operatorResult);
+        assertThat(InquiryStateMachine.answeredByTime(operatorResult).to()).isEqualTo(closed(Ending.ANSWERED));
+    }
+
+    @Test
+    void 時間の遷移は結果を確かめている状態以外では例外() {
+        List<InquiryState> others = List.of(
+                INTAKE,
+                CONFIRMING,
+                INVESTIGATING,
+                handling(Phase.KNOW),
+                new InquiryState(Phase.DECIDE, Turn.ASKER, Awaiting.ASKER_REPLY, null),
+                closed(Ending.ANSWERED),
+                closed(Ending.RESOLVED));
+        for (InquiryState state : others) {
+            assertThatThrownBy(() -> InquiryStateMachine.reminded(state))
+                    .isInstanceOf(IllegalTransitionException.class);
+            assertThatThrownBy(() -> InquiryStateMachine.answeredByTime(state))
+                    .isInstanceOf(IllegalTransitionException.class);
+        }
+    }
+
+    @Test
+    void 担当者に渡したことのない回答済みの件への追記は開き直して担当者に初めて渡す() {
+        // 終わる前の区間（KNOW）ではなく、種類で決まる区間にする
+        Context neverHanded = new Context(InquiryType.LOOKS_WRONG, false, Phase.KNOW, false, 2);
+        Transition t = InquiryStateMachine.noted(closed(Ending.ANSWERED), neverHanded);
+
+        assertThat(t.to()).isEqualTo(handling(Phase.DECIDE));
+        assertThat(t.event()).isEqualTo(HistoryEvent.REOPENED);
+        assertThat(t.actor()).isEqualTo(Actor.ASKER);
+        assertThat(t.handsOver()).isTrue();
+        assertThat(InquiryStateMachine.noted(closed(Ending.ANSWERED), new Context(InquiryType.HOW_TO, false, Phase.KNOW, false, 2))
+                        .to())
+                .isEqualTo(handling(Phase.KNOW));
+        assertThat(InquiryStateMachine.noted(closed(Ending.ANSWERED), new Context(null, false, Phase.KNOW, false, 2)).to())
+                .isEqualTo(handling(Phase.KNOW));
+    }
+
+    @Test
+    void 担当者に渡したことがなければ_回答済み以外の終わった件には追記できない() {
+        for (Ending ending : List.of(Ending.RESOLVED, Ending.DECLINED, Ending.WITHDRAWN)) {
+            assertThatThrownBy(() -> InquiryStateMachine.noted(closed(ending), ctx(InquiryType.HOW_TO)))
+                    .isInstanceOf(IllegalTransitionException.class);
+        }
+    }
 }

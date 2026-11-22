@@ -263,15 +263,45 @@ public final class InquiryStateMachine {
     }
 
     /**
-     * 本人が追記する。担当者に渡したことのある、取り下げていない問い合わせだけ。追記したときの状態で、その後が決まる。
+     * 返事がないことを本人に知らせる。状態は変えない（出来事は {@code REMINDED}。番は変わらないが、時間が起こした出来事なので履歴に残す）。
+     *
+     * @param state いまの状態（{@code RESULT_CONFIRMATION}）
+     * @return 遷移
+     * @throws IllegalTransitionException 結果を確かめている状態でない場合
+     */
+    public static Transition reminded(InquiryState state) {
+        require(state, Awaiting.RESULT_CONFIRMATION);
+        return new Transition(state, HistoryEvent.REMINDED, Actor.TIME, false, null);
+    }
+
+    /**
+     * 返事がないまま期間が過ぎたので、回答済みで終える。
+     *
+     * @param state いまの状態（{@code RESULT_CONFIRMATION}）
+     * @return 遷移
+     * @throws IllegalTransitionException 結果を確かめている状態でない場合
+     */
+    public static Transition answeredByTime(InquiryState state) {
+        require(state, Awaiting.RESULT_CONFIRMATION);
+        return move(state, new InquiryState(Phase.CLOSED, null, null, Ending.ANSWERED), HistoryEvent.ANSWERED, Actor.TIME);
+    }
+
+    /**
+     * 本人が追記する。担当者に渡したことのある、取り下げていない問い合わせと、担当者に渡したことがなく回答済みで終わった問い合わせ
+     * （AI の答えに返事がなかった件）。追記したときの状態で、その後が決まる。
      *
      * @param state いまの状態
      * @param ctx 文脈
      * @return 遷移。担当者の番の間の追記は、状態が変わらない（出来事は {@code null}）
-     * @throws IllegalTransitionException 担当者に渡したことがない、または取り下げた問い合わせの場合
+     * @throws IllegalTransitionException 担当者に渡したことがなく回答済みでもない、または取り下げた問い合わせの場合
      */
     public static Transition noted(InquiryState state, Context ctx) {
         if (!ctx.handedOver()) {
+            if (state.closed() && state.ending() == Ending.ANSWERED) {
+                // 初めて渡すので、区間は「担当者に渡す」の決まり（種類）で決める。終わる前の区間には戻さない
+                return move(state, new InquiryState(handOverPhase(ctx.type()), Turn.OPERATOR, Awaiting.HANDLING, null),
+                        HistoryEvent.REOPENED, Actor.ASKER);
+            }
             throw new IllegalTransitionException("担当者に渡した問い合わせにだけ追記できます");
         }
         if (state.closed()) {

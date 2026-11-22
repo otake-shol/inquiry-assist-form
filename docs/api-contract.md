@@ -71,7 +71,52 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 
 `DO_FOR_ME` で AI が手順を示した場合、「解決した」は自分で行えたこと、「解決していない」は担当者に頼むことを意味する。
 
-返事がないまま期間が過ぎた件を `ANSWERED`（回答済み）にする処理は、段階2で作る。それまで、`ANSWERED` で終わる件は、移行で読み替えた既存の件だけになる。
+本人が確かめないまま期間が過ぎた件は、下の「返事がないとき」の決まりで終わる。
+
+### 返事がないとき
+
+結果を本人が確かめている件（`awaiting: RESULT_CONFIRMATION`）は、返事がないまま期間が過ぎると、1度知らせたうえで `ANSWERED`（回答済み）で終わる。答えたのが AI でも担当者でも同じ。担当者も本人も動かなくてよいのに、件が「本人の番」に残り続けることを防ぐ。
+
+| 順 | 条件 | 起きること |
+| --- | --- | --- |
+| 1. 知らせる | 結果を確かめる状態になってから、知らせるまでの期間が過ぎた。まだ知らせていない | 知らせた時刻（`remindedAt`）を持つ。本人側の未読（`unreadReply`）を `true` にする。状態は変えない |
+| 2. 終える | 知らせてから、終えるまでの期間が過ぎた | 終わる（`phase: CLOSED`、`ending: ANSWERED`）。本人側の未読を `true` にする。担当者に渡したことのある件なら、担当者のストリームに `updated` を流す（担当者の側の未読は変えない） |
+
+- 起点は、結果を確かめる状態になった時刻（`awaitingSince`）。本人が問い合わせを開いただけでは変わらない。本人が答える（7）か追記する（11）と状態が変わり、この決まりの対象から外れる。担当者がもう一度結果を伝えると、起点も、知らせたかどうかも、最初からになる。
+- 終えるまでの期間は、実際に知らせた時刻から数える。1回の判定で、同じ件を知らせて続けて終えることはしない（サーバーが止まっていた後でも、知らせずに終えない）。
+- 期間は営業日で数える。営業日は月曜から金曜（`inquiry.rules.zone` の時間帯で判定する）。祝日は扱わない。N 営業日後は、起点の時刻から日を1日ずつ進め、進めた先が営業日のときだけ数えて、N 回数えた日の同じ時刻。
+- 知らせは、ツールの中だけで行う（本人のボードの未読と、問い合わせの画面の文言）。Slack には投稿しない。本人を特定して外から届ける経路（Slack の個人宛てなど）は、SSO の後に加える。
+- 聞き返しへの返事を待っている件（`ASKER_REPLY`）と、入口の途中の件は、この決まりの対象にしない（別の決まりとして後で加える）。
+- `ANSWERED` で終わった件は、本人が追記すれば開き直せる（11）。担当者に渡したことのない件（AI の答えに返事がなかった件）も同じで、追記すると担当者に初めて渡る。
+
+設定:
+
+| キー | 既定 | 意味 |
+| --- | --- | --- |
+| `inquiry.rules.zone` | `Asia/Tokyo` | 営業日を判定する時間帯 |
+| `inquiry.rules.no-reply.remind-after-business-days` | `5` | 知らせるまでの営業日の数 |
+| `inquiry.rules.no-reply.close-after-business-days` | `5` | 知らせてから、終えるまでの営業日の数 |
+| `inquiry.rules.sweep-enabled` | `true` | 決まりの判定を、定期的に行うか |
+| `inquiry.rules.sweep-interval` | `15m` | 判定の間隔 |
+
+判定は、定期的な実行（`sweep-interval` ごと）で行う。判定そのもの（どの件を知らせ、どの件を終えるか）と営業日の計算は、Spring に依存しないコード（`core/lifecycle`）に置き、現在時刻を引数で受け取る。同じ件を2つの実行が同時に変えようとした場合は、片方だけが通り、もう片方は次の回に見直す。
+
+InquiryView と担当者向けの詳細は、`noReply` を持つ。
+
+```json
+"noReply": { "remindAt": "2026-11-27T03:00:00Z", "remindedAt": null, "closesAt": null }
+```
+
+- `awaiting` が `RESULT_CONFIRMATION` のときだけ非 null。それ以外は `null`。
+- `remindAt` は、知らせる予定の時刻。`remindedAt` は、実際に知らせた時刻（まだなら `null`）。`closesAt` は、終わる予定の時刻（知らせた後だけ非 null）。
+
+### 開発用: 決まりの判定を、時刻を指定して行う
+
+`POST /api/dev/rules/run`。リクエスト `{ "now": "2026-12-01T00:00:00Z" }`（`now` は省略でき、省略すると現在時刻）。与えた時刻を現在として、上の判定を1回行う。知らせた時刻（`remindedAt`）や履歴の時刻にも、与えた時刻を使う。
+
+`200` `{ "reminded": 1, "closed": 0 }`（知らせた件数と、終えた件数）。
+
+手元とスモークで、期間が過ぎるのを待たずに確かめるための口。`production` プロファイルでは存在しない（`404`）。
 
 ## InquiryView
 
@@ -110,6 +155,7 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
   "sentImmediately": false,
   "handedOverAt": null,
   "unreadReply": false,
+  "noReply": null,
   "messages": [],
   "trace": [],
   "mock": true
@@ -125,6 +171,7 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 - `structured` は、問いを組み立てた後（`awaiting` が `QUESTION_CONFIRMATION` になった時点）から非 null。項目は `summary`（本人に見せる言い直しの文章。必須）、`targetSystem`、`goal`、`whatHappened`、`expectedResult`。`urgency` は `structured` から外し、問い合わせの `urgency` に一本化する。
 - `answer` は、答えの完了後に非 null。形は従来どおり（`grounded`、`answered`、`askerExplanation`、`memo`、`citations`）。
 - `canSendNow` は、いま「答えを待たずに担当者へ送る」（8）を実行できるか。
+- `noReply` は、結果を本人が確かめている間だけ非 null（「返事がないとき」の節）。
 - `revisionsLeft` は、言い直しを作り直せる残り回数（初期値2）。
 - 廃止した項目: `categoryByAi`、`category`、`questions`、`systemGuessed`、`submittedAnswers`、`incidentGuidance`。
 
@@ -530,7 +577,7 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 ### `GET /api/operator/inquiries/{id}`
 
-`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`declined`、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
+`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`declined`、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
 
 `followUps` は廃止し、`intake` に置き換える。入力を終える前に担当者へ送られることがなくなったため、「未回答」の状態は要らなくなった。
 
@@ -606,7 +653,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 ### 未読
 
 - **担当者側**（`read`）: 番が担当者に移るたび、また担当者の番の間に本人が追記するたびに、`false` に戻す。
-- **本人側**（`unreadReply`）: 担当者が発言すると `true`、本人がその問い合わせを取得（9）すると `false` になる。
+- **本人側**（`unreadReply`）: 担当者が発言すると `true`、本人がその問い合わせを取得（9）すると `false` になる。返事がないことを知らせたとき、期間が過ぎて終えたときも `true` にする（「返事がないとき」の節）。
 
 ### 担当者の操作
 
@@ -631,7 +678,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 | 操作 | エンドポイント | 実行できるとき | その後 |
 | --- | --- | --- | --- |
 | 結果を確かめる | 7 | `awaiting: RESULT_CONFIRMATION` | 「本人が結果を確かめる」の決まりのとおり |
-| 追記する | 11 | 担当者に渡したことがあり、取り下げていない | 下の表 |
+| 追記する | 11 | 担当者に渡したことがあり、取り下げていない。または、担当者に渡したことがなく、`ANSWERED` で終わっている | 下の表 |
 | 取り下げる | 12 | 終わっていない | 終わる（`ending: WITHDRAWN`） |
 
 追記（11）の後は、追記したときの状態で決まる。
@@ -642,8 +689,9 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 | 聞き返しへの返事を待っている（`ASKER_REPLY`） | 担当者の番にする（`HANDLING`） |
 | 担当者の結果を確かめている（`RESULT_CONFIRMATION`） | 担当者の番にする（「解決していない」と答えたのと同じ） |
 | 終わっている（`RESOLVED`、`ANSWERED`、`DECLINED`） | 開き直す。終わり方を消し、区間を終わる前に戻して、担当者の番にする |
+| 担当者に渡したことがなく、`ANSWERED` で終わっている（AI の答えに返事がなかった） | 開き直して、担当者に渡す（「担当者に渡す」の決まりのとおり。区間は種類で決まり、初めて渡すので担当者に通知する）。履歴の出来事は `REOPENED` |
 
-担当者に渡したことのない問い合わせ、取り下げた問い合わせへの追記は `INVALID_STATE`。
+担当者に渡したことのない問い合わせ（上の `ANSWERED` の場合を除く）、取り下げた問い合わせへの追記は `INVALID_STATE`。
 
 ### 10. `GET /api/inquiries`
 
@@ -675,7 +723,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 { "at": "2026-11-22T03:00:00Z", "actor": "OPERATOR", "event": "ASKED_BACK", "phase": "DECIDE", "turn": "ASKER", "awaiting": "ASKER_REPLY", "ending": null }
 ```
 
-- `actor` は、その変化を起こした人。`ASKER`、`AI`、`OPERATOR` のいずれか。
+- `actor` は、その変化を起こした人。`ASKER`、`AI`、`OPERATOR`、`TIME`（期間が過ぎたことで起きた）のいずれか。
 - `detail` は、`PLACEMENT_CHANGED` 以外では `null`。
 - `phase`、`turn`、`awaiting`、`ending` は、変化の後の状態。
 - `event` は次のいずれか。
@@ -695,10 +743,12 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 | `DECLINED` | 担当者 | 見送った |
 | `WITHDRAWN` | 本人 | 取り下げた |
 | `REOPENED` | 本人 | 終わった件を、追記で開き直した |
+| `REMINDED` | 時間 | 返事がないことを、本人に知らせた（状態は変わらない） |
+| `ANSWERED` | 時間 | 返事がないまま期間が過ぎて、終わった |
 | `PHASE_CHANGED` | 担当者 | 区間を変えた |
 | `PLACEMENT_CHANGED` | 担当者 | 置き直した。この出来事だけ `detail` を持つ: `{ "before": { "type": "おかしいかもしれない", "system": "システムA", "function": null }, "after": { … } }`。値は、既定の言語の名前。決まっていなければ `null` |
 
-履歴は、担当者向けの詳細（`history`）にだけ返す。本人向けの InquiryView には含めない。番が変わらない操作（担当者の番の間の本人の追記、既読）は、履歴に入れない。
+履歴は、担当者向けの詳細（`history`）にだけ返す。本人向けの InquiryView には含めない。番が変わらない操作（担当者の番の間の本人の追記、既読）は、履歴に入れない。時間が起こした出来事（`REMINDED`）は、番が変わらなくても入れる。
 
 ### オペレータのストリーム
 

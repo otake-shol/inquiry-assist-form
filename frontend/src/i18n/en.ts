@@ -91,6 +91,8 @@ export const en: Messages = {
     stillUnresolved: "Not solved yet",
     unresolvedNoteLabel: "What is still unsolved? (optional)",
     unresolvedSend: "Send to the support team",
+    noReplyNotice: (date) =>
+      `There has been no reply, so this inquiry will be closed as “Answered” on ${date}. Please choose below whether it was resolved. You can still send a follow-up from this page after it is closed.`,
     withdrawLink: "Withdraw this inquiry",
     withdrawConfirm:
       "Withdraw this inquiry? You cannot add anything after you withdraw it.",
@@ -288,6 +290,7 @@ export const en: Messages = {
       ASKER: "Requester",
       AI: "AI",
       OPERATOR: "Staff",
+      TIME: "Time limit",
     },
     events: {
       CREATED: "Inquiry created",
@@ -303,6 +306,8 @@ export const en: Messages = {
       DECLINED: "Declined",
       WITHDRAWN: "Withdrawn",
       REOPENED: "Reopened by a new message",
+      REMINDED: "Requester reminded (no reply)",
+      ANSWERED: "Closed after no reply",
       PHASE_CHANGED: "Changed the stage",
       PLACEMENT_CHANGED: "Reclassified",
     },
@@ -313,6 +318,10 @@ export const en: Messages = {
     },
     waitingClosed: (ending) =>
       `This inquiry is closed (${ending}). If the requester adds a message, it reopens on staff's turn.`,
+    noReplyPlanned: (remindDate) =>
+      `If there is no reply, the requester will be reminded on ${remindDate}.`,
+    noReplyReminded: (remindedDate, closeDate) =>
+      `The requester was reminded on ${remindedDate}. If there is no reply, this will be closed as “Answered” on ${closeDate}.`,
     waitingAskerReply: "Waiting for the requester's reply.",
     waitingResult: "Waiting for the requester to check the result.",
     waitingAi: "Waiting for the AI to finish.",

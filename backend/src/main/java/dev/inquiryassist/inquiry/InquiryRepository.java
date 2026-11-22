@@ -24,6 +24,10 @@ interface InquiryRepository extends JpaRepository<InquiryEntity, UUID> {
     /** 本人が作った問い合わせのうち、未読の返信があるものの件数を返す。 */
     long countByAskerIdAndAskerUnreadReplyTrue(String askerId);
 
+    /** 指定した「待っていること」の問い合わせの識別子を返す（返事がないときの決まりの判定の対象を引く）。 */
+    @Query("select e.id from InquiryEntity e where e.awaiting = :awaiting")
+    List<UUID> findIdsByAwaiting(@Param("awaiting") dev.inquiryassist.core.lifecycle.Awaiting awaiting);
+
     /** 返信を読んだことにする。楽観ロックの対象外の列だけを更新し、取得が他の操作と競合しないようにする。 */
     @Transactional
     @Modifying(clearAutomatically = true)

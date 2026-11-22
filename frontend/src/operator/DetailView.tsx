@@ -22,6 +22,7 @@ import {
 } from "./Controls.tsx";
 import {
   formatFiledAt,
+  formatMonthDay,
   opAnswerLabel,
   opUrgencyLabel,
   stateLine,
@@ -216,6 +217,19 @@ export function DetailView({
           <span className="op-state-label">{OP_TEXT.stateLabel}</span>
           <strong>{stateLine(detail, dict)}</strong>
         </p>
+        {detail.noReply !== null && (
+          <p className="op-no-reply">
+            {detail.noReply.remindedAt !== null &&
+            detail.noReply.closesAt !== null
+              ? OP_TEXT.noReplyReminded(
+                  formatMonthDay(detail.noReply.remindedAt, dict.meta.locale),
+                  formatMonthDay(detail.noReply.closesAt, dict.meta.locale),
+                )
+              : OP_TEXT.noReplyPlanned(
+                  formatMonthDay(detail.noReply.remindAt, dict.meta.locale),
+                )}
+          </p>
+        )}
         {detail.language !== dict.meta.code && (
           <p className="op-asker-language">
             {OP_TEXT.askerLanguage(languageName(detail.language))}

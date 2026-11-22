@@ -164,6 +164,7 @@ export function makeView(overrides: Partial<InquiryView> = {}): InquiryView {
     sentImmediately: false,
     handedOverAt: null,
     unreadReply: false,
+    noReply: null,
     mock: true,
     ...overrides,
   };
@@ -401,6 +402,7 @@ export function makeDetail(
     language: "ja",
     ...HANDLING_STATE,
     declined: null,
+    noReply: null,
     filedAt: "2026-11-21T05:00:00Z",
     askerId: "local-user",
     utterance: "昨日まで見えていた求人が今日は見えません",

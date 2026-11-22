@@ -1,4 +1,5 @@
-import type { Declined, Ending, ZeroAnswer } from "../api/types.ts";
+import type { Declined, Ending, NoReply, ZeroAnswer } from "../api/types.ts";
+import { NoReplyNotice } from "./Exchange.tsx";
 import { useMessages } from "../i18n/context.ts";
 import { endingText } from "../text/inquiries.ts";
 
@@ -80,6 +81,8 @@ interface ResultProps {
   doForMe?: boolean;
   /** 説明（AI が書いた文）の言語。問い合わせの `language` */
   language?: string;
+  /** 返事がないときの予定（知らせた後は、確かめる選択肢のすぐ上に知らせを出す） */
+  noReply?: NoReply | null;
   onResolve: (resolved: boolean) => void;
 }
 
@@ -95,6 +98,7 @@ export function Result({
   busy,
   doForMe = false,
   language,
+  noReply = null,
   onResolve,
 }: ResultProps) {
   const { text: TEXT, user: USER_TEXT, sources } = useMessages();
@@ -154,6 +158,7 @@ export function Result({
           language={language}
         />
       </details>
+      {awaitingResolution && <NoReplyNotice noReply={noReply} />}
       {awaitingResolution && (
         <p className="progress-question">{USER_TEXT.progressQuestion}</p>
       )}

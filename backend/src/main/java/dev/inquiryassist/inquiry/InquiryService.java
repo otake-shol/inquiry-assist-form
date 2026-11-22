@@ -510,6 +510,7 @@ public class InquiryService {
     /**
      * 担当者に渡した後の問い合わせに、本人が追記する。追記したときの状態で、その後が決まる
      * （担当者の番なら番は変わらず、聞き返しへの返事なら担当者の番に、結果への追記なら担当者の番に、終わった件なら開き直す）。
+     * 担当者に渡したことがなく回答済みで終わった件（AI の答えに返事がなかった件）への追記は、開き直して担当者に初めて渡す。
      * 担当者の側は未読に戻る。
      *
      * @param id 問い合わせの識別子
@@ -517,7 +518,7 @@ public class InquiryService {
      * @return 追記後の問い合わせ
      * @throws IllegalArgumentException 本文が空、または長すぎる場合
      * @throws InquiryNotFoundException 存在しない、または他人の問い合わせの場合
-     * @throws InvalidStateException 担当者に渡したことがない、または取り下げた場合
+     * @throws InvalidStateException 担当者に渡したことがなく回答済みでもない、または取り下げた場合
      */
     public InquiryView addMessage(UUID id, String body, String lang) {
         String trimmed = MessageBodies.validated(body);

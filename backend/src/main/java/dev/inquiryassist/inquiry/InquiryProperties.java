@@ -6,8 +6,10 @@ import dev.inquiryassist.core.intake.Choice;
 import dev.inquiryassist.core.intake.IntakeCatalog;
 import dev.inquiryassist.core.intake.IntakeQuestion;
 import dev.inquiryassist.core.intake.QuestionKind;
+import dev.inquiryassist.core.lifecycle.NoReplyRule;
 import dev.inquiryassist.core.skill.Skill;
 import java.time.Duration;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -28,6 +30,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param trace スキルの実行記録の設定
  * @param dev 認証を加えるまでの、利用者と担当者の表示名の仮の設定
  * @param filedGuidance 担当者に渡した後に画面が見せる案内文。言語ごと
+ * @param rules 時間で動く決まり（返事がないときの知らせと回答済み）の設定
  */
 @ConfigurationProperties("inquiry")
 public record InquiryProperties(
@@ -42,7 +45,48 @@ public record InquiryProperties(
         @DefaultValue Ollama ollama,
         @DefaultValue Trace trace,
         @DefaultValue Dev dev,
-        @DefaultValue Map<String, String> filedGuidance) {
+        @DefaultValue Map<String, String> filedGuidance,
+        @DefaultValue Rules rules) {
+
+    /**
+     * 時間で動く決まりの設定（{@code inquiry.rules}）。
+     *
+     * @param zone 営業日を判定する時間帯
+     * @param noReply 返事がないときの期間
+     * @param sweepEnabled 決まりの判定を、定期的に行うか
+     * @param sweepInterval 判定の間隔
+     */
+    public record Rules(
+            @DefaultValue("Asia/Tokyo") ZoneId zone,
+            @DefaultValue NoReply noReply,
+            @DefaultValue("true") boolean sweepEnabled,
+            @DefaultValue("15m") Duration sweepInterval) {
+
+        /**
+         * 既定の設定。
+         *
+         * @return 東京の時間帯、5営業日で知らせて、さらに5営業日で終える、15分ごとに判定する設定
+         */
+        public static Rules defaults() {
+            return new Rules(ZoneId.of("Asia/Tokyo"), new NoReply(5, 5), true, Duration.ofMinutes(15));
+        }
+
+        /**
+         * @return 返事がないときの期間（営業日）
+         */
+        public NoReplyRule.Periods periods() {
+            return new NoReplyRule.Periods(noReply.remindAfterBusinessDays(), noReply.closeAfterBusinessDays(), zone);
+        }
+    }
+
+    /**
+     * 返事がないときの期間。
+     *
+     * @param remindAfterBusinessDays 結果を確かめる状態になってから、知らせるまでの営業日の数
+     * @param closeAfterBusinessDays 知らせてから、終えるまでの営業日の数
+     */
+    public record NoReply(
+            @DefaultValue("5") int remindAfterBusinessDays, @DefaultValue("5") int closeAfterBusinessDays) {}
 
     /**
      * スキルの実行記録の設定。

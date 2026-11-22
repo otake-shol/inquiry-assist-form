@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ja } from "../i18n/ja.ts";
-import { placementChangeText } from "./labels.ts";
+import { formatMonthDay, placementChangeText } from "./labels.ts";
 
 describe("placementChangeText", () => {
   it("変える前と後を「・」でつなぎ、決まっていない項目は省く", () => {
@@ -35,5 +35,14 @@ describe("placementChangeText", () => {
         ja,
       ),
     ).toBe("未定 → 仕組みを知りたい");
+  });
+});
+
+describe("formatMonthDay", () => {
+  it("見る人の言語の書式で、月と日だけを書く", () => {
+    const iso = new Date(2026, 11, 1, 12, 0).toISOString();
+    expect(formatMonthDay(iso, "ja-JP")).toBe("12月1日");
+    expect(formatMonthDay(iso, "en-US")).toBe("December 1");
+    expect(formatMonthDay("not a date", "en-US")).toBe("not a date");
   });
 });

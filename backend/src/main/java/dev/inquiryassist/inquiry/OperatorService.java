@@ -311,6 +311,7 @@ public class OperatorService {
                 e.awaiting,
                 e.ending,
                 e.declined,
+                presenter.noReplyOf(e),
                 MessageBodies.viewsOf(e),
                 List.copyOf(e.history),
                 TraceViews.of(e, properties, implementations));

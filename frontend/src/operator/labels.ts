@@ -165,6 +165,20 @@ export function movedText(
 }
 
 /**
+ * 日付を、月と日だけで表す（見る人の言語の書式。例: 「12月1日」「December 1」）。
+ * @param iso ISO 8601 の日時
+ * @param locale 日付の書き方に使うロケール（辞書の `meta.locale`）
+ */
+export function formatMonthDay(iso: string, locale: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat(locale, {
+    month: "long",
+    day: "numeric",
+  }).format(date);
+}
+
+/**
  * 送られた時刻を「月/日 時:分」で表す（24時間。書き方は言語に合わせる）。
  * @param iso ISO 8601 の日時
  * @param locale 日時の書き方に使うロケール（辞書の `meta.locale`）
