@@ -19,7 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
@@ -61,7 +60,6 @@ class DraftUsageConflictTest {
                 SkillImplementations.from(new MockEnvironment()),
                 mock(InquiryPresenter.class),
                 new IntakeLocales(properties),
-                mock(ApplicationEventPublisher.class),
                 drafter,
                 committer,
                 mock(PrecedentRepository.class),

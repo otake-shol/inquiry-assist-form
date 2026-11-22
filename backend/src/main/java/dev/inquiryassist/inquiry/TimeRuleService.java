@@ -9,10 +9,8 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 時間で動く決まりを、本人の返事を待っている件（結果の確かめ、聞き返しへの返事）に適用する（契約書「返事がないとき」）。どの件を知らせ、どの件を終えるかは、
@@ -34,36 +32,22 @@ public class TimeRuleService {
      */
     public record Result(int reminded, int closed) {}
 
-    /** 1件の更新の結果。 */
-    private record Outcome(NoReplyRule.Action action, InquiryEntity saved) {}
-
     /** 決まりの対象の、待っていること（本人の返事を待っている件）。 */
     private static final List<Awaiting> TARGETS = List.of(Awaiting.RESULT_CONFIRMATION, Awaiting.ASKER_REPLY);
 
     private final InquiryRepository repository;
     private final InquiryProperties properties;
-    private final InquiryPresenter presenter;
-    private final TransactionTemplate transaction;
-    private final ApplicationEventPublisher events;
+    private final InquiryCommitter committer;
 
     /**
-     * @param repository 問い合わせ記録の保存先
+     * @param repository 問い合わせ記録の保存先（対象の件を引く）
      * @param properties 期間の設定
-     * @param presenter 担当者向けの表現を作る
-     * @param transaction 1件ごとのトランザクション
-     * @param events 担当者のストリームへ更新を流す
+     * @param committer 保存と、確定後の通知（担当者のストリームへの配信と、案を作り始める判定を、1か所で行う）
      */
-    public TimeRuleService(
-            InquiryRepository repository,
-            InquiryProperties properties,
-            InquiryPresenter presenter,
-            TransactionTemplate transaction,
-            ApplicationEventPublisher events) {
+    public TimeRuleService(InquiryRepository repository, InquiryProperties properties, InquiryCommitter committer) {
         this.repository = repository;
         this.properties = properties;
-        this.presenter = presenter;
-        this.transaction = transaction;
-        this.events = events;
+        this.committer = committer;
     }
 
     /**
@@ -76,9 +60,9 @@ public class TimeRuleService {
         int reminded = 0;
         int closed = 0;
         for (UUID id : repository.findIdsByAwaitingIn(TARGETS)) {
-            Outcome outcome;
+            NoReplyRule.Action[] action = new NoReplyRule.Action[1];
             try {
-                outcome = transaction.execute(status -> runOne(id, now));
+                committer.update(id, inquiry -> runOne(inquiry, now, action));
             } catch (OptimisticLockingFailureException e) {
                 // 本人の返事などと競合した。次の回に見直す
                 log.info("返事がないときの決まりの更新が競合したため、次の回に回します id={}", id);
@@ -88,23 +72,18 @@ public class TimeRuleService {
                 log.error("返事がないときの決まりの適用に失敗 id={}", id, e);
                 continue;
             }
-            if (outcome == null) {
-                continue;
-            }
-            if (outcome.action() == NoReplyRule.Action.REMIND) {
+            if (action[0] == NoReplyRule.Action.REMIND) {
                 reminded++;
-            } else if (outcome.action() == NoReplyRule.Action.CLOSE) {
+            } else if (action[0] == NoReplyRule.Action.CLOSE) {
                 closed++;
-                publishUpdated(outcome.saved());
             }
         }
         return new Result(reminded, closed);
     }
 
-    /** 1件を判定して更新する。何もしない件は null。 */
-    private Outcome runOne(UUID id, Instant now) {
-        InquiryEntity inquiry = repository.findById(id).orElse(null);
-        if (inquiry == null || InquiryStateMachine.timeEnding(inquiry.awaiting) == null) {
+    /** 読み込んだ1件を判定して変更する。何もしない件は null（保存しない）。終えた件だけ、担当者のストリームへ更新を流す。 */
+    private InquiryCommitter.Update runOne(InquiryEntity inquiry, Instant now, NoReplyRule.Action[] decided) {
+        if (InquiryStateMachine.timeEnding(inquiry.awaiting) == null) {
             return null;
         }
         NoReplyRule.Action action =
@@ -120,21 +99,11 @@ public class TimeRuleService {
         inquiry.apply(transition, now);
         // どちらも、本人に見てほしい知らせ。担当者の側の未読は変えない
         inquiry.askerUnreadReply = true;
-        inquiry.updatedAt = Instant.now();
-        // 競合は、このトランザクションの中で検出する（コミットの時点まで持ち越さない）
-        InquiryEntity saved = repository.saveAndFlush(inquiry);
-        return new Outcome(action, saved);
-    }
-
-    /** 担当者に渡したことのある件が終わったら、担当者のストリームへ更新を流す。配信の失敗で、確定済みの更新を失敗にしない。 */
-    private void publishUpdated(InquiryEntity saved) {
-        if (saved.handedOverAt == null) {
-            return;
-        }
-        try {
-            events.publishEvent(presenter.updatedEvent(saved));
-        } catch (RuntimeException e) {
-            log.error("更新の通知イベントの配信に失敗 id={}", saved.id, e);
-        }
+        decided[0] = action;
+        return new InquiryCommitter.Update(
+                null,
+                action == NoReplyRule.Action.CLOSE
+                        ? InquiryCommitter.Publish.UPDATED_IF_HANDED_OVER
+                        : InquiryCommitter.Publish.NONE);
     }
 }

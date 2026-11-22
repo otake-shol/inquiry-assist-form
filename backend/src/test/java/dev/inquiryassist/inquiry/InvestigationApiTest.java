@@ -31,6 +31,9 @@ class InvestigationApiTest extends ApiSupport {
     @Autowired
     InvestigationRunner runner;
 
+    @Autowired
+    InvestigationRecovery recovery;
+
     // ---- 補助 ----
 
     private static List<Map.Entry<String, String>> events(String body) {
@@ -196,22 +199,39 @@ class InvestigationApiTest extends ApiSupport {
     }
 
     @Test
-    void 調べていない間に送ると裏で調査が始まる() throws Exception {
+    void 問いを確かめると_ストリームにつながなくても調査が進み_結果が本人の確かめ待ちになる() throws Exception {
         String id = toAnswering(HOW_TO, null);
-        assertThat(investigationStatus(id)).isEqualTo("NOT_RUN");
+
+        // 進捗ストリームにはつながない。API が調査を始め、結果まで行き着く
+        assertThat(waitFor(() -> "RESULT_CONFIRMATION".equals(row(id).get("awaiting")), 15_000)).isTrue();
+        awaitInvestigationIdle(id);
+
+        assertThat(investigationStatus(id)).isEqualTo("DONE");
+        assertThat(row(id).get("investigation_audience")).isEqualTo("ASKER");
+        String asker = view(id);
+        assertThat((String) JsonPath.read(asker, "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
+        assertThat((Object) JsonPath.read(asker, "$.answer.askerExplanation")).isNotNull();
+        assertThat(usageSteps(id)).contains("investigator", "explainer");
+    }
+
+    @Test
+    void 調べている間に送ると調査は止まらず_結果は担当者だけに保存される() throws Exception {
+        String id = toAnswering("[遅延] " + HOW_TO, null);
+        assertThat(investigationStatus(id)).isEqualTo("RUNNING");
 
         sendNow(id).andExpect(status().isOk());
 
         assertThat(investigationStatus(id)).isEqualTo("DONE");
         assertThat(row(id).get("investigation_audience")).isEqualTo("OPERATOR");
         assertThat((Object) JsonPath.read(detail(id), "$.answer.memo.findings")).isNotNull();
+        assertThat((Object) JsonPath.read(view(id), "$.answer")).isNull();
+        assertThat(usageSteps(id).stream().filter("investigator"::equals)).hasSize(1);
     }
 
     @Test
     void 調査が失敗した後に送ると裏で調査が始まり_失敗しても本人向けには何も変わらない() throws Exception {
         String id = toAnswering("[エラー] " + HOW_TO, null);
-        stream(id);
-        assertThat(investigationStatus(id)).isEqualTo("FAILED");
+        awaitStatus(id, "FAILED");
         Instant firstStart = ((Timestamp) row(id).get("investigation_started_at")).toInstant();
 
         sendNow(id).andExpect(status().isOk());
@@ -233,6 +253,7 @@ class InvestigationApiTest extends ApiSupport {
     @Test
     void 裏での調査が失敗しても担当者側の未読には戻さない() throws Exception {
         String id = toAnswering("[エラー] " + HOW_TO, null);
+        awaitStatus(id, "FAILED");
         mvc.perform(post("/api/inquiries/" + id + "/send-now")).andExpect(status().isOk());
         mvc.perform(post("/api/operator/inquiries/" + id + "/read")).andExpect(status().isOk());
         awaitStatus(id, "FAILED");
@@ -340,5 +361,50 @@ class InvestigationApiTest extends ApiSupport {
         assertThat(((Timestamp) row(stuck).get("investigation_finished_at")).toInstant()).isEqualTo(bootTime);
         assertThat(investigationStatus(idle)).isEqualTo("NOT_RUN");
         assertThat(row(idle).get("investigation_finished_at")).isNull();
+    }
+
+    @Test
+    void 起動時に調査を待っていた件は担当者に渡り_通知が働き_ほかの件は変わらない() throws Exception {
+        String waiting = toAnswering("[エラー] " + HOW_TO, null);
+        awaitStatus(waiting, "FAILED");
+        awaitInvestigationIdle(waiting);
+        String intake = idOf(start());
+        notifier.notices().clear();
+
+        recovery.run(null);
+
+        String detail = detail(waiting);
+        assertThat((String) JsonPath.read(detail, "$.awaiting")).isEqualTo("HANDLING");
+        assertThat((String) JsonPath.read(detail, "$.handoverReason")).isEqualTo("TIMEOUT");
+        assertThat((List<String>) JsonPath.read(detail, "$.history[-1:].event")).containsExactly("HANDED_OVER");
+        assertThat((List<String>) JsonPath.read(detail, "$.history[-1:].actor")).containsExactly("TIME");
+        assertThat(notifier.notices()).anySatisfy(n -> assertThat(n.inquiryId().toString()).isEqualTo(waiting));
+        assertThat((String) JsonPath.read(view(intake), "$.awaiting")).isEqualTo("INTAKE_ANSWER");
+        // 二度目は何もしない（もう調査を待つ件がない）
+        notifier.notices().clear();
+        recovery.run(null);
+        assertThat(notifier.notices()).isEmpty();
+    }
+
+    @Test
+    void 調査が失敗した後にストリームをつなぐと_調査をやり直し_失敗をfailedで流し_待つ状態は変わらない() throws Exception {
+        String id = toAnswering("[エラー] " + HOW_TO, null);
+        awaitStatus(id, "FAILED");
+        awaitInvestigationIdle(id);
+        Instant firstStart = ((Timestamp) row(id).get("investigation_started_at")).toInstant();
+
+        List<Map.Entry<String, String>> events = events(streamOnly(id));
+
+        // つなぐと、始め直した（再試行）。また失敗したので、failed。待つ状態は INVESTIGATION のまま
+        Map.Entry<String, String> last = events.get(events.size() - 1);
+        assertThat(last.getKey()).isEqualTo("failed");
+        assertThat((String) JsonPath.read(last.getValue(), "$.code")).isEqualTo("AI_UNAVAILABLE");
+        assertThat(events.subList(0, events.size() - 1)).allSatisfy(e -> assertThat(e.getKey()).isEqualTo("progress"));
+        assertThat(((Timestamp) row(id).get("investigation_started_at")).toInstant()).isAfter(firstStart);
+        assertThat(usageSteps(id).stream().filter("investigator"::equals)).hasSize(2);
+        assertThat(row(id).get("awaiting")).isEqualTo("INVESTIGATION");
+        assertThat(investigationStatus(id)).isEqualTo("FAILED");
+        // つなぎ直しの途中で今すぐ送ることもできる
+        sendNow(id).andExpect(status().isOk());
     }
 }

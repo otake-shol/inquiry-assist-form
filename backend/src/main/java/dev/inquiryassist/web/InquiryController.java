@@ -6,6 +6,7 @@ import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.intake.IntakeReply;
 import dev.inquiryassist.core.lifecycle.IllegalTransitionException;
 import dev.inquiryassist.inquiry.InquiryList;
+import dev.inquiryassist.inquiry.AnswerWatcher;
 import dev.inquiryassist.inquiry.InquiryService;
 import dev.inquiryassist.inquiry.InquiryView;
 import dev.inquiryassist.inquiry.InvalidStateException;
@@ -201,7 +202,8 @@ public class InquiryController {
     }
 
     /**
-     * 0次回答を生成し、進捗と結果を SSE で流す。生成は仮想スレッドで行う。
+     * 調査（0次回答の生成）の進捗と結果を、見るための SSE。調査を始めるのは API で、問いを確かめた時点（5）に始まっている。
+     * つないだ時点で、調査が走っていればその続きを、すでに終わっていればすぐ {@code done} を、失敗した後なら調査をやり直して、流す。
      *
      * <p>問い合わせが存在しなければ、ストリームを開始せず 404 を返す。それ以外の失敗は {@code failed} イベントで流す。
      *
@@ -212,7 +214,37 @@ public class InquiryController {
     public SseEmitter answerStream(@PathVariable UUID id, @ViewerLang String lang) {
         service.get(id, lang);
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MILLIS);
-        Thread.ofVirtual().name("answer-" + id).start(() -> runAnswer(id, emitter, lang));
+        Runnable cancel = service.watchAnswer(id, lang, new AnswerWatcher() {
+            @Override
+            public void progress(String message) {
+                send(emitter, "progress", Map.of("message", message));
+            }
+
+            @Override
+            public void done(InquiryView view) {
+                send(emitter, "done", view);
+                emitter.complete();
+            }
+
+            @Override
+            public void failed(RuntimeException failure) {
+                if (failure instanceof AiRefusalException) {
+                    send(emitter, "failed", new ErrorBody("AI_REFUSED", failure.getMessage()));
+                } else if (failure instanceof AiUnavailableException) {
+                    log.warn("0次回答の生成で AI を呼び出せませんでした id={}", id);
+                    send(emitter, "failed", new ErrorBody("AI_UNAVAILABLE", failure.getMessage()));
+                } else {
+                    // 契約外の失敗。画面を「担当者に送る」へ誘導できるよう AI_UNAVAILABLE として流す
+                    log.error("0次回答の生成で想定外の失敗 id={}", id);
+                    send(emitter, "failed", new ErrorBody("AI_UNAVAILABLE", "内部エラーが発生しました"));
+                }
+                emitter.complete();
+            }
+        });
+        // つなぎを切っても、調査は止まらない
+        emitter.onCompletion(cancel);
+        emitter.onTimeout(cancel);
+        emitter.onError(e -> cancel.run());
         return emitter;
     }
 
@@ -283,27 +315,7 @@ public class InquiryController {
         return service.get(id, lang);
     }
 
-    private void runAnswer(UUID id, SseEmitter emitter, String lang) {
-        try {
-            InquiryView done = service.generateAnswer(id, message -> send(emitter, "progress", Map.of("message", message)), lang);
-            send(emitter, "done", done);
-        } catch (AiRefusalException e) {
-            send(emitter, "failed", new ErrorBody("AI_REFUSED", e.getMessage()));
-        } catch (AiUnavailableException e) {
-            log.warn("0次回答の生成で AI を呼び出せませんでした id={}", id, e);
-            send(emitter, "failed", new ErrorBody("AI_UNAVAILABLE", e.getMessage()));
-        } catch (InvalidStateException | IllegalTransitionException e) {
-            send(emitter, "failed", new ErrorBody("INVALID_STATE", e.getMessage()));
-        } catch (RuntimeException e) {
-            // 契約外の失敗。画面を「担当者に送る」へ誘導できるよう AI_UNAVAILABLE として流す
-            log.error("0次回答の生成で想定外の失敗 id={}", id, e);
-            send(emitter, "failed", new ErrorBody("AI_UNAVAILABLE", "内部エラーが発生しました"));
-        } finally {
-            emitter.complete();
-        }
-    }
-
-    /** クライアントが切断済みでも生成と保存は止めないため、送信の失敗は無視する。 */
+    /** クライアントが切断済みでも調査と保存は止めないため、送信の失敗は無視する。 */
     private static void send(SseEmitter emitter, String event, Object data) {
         try {
             emitter.send(SseEmitter.event().name(event).data(data, MediaType.APPLICATION_JSON));

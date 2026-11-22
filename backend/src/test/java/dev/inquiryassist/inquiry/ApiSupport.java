@@ -30,7 +30,7 @@ import tools.jackson.databind.json.JsonMapper;
  * API のテストが共有する、HTTP 呼び出しの補助。入口の質問は「押して答える」道と「文章で書く」道の両方を、
  * 1問ずつ API を呼んで進める（受付などのスキルを直接呼ばない）。
  */
-@SpringBootTest(properties = {"inquiry.mock.slow-step-delay=50ms", "inquiry.operator.heartbeat-interval=PT0.2S"})
+@SpringBootTest(properties = {"inquiry.mock.slow-step-delay=100ms", "inquiry.operator.heartbeat-interval=PT0.2S"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 abstract class ApiSupport {
@@ -216,9 +216,12 @@ abstract class ApiSupport {
         return id;
     }
 
-    /** 文章で始めて入口を終え、言い直しを確定し、答えを待たずに担当者へ送る。送った問い合わせの id を返す。 */
+    /**
+     * 文章で始めて入口を終え、言い直しを確定し、答えを待たずに担当者へ送る。送った問い合わせの id を返す。
+     * 調査は言い直しの確定の時点で API が始めるので、送るまでの間に終わらないよう、調査を遅らせる印（{@code [遅延]}）を文章に添える。
+     */
     String filedNow(String text, String systemId) throws Exception {
-        String id = toAnswering(text, systemId);
+        String id = toAnswering(text.contains("[遅延]") ? text : text + " [遅延]", systemId);
         sendNow(id).andExpect(status().isOk());
         return id;
     }

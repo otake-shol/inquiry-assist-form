@@ -123,7 +123,7 @@ AI が担当者に引き継いだ件では、本人が自分で送っていな�
   - 日本語: 「お返事がないため、{日付}に「回答済み」として終了します。解決したかどうかを、下から選んでください。終了した後も、このページから続きを送れます。」
   - 英語: "There has been no reply, so this inquiry will be closed as “Answered” on {date}. Please choose below whether it was resolved. You can still send a follow-up from this page after it is closed."
   - `{日付}` は `noReply.closesAt` の日付。見る人の言語の書式で、月と日を出す（「12月1日」「December 1」）。
-- **「回答済み」で終わった件**: 担当者に渡したことのない件（AI の答えに返事がなかった件）にも、続きを送る欄を出す。送ると担当者に渡る。
+- **「回答済み」で終わった件**: 担当者に渡したことのない件（AI の答えに返事がなかった件）にも、続きを送る欄を出す。送ると担当者に渡る。AI の答えで「解決済み」になった件も同じ（解決したと伝えたが、やはり足りなかった場合に、新しく書き直さずに続けられる）。
 - **聞き返しに答えていない件**（`noReply.endsAs` が `WITHDRAWN`）: 知らせた後だけ、「担当者の質問に答える」の入力欄のすぐ上に知らせを出す。
   - 日本語: 「お返事がないため、{日付}に「取り下げ」として終了します。続ける場合は、下から担当者の質問に答えてください。終了した後も、このページから続きを送れます。」
   - 英語: "There has been no reply, so this inquiry will be closed as “Withdrawn” on {date}. To continue, please answer the support team's question below. You can still send a follow-up from this page after it is closed."

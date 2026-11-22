@@ -93,9 +93,9 @@ class TimeRuleSettingsTest {
                 .withPropertyValues("spring.profiles.active=local-ai")
                 .run(context -> assertThat(context.getBean(InquiryProperties.class).rules().answerTimeout())
                         .isEqualTo(Duration.ofMinutes(10)));
-        // プロファイルがなければ、既定の60秒
+        // プロファイルがなければ、テスト用の設定の値（30分。本体の既定の60秒は、最初のテストが確かめている）
         runner.withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
                 .run(context -> assertThat(context.getBean(InquiryProperties.class).rules().answerTimeout())
-                        .isEqualTo(Duration.ofSeconds(60)));
+                        .isEqualTo(Duration.ofMinutes(30)));
     }
 }

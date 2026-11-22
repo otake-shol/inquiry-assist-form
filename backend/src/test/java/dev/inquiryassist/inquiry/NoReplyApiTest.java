@@ -465,15 +465,28 @@ class NoReplyApiTest extends ApiSupport {
     }
 
     @Test
-    void 担当者に渡したことがなく解決で終わった件への追記は引き続き受け付けない() throws Exception {
+    void 担当者に渡したことがなく解決で終わった件に追記しても開き直して担当者に初めて渡る() throws Exception {
         String id = answeredByAi();
         resolve(id, true).andExpect(status().isOk());
+        assertThat((String) JsonPath.read(view(id), "$.ending")).isEqualTo("RESOLVED");
+        assertThat(row(id).get("handed_over_at")).isNull();
+        notifier.notices().clear();
 
-        mvc.perform(post("/api/inquiries/" + id + "/messages")
+        String reopened = text(mvc.perform(post("/api/inquiries/" + id + "/messages")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json("body", "追記")))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("INVALID_STATE"));
+                        .content(json("body", "解決したと思いましたが、やはり足りませんでした")))
+                .andExpect(status().isOk()));
+
+        assertThat((String) JsonPath.read(reopened, "$.turn")).isEqualTo("OPERATOR");
+        assertThat((String) JsonPath.read(reopened, "$.awaiting")).isEqualTo("HANDLING");
+        assertThat((Object) JsonPath.read(reopened, "$.ending")).isNull();
+        assertThat((String) JsonPath.read(reopened, "$.handoverReason")).isEqualTo("REOPENED");
+        assertThat((String) JsonPath.read(reopened, "$.handedOverAt")).isNotNull();
+        assertThat(notifier.notices()).extracting(n -> n.inquiryId().toString()).containsExactly(id);
+        String detail = operatorDetail(id);
+        assertThat((Boolean) JsonPath.read(detail, "$.read")).isFalse();
+        assertThat(historyEvents(detail)).endsWith("RESOLVED", "REOPENED");
+        assertThat(historyActors(detail)).endsWith("ASKER", "ASKER");
     }
 
     // ---- 開発用の口 ----

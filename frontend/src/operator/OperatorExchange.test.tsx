@@ -355,7 +355,15 @@ describe("担当者のパネル", () => {
     expect(within(phases).getByText("分かる")).not.toHaveAttribute(
       "aria-current",
     );
-    expect(within(phases).queryByRole("button")).toBeNull();
+    // ボタンでも、押せる要素でもない（枠や塗りのない、並びだけの表示）
+    const indicator = phases.closest(".op-phase")!;
+    expect(indicator.querySelector("button, a, input, select")).toBeNull();
+    expect(indicator.querySelectorAll("li")).toHaveLength(3);
+    expect(indicator).toHaveTextContent("区間");
+    expect(within(phases).getByText("決まる", { selector: "li" })).toHaveClass(
+      "current",
+    );
+    expect(within(phases).getByText("分かる")).not.toHaveClass("current");
     expect(
       within(panel).queryByRole("group", { name: "区間を切り替える" }),
     ).toBeNull();

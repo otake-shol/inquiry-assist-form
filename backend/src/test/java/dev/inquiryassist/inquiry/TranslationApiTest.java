@@ -122,7 +122,7 @@ class TranslationApiTest extends ApiSupport {
 
     @Test
     void 訳す先の言語ごとの印で訳す() throws Exception {
-        String id = idOf(create(HOW_TO));
+        String id = idOf(create("[遅延] " + HOW_TO));
         finishIntake(id, null);
         confirm(id).andExpect(status().isOk());
         sendNow(id).andExpect(status().isOk());

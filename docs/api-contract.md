@@ -401,7 +401,7 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 `200` InquiryView。
 
 - `CHANGE_REQUEST`: 担当者に渡す（区間は `DECIDE`）
-- それ以外: `phase: KNOW`、`turn: AI`、`awaiting: INVESTIGATION`
+- それ以外: `phase: KNOW`、`turn: AI`、`awaiting: INVESTIGATION`。**この時点で、API が調査を始める**（応答を返した後に、裏で走らせる。画面が進捗ストリーム（6）につなぐのを待たない）。本人がこの直後にページを閉じても、調査は進み、結果か引き継ぎに行き着く
 
 ### 5a. `POST /api/inquiries/{id}/revision`
 
@@ -417,17 +417,26 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 
 ### 6. `GET /api/inquiries/{id}/answer-stream`
 
-`text/event-stream`。`awaiting` が `INVESTIGATION` のときに0次回答を生成し、進捗と結果を流す。
+`text/event-stream`。調査（0次回答の生成）の進み具合と結果を、見るための口。調査を始めるのは API で、問いを確かめた時点（5）に始まっている。
 
 | event | data | 意味 |
 | --- | --- | --- |
-| `progress` | `{ "message": "コードを検索しています" }` | 進捗。0回以上 |
-| `done` | InquiryView | 完了。この後ストリームを閉じる |
+| `progress` | `{ "message": "コードを検索しています" }` | 進捗。0回以上。つないだ後の分だけが届く（つなぐ前の進捗は、届かない） |
+| `done` | InquiryView | 調査を待つ状態が終わった。この後ストリームを閉じる |
 | `failed` | `{ "code": "AI_REFUSED", "message": "…" }` | 失敗。この後ストリームを閉じる |
 
+つないだ時点の状態で、次のように動く。
+
+| つないだ時点 | 動き |
+| --- | --- |
+| 調査が走っている（`awaiting: INVESTIGATION`） | その後の `progress` を流し、終わったら `done` か `failed` を流す |
+| 調査を待つ状態が、既に終わっている（`awaiting` が `INVESTIGATION` でない） | すぐに `done`（いまの InquiryView）を流す。ページを開き直した場合や、つなぐ前に調査が終わった場合 |
+| `awaiting: INVESTIGATION` で、調査が走っていない（失敗した後） | 調査を始めて、1行目と同じ。これが再試行になる |
+
 - 完了時: 種類ごとの経路の表のとおり。`LOOKS_WRONG` は担当者に渡す（`handoverReason: ROUTE`）。それ以外の種類は、`answer.grounded` と `answer.answered` がともに `true` なら本人が確かめ（`turn: ASKER`、`awaiting: RESULT_CONFIRMATION`）、そうでなければ担当者に渡す（`DO_FOR_ME` は `ROUTE`、ほかは `NO_ANSWER`）。担当者に渡した場合も、`done` の InquiryView の `answer` には結果が入る（本人は、調べた結果を見たうえで、引き継がれたことを知る）。
-- **時間切れ**: 調査が `inquiry.rules.answer-timeout`（既定 `60s`）を超えたら、その時点で担当者に渡し（`handoverReason: TIMEOUT`。履歴の出来事は `HANDED_OVER`、起こしたのは `TIME`）、`done` を流してストリームを閉じる。この InquiryView の `answer` は `null`。調査は打ち切らずに裏で続け、結果は担当者だけに渡す（「調査の状況と、裏での調査」の節）。長く待たせた末に、失敗を見せないため。時間切れの前に失敗した場合は、従来どおり `failed` を流す。
-- 失敗時の `code`: `AI_REFUSED`／`AI_UNAVAILABLE`／`INVALID_STATE`（`awaiting` が `INVESTIGATION` でない、または同じ問い合わせの生成が進行中）。失敗しても `awaiting` は `INVESTIGATION` のままで、再購読による再試行と「答えを待たずに担当者へ送る」（8）ができる。
+- **時間切れ**: 調査を始めてから `inquiry.rules.answer-timeout`（既定 `60s`）が過ぎても、まだ `awaiting: INVESTIGATION` なら、担当者に渡す（`handoverReason: TIMEOUT`。履歴の出来事は `HANDED_OVER`、起こしたのは `TIME`）。画面がつないでいるかどうかに関係なく、API が行う。つないでいれば、`done` を流してストリームを閉じる（この InquiryView の `answer` は `null`）。調査が走っていれば、打ち切らずに裏で続け、結果は担当者だけに渡す（「調査の状況と、裏での調査」の節）。調査が失敗したまま、本人が再試行も送ることもしなかった場合も、同じ時点で担当者に渡る。**問い合わせが、AI の番のまま残ることはない。**
+- 失敗時の `code`: `AI_REFUSED`／`AI_UNAVAILABLE`。失敗しても `awaiting` は `INVESTIGATION` のままで、つなぎ直しによる再試行と「答えを待たずに担当者へ送る」（8）ができる（時間切れになるまで）。
+- API を止めると、走っていた調査は失われる。起動時に、`awaiting: INVESTIGATION` の件は、担当者に渡す（`handoverReason: TIMEOUT`）。本人が戻らなくても、担当者に見えるようにするため。
 - 画面は `done` か `failed` を受けたら接続を閉じる（EventSource の自動再接続を止める）。
 
 ### 7. `POST /api/inquiries/{id}/resolution`
@@ -750,7 +759,7 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 | --- | --- |
 | 本人が、答えを待たずに送った（8） | 送る前の `awaiting` が `INVESTIGATION` だった場合。調査が既に走っていればそのまま続け、走っていなければ始める。AI の答えが既にある場合（`RESULT_CONFIRMATION` から送った）、言い直しを作れなかった場合、本人が言い直しを合っていないとしたまま送った場合（`QUESTION_CONFIRMATION` から送った）は、始めない |
 | 業務が止まっている件を、担当者に渡した | 言い直しがあり、種類が `CHANGE_REQUEST` でない場合。本人は言い直しを確かめていないので、`unconfirmedQuestion` を `true` にする |
-| 調査が時間切れになった（6） | 走っている調査を、そのまま続ける |
+| 調査が時間切れになった（6） | 走っている調査を、そのまま続ける（走っていなければ、始めない） |
 
 - 同じ問い合わせの調査は、同時に1つだけ走らせる。
 - 調査は、裏で行う場合も、本人の閲覧権限（`AccessScope`）で行う。結果が本人に伝わりうるため。
@@ -953,7 +962,7 @@ inquiry:
 | 操作 | エンドポイント | 実行できるとき | その後 |
 | --- | --- | --- | --- |
 | 結果を確かめる | 7 | `awaiting: RESULT_CONFIRMATION` | 「本人が結果を確かめる」の決まりのとおり |
-| 追記する | 11 | 担当者に渡したことがあり、本人が取り下げていない。または、担当者に渡したことがなく、`ANSWERED` で終わっている | 下の表 |
+| 追記する | 11 | 担当者に渡したことがあり、本人が取り下げていない。または、担当者に渡したことがなく、`RESOLVED` か `ANSWERED` で終わっている | 下の表 |
 | 取り下げる | 12 | 終わっていない | 終わる（`ending: WITHDRAWN`） |
 
 追記（11）の後は、追記したときの状態で決まる。
@@ -964,9 +973,9 @@ inquiry:
 | 聞き返しへの返事を待っている（`ASKER_REPLY`） | 担当者の番にする（`HANDLING`） |
 | 担当者の結果を確かめている（`RESULT_CONFIRMATION`） | 担当者の番にする（「解決していない」と答えたのと同じ） |
 | 終わっている（`RESOLVED`、`ANSWERED`、`DECLINED`、時間で終わった `WITHDRAWN`） | 開き直す。終わり方を消し、区間を終わる前に戻して、担当者の番にする |
-| 担当者に渡したことがなく、`ANSWERED` で終わっている（AI の答えに返事がなかった） | 開き直して、担当者に渡す（「担当者に渡す」の決まりのとおり。区間は種類で決まり、初めて渡すので担当者に通知する）。履歴の出来事は `REOPENED` |
+| 担当者に渡したことがなく、`RESOLVED` か `ANSWERED` で終わっている（AI の答えで解決したと伝えたが、やはり足りなかった。または、AI の答えに返事がなかった） | 開き直して、担当者に渡す（「担当者に渡す」の決まりのとおり。区間は種類で決まり、初めて渡すので担当者に通知する）。履歴の出来事は `REOPENED` |
 
-担当者に渡したことのない問い合わせ（上の `ANSWERED` の場合を除く）、本人が取り下げた問い合わせ（`ending: WITHDRAWN` で `closedBy: ASKER`）への追記は `INVALID_STATE`。
+担当者に渡したことのない問い合わせ（上の、`RESOLVED` か `ANSWERED` で終わっている場合を除く）、本人が取り下げた問い合わせ（`ending: WITHDRAWN` で `closedBy: ASKER`）への追記は `INVALID_STATE`。
 
 ### 10. `GET /api/inquiries`
 
@@ -1048,7 +1057,7 @@ inquiry:
 | --- | --- |
 | `INTAKE_ANSWER` | 答え終えた質問（`intake.entries`）の要約と、次の質問（`intake.next`）。入口の答えは1問ごとに保存されるので、続きから再開できる |
 | `QUESTION_CONFIRMATION` | 答え終えた質問の要約と、言い直しの確認 |
-| `INVESTIGATION` | 進捗ストリームを購読し直す（調査をやり直す） |
+| `INVESTIGATION` | 進捗ストリームにつなぎ直す（走っていれば続きを見る。失敗していれば、やり直す） |
 | `RESULT_CONFIRMATION` | 調べた結果、担当者とのやり取り（あれば）、結果の確かめ |
 | `HANDLING`、`ASKER_REPLY` | 経過の要約、いまの状況、やり取り、追記の入力欄 |
 | 終わっている（`null`） | 経過の要約、終わりの文言、担当者に渡したことがあればやり取り |

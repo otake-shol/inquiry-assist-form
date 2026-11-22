@@ -194,9 +194,7 @@ describe("担当者のパネル: 訳を見る", () => {
       ["Since yesterday.", "昨日からです。"],
     ];
     for (const [original, translated] of pairs) {
-      const originalNode = within(panel).getByText(original, {
-        selector: "p",
-      });
+      const originalNode = within(panel).getByText(original);
       const note = originalNode.nextElementSibling as HTMLElement;
       expect(note).toHaveClass("op-translation");
       expect(within(note).getByText("訳（AI）")).toBeInTheDocument();

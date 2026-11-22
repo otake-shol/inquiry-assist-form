@@ -143,12 +143,13 @@ class SkillSpyTest extends ApiSupport {
 
     @Test
     void 説明が失敗した後の再試行は調査からやり直し成功すると保存済みの内容が置き換わる() throws Exception {
-        String id = toAnswering("期限の仕様", null);
+        // 調査は確定の時点で始まるので、説明を失敗させてから確定する
         doThrow(new AiUnavailableException("一時的な失敗", null)).when(explainer).explain(any(), any(), any());
+        String id = toAnswering("期限の仕様", null);
 
-        String failed = stream(id);
-
-        assertThat(failed).contains("event:failed");
+        // 進捗ストリームにはつながない。調査は、説明が失敗して止まる（待つ状態は変わらない）
+        assertThat(waitFor(() -> "FAILED".equals(row(id).get("investigation_status")), 15_000)).isTrue();
+        assertThat(row(id).get("awaiting")).isEqualTo("INVESTIGATION");
         assertThat(jdbc.queryForObject("select answer_grounded from inquiries where id = ?::uuid", Boolean.class, id))
                 .isNull();
         assertThat(jdbc.queryForObject("select technical_memo is not null from inquiries where id = ?::uuid", Boolean.class, id))

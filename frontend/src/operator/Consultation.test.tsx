@@ -173,9 +173,7 @@ describe("担当者のパネル: 相談する", () => {
     const fold = within(panel).getByText("相談する").closest("details")!;
     expect(fold).not.toHaveAttribute("open");
     const send = within(panel).getByLabelText("本人に送る");
-    const decline = within(panel)
-      .getByText("見送る", { selector: "summary" })
-      .closest("details")!;
+    const decline = within(panel).getByText("見送る").closest("details")!;
     const follows = (a: Node, b: Node) =>
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(follows(send, fold)).toBe(true);
@@ -226,9 +224,7 @@ describe("担当者のパネル: 相談する", () => {
       question: "期限ちょうどの扱いは仕様ですか。",
     });
     expect(within(panel).queryByLabelText("本人に送る")).toBeNull();
-    expect(
-      within(panel).queryByText("見送る", { selector: "summary" }),
-    ).toBeNull();
+    expect(within(panel).queryByText("見送る")).toBeNull();
     expect(within(panel).queryByLabelText("相談したいこと")).toBeNull();
     // 状態の行は、仕様の持ち主の番になる
     expect(within(panel).getByText(/仕様の持ち主の番/)).toBeInTheDocument();
@@ -354,9 +350,7 @@ describe("担当者のパネル: 相談している間", () => {
     ).toBeEnabled();
     expect(within(panel).queryByLabelText("本人に送る")).toBeNull();
     expect(within(panel).queryByText("相談する")).toBeNull();
-    expect(
-      within(panel).queryByText("見送る", { selector: "summary" }),
-    ).toBeNull();
+    expect(within(panel).queryByText("見送る")).toBeNull();
     // 状態の行
     expect(
       within(panel).getByText("仕様の持ち主の番（仕様の持ち主の決定待ち）"),
@@ -596,11 +590,7 @@ describe("英語の担当者の画面: 相談", () => {
     expect(
       within(panel).getByRole("heading", { name: "Spec owner's decision" }),
     ).toBeInTheDocument();
-    expect(
-      within(panel).getByText("Do not accept", {
-        selector: ".op-decision-kind",
-      }),
-    ).toBeInTheDocument();
+    expect(within(panel).getByText("Do not accept")).toBeInTheDocument();
     await user.click(within(panel).getByText("Status history"));
     const row = within(
       within(panel).getByText("Status history").closest("details")!,

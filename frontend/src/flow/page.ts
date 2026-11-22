@@ -89,8 +89,9 @@ export function pageSections(view: InquiryView | null): Section[] {
   if (view.ending !== null) sections.push({ kind: "closing" });
 
   // 担当者に渡したことのある問い合わせは、「いまの状況」とやり取り、追記の入力欄を置く
-  // 担当者に渡したことのない件が、返事がないまま「回答済み」で終わったときも、続きを送る欄を置く
-  if (view.handedOverAt !== null || view.ending === "ANSWERED") {
+  // 担当者に渡したことのない件が、AI の答えで「解決済み」になった（やはり足りなかった場合）ときと、
+  // 返事がないまま「回答済み」で終わったときも、続きを送る欄を置く
+  if (view.handedOverAt !== null || endsWithoutHandover(view)) {
     sections.push({ kind: "followup" });
   }
   return sections;
@@ -175,14 +176,27 @@ export function resultFromOperator(view: InquiryView): boolean {
 }
 
 /**
+ * 担当者に渡したことがなく、AI の答えで終わった件か（「解決済み」か「回答済み」）。
+ * こうした件は、追記すると開き直して担当者に渡る。
+ * @param view 現在の問い合わせ
+ */
+function endsWithoutHandover(view: InquiryView): boolean {
+  return (
+    view.handedOverAt === null &&
+    (view.ending === "RESOLVED" || view.ending === "ANSWERED")
+  );
+}
+
+/**
  * 追記の入力欄を出せるか。担当者に渡したことがあり、取り下げていない件。
  * 終わっている件（解決済み、回答済み、見送り）でも、追記で開き直せる。
- * 担当者に渡したことのない件も、返事がないまま「回答済み」で終わっていれば出す（送ると担当者に渡る）。
+ * 担当者に渡したことのない件も、AI の答えで「解決済み」か、返事がないまま「回答済み」で終わっていれば出す
+ * （送ると担当者に渡る）。
  * 時間で「取り下げ」になった件（聞き返しに返事がなかった件）も出す。
  * @param view 現在の問い合わせ
  */
 export function canAppend(view: InquiryView): boolean {
-  if (view.handedOverAt === null) return view.ending === "ANSWERED";
+  if (view.handedOverAt === null) return endsWithoutHandover(view);
   // 本人が自分で取り下げた件には出さない。時間で「取り下げ」になった件には出す
   return view.ending !== "WITHDRAWN" || view.closedBy === "TIME";
 }

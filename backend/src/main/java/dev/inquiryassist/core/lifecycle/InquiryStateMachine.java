@@ -395,17 +395,17 @@ public final class InquiryStateMachine {
     }
 
     /**
-     * 本人が追記する。担当者に渡したことのある、本人が取り下げていない問い合わせと、担当者に渡したことがなく回答済みで終わった問い合わせ
-     * （AI の答えに返事がなかった件）。追記したときの状態で、その後が決まる。
+     * 本人が追記する。担当者に渡したことのある、本人が取り下げていない問い合わせと、担当者に渡したことがなく解決済みか回答済みで終わった問い合わせ
+     * （AI の答えで解決したと伝えたが足りなかった件、または AI の答えに返事がなかった件）。追記したときの状態で、その後が決まる。
      *
      * @param state いまの状態
      * @param ctx 文脈
      * @return 遷移。担当者の番の間の追記は、状態が変わらない（出来事は {@code null}）
-     * @throws IllegalTransitionException 担当者に渡したことがなく回答済みでもない、または取り下げた問い合わせの場合
+     * @throws IllegalTransitionException 担当者に渡したことがなく、解決済みでも回答済みでもない、または取り下げた問い合わせの場合
      */
     public static Transition noted(InquiryState state, Context ctx) {
         if (!ctx.handedOver()) {
-            if (state.closed() && state.ending() == Ending.ANSWERED) {
+            if (state.closed() && (state.ending() == Ending.ANSWERED || state.ending() == Ending.RESOLVED)) {
                 // 初めて渡すので、区間は「担当者に渡す」の決まり（種類）で決める。終わる前の区間には戻さない
                 return move(state, new InquiryState(handOverPhase(ctx.type()), Turn.OPERATOR, Awaiting.HANDLING, null),
                         HistoryEvent.REOPENED, Actor.ASKER, HandoverReason.REOPENED);

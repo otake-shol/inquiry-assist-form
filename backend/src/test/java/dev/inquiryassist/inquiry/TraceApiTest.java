@@ -76,7 +76,7 @@ class TraceApiTest extends ApiSupport {
 
     @Test
     void durationMillisのない既存の形のusagesを持つ行も読める() throws Exception {
-        String id = idOf(create("期限の仕様"));
+        String id = idOf(create("[遅延] 期限の仕様"));
         // この項目を加える前に保存された形（durationMillis がない）
         jdbc.update(
                 "update inquiries set usages = ?::jsonb where id = ?::uuid",

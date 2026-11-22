@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.mock.env.MockEnvironment;
 
 /** 相談先が1人も決まらないとき（設定にも指定にもない）は、相談できない（{@code VALIDATION}）ことを、DB なしで確かめる。 */
@@ -47,7 +46,6 @@ class ConsultantsMissingTest {
                 SkillImplementations.from(new MockEnvironment()),
                 mock(InquiryPresenter.class),
                 new IntakeLocales(properties),
-                mock(ApplicationEventPublisher.class),
                 mock(dev.inquiryassist.core.skill.DrafterSkill.class),
                 mock(InquiryCommitter.class),
                 mock(PrecedentRepository.class),

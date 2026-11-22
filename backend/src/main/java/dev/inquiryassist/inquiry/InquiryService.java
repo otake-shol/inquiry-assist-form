@@ -254,7 +254,7 @@ public class InquiryService {
     }
 
     /**
-     * 言い直しを確定する。「変えてほしい」（{@code CHANGE_REQUEST}）はここで担当者に送り、それ以外は0次回答の生成待ちになる。
+     * 言い直しを確定する。「変えてほしい」（{@code CHANGE_REQUEST}）はここで担当者に送り、それ以外は0次回答の生成待ちになる（調査は、この確定の後に API が始める）。
      *
      * @param id 問い合わせの識別子
      * @param summary 本人が書き直した文章。AI の言い直しをそのまま確定する場合は null
@@ -271,8 +271,13 @@ public class InquiryService {
         requireAwaiting(inquiry, Awaiting.QUESTION_CONFIRMATION);
         inquiry.structuredConfirmed =
                 summary == null ? inquiry.structuredByAi : inquiry.structuredByAi.withSummary(summary);
-        return presenter.toView(commit(
-                inquiry, apply(inquiry, InquiryStateMachine.confirmed(inquiry.state(), inquiry.context(null)), false)));
+        InquiryEntity saved = commit(
+                inquiry, apply(inquiry, InquiryStateMachine.confirmed(inquiry.state(), inquiry.context(null)), false));
+        // 調査は、問いを確かめた時点で API が始める（画面が進捗ストリームにつなぐのを待たない）。保存の確定後に、裏で走らせる
+        if (saved.awaiting == Awaiting.INVESTIGATION) {
+            runner.startForAskerQuietly(saved.id);
+        }
+        return presenter.toView(saved);
     }
 
     /**
@@ -329,30 +334,43 @@ public class InquiryService {
     }
 
     /**
-     * 0次回答を生成する。調査、照合、説明の順に進め、照合できた事実だけから本人向けの説明を作る。
-     * 種類ごとの経路（{@link InquiryType#filesAfterAnswer}）に従い、担当者へ渡すか、本人が結果を確かめる段階に進める。
-     * 同じ問い合わせの調査は同時に1つだけ走らせる。
-     *
-     * <p>調査が {@code inquiry.rules.answer-timeout} を超えたら、その時点で担当者に渡して返す（調査は止めず、裏で続けて、
-     * 結果は担当者だけに渡す）。このとき本人向けの回答は返さない。
-     *
-     * <p>説明だけが失敗した場合は、調査と照合の結果（技術メモ、出典と照合結果、利用量）を保存したうえで
-     * 失敗を投げる。待っていることは {@code INVESTIGATION} のままで、本人向けの回答は返さない。
+     * 調査（0次回答の生成）の進み具合を見る。調査を始めるのは API で、問いを確かめた時点（{@link #confirmStructured}）に始まっている。
+     * つないだ時点の状態で、次のように動く: 調査が走っていれば、その後の進捗と、終わったときの {@code done}／{@code failed}。
+     * 調査を待つ状態が、すでに終わっていれば、すぐ {@code done}（いまの問い合わせ）。{@code INVESTIGATION} で調査が走っていなければ
+     * （失敗した後）、調査を始めて同じように（再試行）。
      *
      * @param id 問い合わせの識別子
-     * @param progress 進捗の通知先
-     * @return 完了後（または時間切れで担当者に渡した後）の問い合わせ
-     * @throws InvalidStateException 同じ問い合わせの調査が進行中の場合
-     * @throws dev.inquiryassist.core.lifecycle.IllegalTransitionException 調査を待っている状態でない場合
-     * @throws dev.inquiryassist.core.AiRefusalException モデルが回答を拒否した場合
-     * @throws dev.inquiryassist.core.AiUnavailableException モデルを呼び出せなかった場合
+     * @param lang 見る人の言語（{@code done} の問い合わせの言語）
+     * @param watcher 見ている画面
+     * @return 見るのをやめる処理（つなぎを切ったときに呼ぶ。調査は止まらない）
+     * @throws InquiryNotFoundException 存在しない、または他人の問い合わせの場合
      */
-    public InquiryView generateAnswer(UUID id, ProgressListener progress, String lang) {
-        InquiryEntity inquiry = load(id, lang);
-        requireAwaiting(inquiry, Awaiting.INVESTIGATION);
-        InquiryEntity saved = runner.runForAsker(id, progress);
-        saved.viewerLanguage = lang;
-        return presenter.toView(saved);
+    public Runnable watchAnswer(UUID id, String lang, AnswerWatcher watcher) {
+        load(id, lang);
+        java.util.concurrent.atomic.AtomicBoolean finished = new java.util.concurrent.atomic.AtomicBoolean();
+        return runner.watch(id, new AnswerStreamHub.Listener() {
+            @Override
+            public void progress(String message) {
+                if (!finished.get()) {
+                    watcher.progress(message);
+                }
+            }
+
+            @Override
+            public void done() {
+                if (finished.compareAndSet(false, true)) {
+                    InquiryEntity current = load(id, lang);
+                    watcher.done(presenter.toView(current));
+                }
+            }
+
+            @Override
+            public void failed(RuntimeException failure) {
+                if (finished.compareAndSet(false, true)) {
+                    watcher.failed(failure);
+                }
+            }
+        });
     }
 
     /**
@@ -396,6 +414,8 @@ public class InquiryService {
         InquiryEntity saved = commit(inquiry, apply(inquiry, transition, true));
         if (wasInvestigating) {
             runner.startBackground(saved.id);
+            // 進捗を見ている画面には、待つ状態が終わったことを、調査の終わりを待たずに伝える
+            runner.endWatching(saved.id);
         }
         return presenter.toView(saved);
     }

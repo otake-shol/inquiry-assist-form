@@ -78,20 +78,52 @@ class InvestigationTimeoutApiTest extends ApiSupport {
     }
 
     @Test
-    void 時間切れの後にもう一度ストリームを開いても調べ直さない() throws Exception {
+    void 時間切れの後にもう一度ストリームを開いても調べ直さず_すぐ現在の状態でdoneを流す() throws Exception {
         String id = toAnswering("[遅延] 使い方を教えて", null);
         stream(id);
 
-        String body = mvc.perform(get("/api/inquiries/" + id + "/answer-stream")
-                        .accept(org.springframework.http.MediaType.TEXT_EVENT_STREAM))
-                .andReturn()
-                .getResponse()
-                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
-        awaitInvestigationIdle(id);
+        String done = doneOf(stream(id));
 
-        // 開き直しは調査を待つ状態でないので、失敗（INVALID_STATE）で閉じる。調査が2重に走らない
+        // 開き直しは調査を待つ状態でないので、現在の状態で done。調査が2重に走らない
+        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("HANDLING");
+        assertThat((String) JsonPath.read(done, "$.handoverReason")).isEqualTo("TIMEOUT");
         assertThat(usageSteps(id)).endsWith("restater", "investigator", "explainer", "advisor");
-        assertThat(body).doesNotContain("event:done");
+    }
+
+    @Test
+    void ストリームにつながなくても時間切れで担当者に渡り_調査は続き_結果は担当者だけに届く() throws Exception {
+        String id = toAnswering("[遅延] 使い方を教えて", null);
+
+        // 進捗ストリームにはつながない。時間切れは、API が行う
+        assertThat(waitFor(() -> "TIMEOUT".equals(row(id).get("handover_reason")), 15_000)).isTrue();
+
+        String early = detail(id);
+        assertThat((String) JsonPath.read(early, "$.awaiting")).isEqualTo("HANDLING");
+        assertThat((List<String>) JsonPath.read(early, "$.history[-1:].event")).containsExactly("HANDED_OVER");
+        assertThat((List<String>) JsonPath.read(early, "$.history[-1:].actor")).containsExactly("TIME");
+        assertThat(notifier.notices()).anySatisfy(n -> assertThat(n.inquiryId().toString()).isEqualTo(id));
+        awaitInvestigationIdle(id);
+        String late = detail(id);
+        assertThat((String) JsonPath.read(late, "$.investigation.status")).isEqualTo("DONE");
+        assertThat((String) JsonPath.read(late, "$.investigation.audience")).isEqualTo("OPERATOR");
+        assertThat((Object) JsonPath.read(view(id), "$.answer")).isNull();
+        assertThat(usageSteps(id).stream().filter("investigator"::equals)).hasSize(1);
+    }
+
+    @Test
+    void 調査が失敗して止まったままでも時間切れで担当者に渡る() throws Exception {
+        String id = toAnswering("[エラー] 使い方を教えて", null);
+
+        // 調査は、すぐ失敗して止まる。本人は再試行も送ることもしない
+        assertThat(waitFor(() -> "TIMEOUT".equals(row(id).get("handover_reason")), 15_000)).isTrue();
+
+        String detail = detail(id);
+        assertThat((String) JsonPath.read(detail, "$.awaiting")).isEqualTo("HANDLING");
+        assertThat((String) JsonPath.read(detail, "$.investigation.status")).isEqualTo("FAILED");
+        assertThat((List<String>) JsonPath.read(detail, "$.history[-1:].event")).containsExactly("HANDED_OVER");
+        assertThat((List<String>) JsonPath.read(detail, "$.history[-1:].actor")).containsExactly("TIME");
+        assertThat(notifier.notices().stream().filter(n -> n.inquiryId().toString().equals(id))).hasSize(1);
+        assertThat((Object) JsonPath.read(view(id), "$.answer")).isNull();
     }
 
     @Test

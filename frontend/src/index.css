@@ -1149,27 +1149,33 @@ blockquote {
 }
 
 /* 担当者の画面: 区間の表示、やり取り */
+.op-phase {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 10px 0 0;
+}
+
+/* 枠も塗りも付けない（押せるボタンに見えないように）。いまの区間だけを太字にする */
 .op-phase-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 10px 0 0;
+  gap: 0 8px;
+  margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.op-phase-list li {
-  padding: 4px 16px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
   color: var(--muted);
 }
 
+.op-phase-list li + li::before {
+  content: "›";
+  margin-right: 8px;
+}
+
 .op-phase-list li.current {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 600;
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .op-exchange .thread {

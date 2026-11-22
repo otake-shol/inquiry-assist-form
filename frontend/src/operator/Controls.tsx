@@ -34,23 +34,29 @@ interface PhaseIndicatorProps {
 
 /**
  * いまの区間（分かる、決まる、行われる）を示す。見るだけで、押せない（区間は種類で決まり、置き直すと変わる）。
- * いまの区間に `aria-current="step"` を付け、色でも示す。受付と終わりのときは、どれも示さない。
+ * 「区間 分かる › 決まる › 行われる」の並びで、いまの区間だけを太字にする（枠や塗りは付けない。ボタンに見えないように）。
+ * いまの区間に `aria-current="step"` を付ける。受付と終わりのときは、どれも太字にしない。
  * @param props いまの区間
  */
 export function PhaseIndicator({ phase }: PhaseIndicatorProps) {
   const OP_TEXT = useMessages().op;
   return (
-    <ol className="op-phase-list" aria-label={OP_TEXT.phaseLabel}>
-      {SHOWN_PHASES.map((candidate) => (
-        <li
-          key={candidate}
-          className={phase === candidate ? "current" : ""}
-          aria-current={phase === candidate ? "step" : undefined}
-        >
-          {OP_TEXT.phases[candidate]}
-        </li>
-      ))}
-    </ol>
+    <div className="op-phase">
+      <span className="op-state-label" aria-hidden="true">
+        {OP_TEXT.phaseLabel}
+      </span>
+      <ol className="op-phase-list" aria-label={OP_TEXT.phaseLabel}>
+        {SHOWN_PHASES.map((candidate) => (
+          <li
+            key={candidate}
+            className={phase === candidate ? "current" : ""}
+            aria-current={phase === candidate ? "step" : undefined}
+          >
+            {OP_TEXT.phases[candidate]}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

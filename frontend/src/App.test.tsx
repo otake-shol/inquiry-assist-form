@@ -1057,7 +1057,7 @@ describe("入口から結果までの流れ", () => {
     ).not.toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", { name: "新しい問い合わせを書く" }),
+      screen.getByRole("button", { name: "別の問い合わせを書く" }),
     );
     expect(
       await screen.findByRole("group", { name: "何をしたいですか" }),
@@ -1642,6 +1642,119 @@ describe("答えを待たずに送る", () => {
     expect(
       await screen.findByRole("button", { name: SEND_NOW }),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * つないだらすぐ `done` を流す進捗ストリームの偽物（つなぐ前に調査が終わっていた場合。
+ * ページを開き直したら、既に終わっていた場合）。
+ */
+function doneAtOnce(done: InquiryView): FakeStream {
+  const stream = new FakeStream();
+  const connect = stream.subscribe;
+  const subscribe: FakeStream["subscribe"] = (id, handlers, language) => {
+    const close = connect(id, handlers, language);
+    handlers.onDone(done);
+    return close;
+  };
+  return Object.assign(stream, { subscribe });
+}
+
+describe("進捗ストリームは見るだけの口（調査は API が始める）", () => {
+  it("つないですぐ done（結果）が届いても、調べた結果を出し、ストリームを閉じる", async () => {
+    const done = makeStructuredView({
+      ...RESULT_STATE,
+      answer: groundedAnswer,
+    });
+    const stream = doneAtOnce(done);
+    openInquiry(makeStructuredView(INVESTIGATION_STATE), {}, stream);
+
+    expect(
+      await screen.findByRole("heading", { name: "調べた結果" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "解決しました" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "調べています" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // 結果が出た後は、つなぎ直さない
+    expect(stream.subscriptions).toHaveLength(1);
+    expectNoInternalWords();
+  });
+
+  it("つないですぐ done（時間切れで担当者に渡った状態）が届いても、引き継いだ表示になる", async () => {
+    const done = makeFiledView({
+      structured: makeStructuredView().structured,
+      sentImmediately: false,
+      handoverReason: "TIMEOUT",
+      answer: null,
+      messages: [],
+    });
+    const stream = doneAtOnce(done);
+    openInquiry(makeStructuredView(INVESTIGATION_STATE), {}, stream);
+
+    expect(
+      await screen.findByText("担当者が確認しています"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "調べるのに時間がかかっているため、担当者に引き継ぎました。調べた内容は、担当者に渡します。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "調べた結果" }),
+    ).not.toBeInTheDocument();
+    expect(stream.subscriptions).toHaveLength(1);
+  });
+
+  it("失敗の表示から、つなぎ直したら既に担当者に渡っていた（done が HANDLING・answer なし）。失敗の表示が消え、引き継いだ表示に切り替わる", async () => {
+    const user = userEvent.setup();
+    const stream = new FakeStream();
+    openInquiry(
+      makeStructuredView({ ...INVESTIGATION_STATE, canSendNow: true }),
+      {},
+      stream,
+    );
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
+    act(() =>
+      stream.latest.handlers.onFailed({
+        code: "AI_UNAVAILABLE",
+        message: "model down",
+      }),
+    );
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "もう一度調べる" }));
+    await waitFor(() => expect(stream.subscriptions).toHaveLength(2));
+    act(() =>
+      stream.latest.handlers.onDone(
+        makeFiledView({
+          structured: makeStructuredView().structured,
+          sentImmediately: false,
+          handoverReason: "TIMEOUT",
+          answer: null,
+          messages: [],
+        }),
+      ),
+    );
+
+    expect(
+      await screen.findByText("担当者が確認しています"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "もう一度調べる" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "調べるのに時間がかかっているため、担当者に引き継ぎました。調べた内容は、担当者に渡します。",
+      ),
+    ).toBeInTheDocument();
+    // 古い接続も、新しい接続も、閉じている
+    expect(stream.subscriptions.every((c) => c.closed)).toBe(true);
+    expect(screen.getByLabelText("追加で伝える")).toBeInTheDocument();
   });
 });
 

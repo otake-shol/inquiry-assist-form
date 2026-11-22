@@ -86,10 +86,13 @@ class AdviceRunner {
      * @return 印を付けた場合は true。保存の確定後に {@link #launch} を呼ぶこと
      */
     boolean claim(InquiryEntity inquiry) {
+        // 安い条件（担当者の番で、案が未作成で、言い直しがある）を先に見る。先例を引くのは、事実がなく、必要なときだけ
         if (inquiry.awaiting != Awaiting.HANDLING
                 || inquiry.adviceStatus != AdviceStatus.NOT_RUN
-                || inquiry.structured() == null
-                || (confirmedFindings(inquiry).isEmpty() && precedentFinder.find(inquiry).isEmpty())) {
+                || inquiry.structured() == null) {
+            return false;
+        }
+        if (confirmedFindings(inquiry).isEmpty() && precedentFinder.find(inquiry).isEmpty()) {
             return false;
         }
         inquiry.adviceStatus = AdviceStatus.RUNNING;

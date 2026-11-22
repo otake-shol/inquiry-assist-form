@@ -145,14 +145,23 @@ describe("pageSections: 担当者に渡した後", () => {
     }
   });
 
-  it("担当者に渡していない終わり方（AI の答えで解決、取り下げ）には、やり取りを並べない", () => {
+  it("担当者に渡していない終わり方は、AI の答えで解決した件、返事がないまま回答済みの件にだけ、続きを送る欄を並べる。取り下げには並べない", () => {
     const solved = makeStructuredView({
       ...closedState("RESOLVED"),
       answer: groundedAnswer,
     });
-    expect(kinds(pageSections(solved)).slice(-2)).toEqual([
+    expect(kinds(pageSections(solved)).slice(-3)).toEqual([
       "result",
       "closing",
+      "followup",
+    ]);
+    const unanswered = makeStructuredView({
+      ...closedState("ANSWERED"),
+      answer: groundedAnswer,
+    });
+    expect(kinds(pageSections(unanswered)).slice(-2)).toEqual([
+      "closing",
+      "followup",
     ]);
     const withdrawn = makeView({ ...closedState("WITHDRAWN") });
     expect(kinds(pageSections(withdrawn))).toEqual(["closing"]);
@@ -321,8 +330,10 @@ describe("canAppend と canWithdraw", () => {
     expect(canAppend(makeFiledView(closedState("WITHDRAWN")))).toBe(false);
     // 担当者に渡したことがなければ追記できない
     expect(canAppend(makeStructuredView(RESULT_STATE))).toBe(false);
-    expect(canAppend(makeView(closedState("RESOLVED")))).toBe(false);
     expect(canAppend(makeView(closedState("WITHDRAWN")))).toBe(false);
+    // ただし、AI の答えで解決した件、返事がないまま回答済みの件は、続きを送れる（送ると担当者に渡る）
+    expect(canAppend(makeView(closedState("RESOLVED")))).toBe(true);
+    expect(canAppend(makeView(closedState("ANSWERED")))).toBe(true);
   });
 
   it("時間で「取り下げ」になった件には続きを送る欄を出し、本人が自分で取り下げた件には出さない", () => {

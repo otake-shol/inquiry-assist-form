@@ -26,7 +26,6 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 
@@ -49,7 +48,6 @@ public class OperatorService {
     private final SkillImplementations implementations;
     private final InquiryPresenter presenter;
     private final IntakeLocales locales;
-    private final ApplicationEventPublisher events;
     private final DrafterSkill drafter;
     private final InquiryCommitter committer;
     private final PrecedentRepository precedents;
@@ -61,7 +59,6 @@ public class OperatorService {
      * @param implementations スキルごとの実装（実行記録の実装名に使う）
      * @param presenter 一覧と詳細の項目を作る
      * @param locales 置き直しの入力を確かめる、システムと機能の一覧（言語ごと）
-     * @param events 更新の確定後にイベントを発行する
      * @param drafter 返信の下書き
      * @param committer 下書きの利用量の保存
      * @param precedents 先例（詳細の {@code decisions}）
@@ -73,7 +70,6 @@ public class OperatorService {
             SkillImplementations implementations,
             InquiryPresenter presenter,
             IntakeLocales locales,
-            ApplicationEventPublisher events,
             DrafterSkill drafter,
             InquiryCommitter committer,
             PrecedentRepository precedents,
@@ -83,7 +79,6 @@ public class OperatorService {
         this.implementations = implementations;
         this.presenter = presenter;
         this.locales = locales;
-        this.events = events;
         this.drafter = drafter;
         this.committer = committer;
         this.precedents = precedents;
@@ -417,23 +412,11 @@ public class OperatorService {
     }
 
     /**
-     * 保存し、確定後に更新をオペレータの画面へ知らせる。他の操作との競合は {@link InvalidStateException} にする。
-     * 配信側の失敗で、確定済みの更新を失敗にしない。
+     * 保存し、確定後に更新をオペレータの画面へ知らせる。保存の経路は、本人の操作と調査の結果の保存と同じ {@link InquiryCommitter} を通る
+     * （担当者のストリームへの配信と、案を作り始める判定を、1か所で行う）。他の操作との競合は {@link InvalidStateException} になる。
      */
     private InquiryEntity saveAndPublish(InquiryEntity inquiry) {
-        inquiry.updatedAt = Instant.now();
-        InquiryEntity saved;
-        try {
-            saved = repository.saveAndFlush(inquiry);
-        } catch (OptimisticLockingFailureException e) {
-            throw new InvalidStateException("他の操作と競合しました。最新の状態を取得し直してください");
-        }
-        try {
-            events.publishEvent(presenter.updatedEvent(saved));
-        } catch (RuntimeException e) {
-            log.error("更新の通知イベントの配信に失敗 id={}", saved.id, e);
-        }
-        return saved;
+        return committer.commit(inquiry, null);
     }
 
     private InquiryEntity loadHandedOver(UUID id) {

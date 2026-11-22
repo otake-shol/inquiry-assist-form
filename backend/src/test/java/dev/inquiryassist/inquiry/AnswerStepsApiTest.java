@@ -83,8 +83,8 @@ class AnswerStepsApiTest extends ApiSupport {
 
     @Test
     void 裏での調査の結果の手順は担当者向けにだけ返り_本人向けではanswerごとnull() throws Exception {
-        String id = toAnswering(HOW_TO, null);
-        // 答えを待たずに送る（調べていない間に送ると、裏で調査が始まり、結果は担当者だけに届く）
+        String id = toAnswering("[遅延] " + HOW_TO, null);
+        // 調べている間に答えを待たずに送る（調査は止まらず、結果は担当者だけに届く）
         sendNow(id).andExpect(status().isOk());
 
         assertThat((Object) JsonPath.read(view(id), "$.answer")).isNull();

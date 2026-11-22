@@ -276,7 +276,9 @@ class SkillFlowTest extends ApiSupport {
         pick(id, "q1", "o2");
         skip(id, "note").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
         confirm(id);
-        sendNow(id).andExpect(jsonPath("$.awaiting").value("HANDLING"));
+        // 調査は確定の時点で始まる。結果が出た後に、解決していないと伝えて担当者に渡す
+        stream(id);
+        resolve(id, false).andExpect(jsonPath("$.awaiting").value("HANDLING"));
 
         String detail = operatorDetail(id);
 
@@ -296,7 +298,9 @@ class SkillFlowTest extends ApiSupport {
         String id = idOf(create("[質問なし] " + SPEC));
         finishIntake(id, null);
         confirm(id);
-        sendNow(id);
+        // 調査は確定の時点で始まる。結果が出た後に、解決していないと伝えて担当者に渡す
+        stream(id);
+        resolve(id, false).andExpect(status().isOk());
 
         String detail = operatorDetail(id);
 

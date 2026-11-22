@@ -465,7 +465,7 @@ describe("作成と URL", () => {
     open("/inquiries/inq-1");
 
     await user.click(
-      await screen.findByRole("button", { name: "新しい問い合わせを書く" }),
+      await screen.findByRole("button", { name: "別の問い合わせを書く" }),
     );
     expect(window.location.pathname).toBe("/");
     expect(await findFirstQuestion()).toBeInTheDocument();
@@ -757,7 +757,7 @@ describe("開き直したときの再開", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("担当者に渡していない終わり方（AI の答えで解決）は、終わりの文言だけを出し、状況とやり取りは出さない", async () => {
+  it("担当者に渡していない終わり方（AI の答えで解決）は、終わりの文言と続きを送る欄を出す。担当者に渡したとは言わない", async () => {
     installFakeFetch({
       ...config,
       "GET /api/inquiries/inq-1": {
@@ -772,9 +772,10 @@ describe("開き直したときの再開", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "いまの状況" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("追加で伝える")).not.toBeInTheDocument();
+      screen.getByText("解決済み", { selector: ".handling-status" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("追加で伝える")).toBeInTheDocument();
+    expect(screen.queryByText(/担当者に送りました/)).not.toBeInTheDocument();
   });
 
   it("任意の項目（messages、trace、createdAt）が欠けた応答でも表示できる", async () => {

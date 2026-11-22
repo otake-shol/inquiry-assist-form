@@ -301,7 +301,7 @@ class LanguageApiTest extends ApiSupport {
 
     @Test
     void 担当者の一覧と詳細は問い合わせの言語を持ち_名前は担当者の見る言語() throws Exception {
-        String id = idOf(createAs(EN, "How does the deadline work in Billing?"));
+        String id = idOf(createAs(EN, "[遅延] How does the deadline work in Billing?"));
         finishAs(EN, id, "billing");
         mvc.perform(as(put("/api/inquiries/" + id + "/structured"), EN)
                         .contentType(MediaType.APPLICATION_JSON)

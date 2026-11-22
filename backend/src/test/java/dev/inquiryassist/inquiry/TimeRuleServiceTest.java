@@ -13,12 +13,8 @@ import dev.inquiryassist.core.lifecycle.Ending;
 import dev.inquiryassist.core.lifecycle.Phase;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
-import org.springframework.transaction.support.TransactionCallback;
-import org.springframework.transaction.support.TransactionTemplate;
 
 /** 判定を回す処理の、競合した件を次の回に回すことと、1件の失敗で他の件を止めないことを、DB なしで確かめる。 */
 class TimeRuleServiceTest {
@@ -28,9 +24,9 @@ class TimeRuleServiceTest {
     private static final Instant REMIND_AT = Instant.parse("2026-01-12T03:00:00Z");
 
     private final InquiryRepository repository = mock(InquiryRepository.class);
-    private final InquiryPresenter presenter = mock(InquiryPresenter.class);
-    private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
-    private final TransactionTemplate transaction = mock(TransactionTemplate.class);
+    private final InquiryCommitter committer = mock(InquiryCommitter.class);
+    private final java.util.Map<java.util.UUID, InquiryEntity> store = new java.util.HashMap<>();
+    private final java.util.Map<java.util.UUID, InquiryCommitter.Update> updates = new java.util.HashMap<>();
     private final TimeRuleService service = new TimeRuleService(
             repository,
             new InquiryProperties(
@@ -48,9 +44,7 @@ class TimeRuleServiceTest {
                     java.util.Map.of(),
                     InquiryProperties.Rules.defaults(),
                     java.util.List.of()),
-            presenter,
-            transaction,
-            events);
+            committer);
 
     private static InquiryEntity waiting(Instant since, Instant remindedAt) {
         InquiryEntity e = new InquiryEntity("u", Urgency.NORMAL, since);
@@ -61,86 +55,93 @@ class TimeRuleServiceTest {
         return e;
     }
 
+    /** 保存の共通の経路（{@link InquiryCommitter#update}）を、記録の読み込みと、変更の適用だけを行う偽にする。 */
     @SuppressWarnings("unchecked")
-    private void runCallbacksDirectly() {
-        when(transaction.execute(any())).thenAnswer(inv -> ((TransactionCallback<Object>) inv.getArgument(0)).doInTransaction(null));
+    private void commitDirectly() {
+        when(committer.update(any(), any())).thenAnswer(inv -> {
+            java.util.UUID id = inv.getArgument(0);
+            InquiryEntity entity = store.get(id);
+            if (entity == null) {
+                return null;
+            }
+            InquiryCommitter.Update update =
+                    ((java.util.function.Function<InquiryEntity, InquiryCommitter.Update>) inv.getArgument(1)).apply(entity);
+            if (update == null) {
+                return null;
+            }
+            updates.put(id, update);
+            return entity;
+        });
+    }
+
+    private InquiryEntity register(InquiryEntity e) {
+        store.put(e.id, e);
+        return e;
     }
 
     @Test
     void 競合した件は次の回に回し_ほかの件は続けて処理する() {
-        runCallbacksDirectly();
-        InquiryEntity conflicted = waiting(SINCE, null);
-        InquiryEntity fine = waiting(SINCE, null);
+        commitDirectly();
+        InquiryEntity conflicted = register(waiting(SINCE, null));
+        InquiryEntity fine = register(waiting(SINCE, null));
         when(repository.findIdsByAwaitingIn(any())).thenReturn(List.of(conflicted.id, fine.id));
-        when(repository.findById(conflicted.id)).thenReturn(Optional.of(conflicted));
-        when(repository.findById(fine.id)).thenReturn(Optional.of(fine));
-        when(repository.saveAndFlush(conflicted)).thenThrow(new ObjectOptimisticLockingFailureException(InquiryEntity.class, conflicted.id));
-        when(repository.saveAndFlush(fine)).thenReturn(fine);
+        when(committer.update(org.mockito.ArgumentMatchers.eq(conflicted.id), any()))
+                .thenThrow(new ObjectOptimisticLockingFailureException(InquiryEntity.class, conflicted.id));
 
         TimeRuleService.Result result = service.run(REMIND_AT);
 
         assertThat(result).isEqualTo(new TimeRuleService.Result(1, 0));
         assertThat(fine.remindedAt).isEqualTo(REMIND_AT);
         assertThat(fine.askerUnreadReply).isTrue();
+        assertThat(conflicted.remindedAt).isNull();
     }
 
     @Test
     void 一件の想定外の失敗でも残りの件の判定を止めない() {
-        runCallbacksDirectly();
-        InquiryEntity broken = waiting(SINCE, null);
-        InquiryEntity fine = waiting(SINCE, null);
+        commitDirectly();
+        InquiryEntity broken = register(waiting(SINCE, null));
+        InquiryEntity fine = register(waiting(SINCE, null));
         when(repository.findIdsByAwaitingIn(any())).thenReturn(List.of(broken.id, fine.id));
-        when(repository.findById(broken.id)).thenThrow(new IllegalStateException("壊れた行"));
-        when(repository.findById(fine.id)).thenReturn(Optional.of(fine));
-        when(repository.saveAndFlush(fine)).thenReturn(fine);
+        when(committer.update(org.mockito.ArgumentMatchers.eq(broken.id), any())).thenThrow(new IllegalStateException("壊れた行"));
 
         assertThat(service.run(REMIND_AT)).isEqualTo(new TimeRuleService.Result(1, 0));
     }
 
     @Test
     void 待っていることが変わっていた件は何もしない() {
-        runCallbacksDirectly();
-        InquiryEntity changed = waiting(SINCE, null);
+        commitDirectly();
+        InquiryEntity changed = register(waiting(SINCE, null));
         changed.awaiting = Awaiting.HANDLING;
         when(repository.findIdsByAwaitingIn(any())).thenReturn(List.of(changed.id));
-        when(repository.findById(changed.id)).thenReturn(Optional.of(changed));
 
         assertThat(service.run(REMIND_AT.plusSeconds(86400L * 100))).isEqualTo(new TimeRuleService.Result(0, 0));
-        verify(repository, never()).saveAndFlush(any());
+        assertThat(updates).isEmpty();
+        assertThat(changed.remindedAt).isNull();
     }
 
     @Test
-    void 終えた件のうち担当者に渡したことのある件だけストリームへ更新を流す() {
-        runCallbacksDirectly();
+    void 終える件は担当者のストリームへ更新を流す対象にし_知らせるだけの件は流さない() {
+        commitDirectly();
         Instant closesAt = Instant.parse("2026-01-19T03:00:00Z");
-        InquiryEntity handed = waiting(SINCE, REMIND_AT);
-        handed.handedOverAt = SINCE;
-        InquiryEntity neverHanded = waiting(SINCE, REMIND_AT);
-        when(repository.findIdsByAwaitingIn(any())).thenReturn(List.of(handed.id, neverHanded.id));
-        when(repository.findById(handed.id)).thenReturn(Optional.of(handed));
-        when(repository.findById(neverHanded.id)).thenReturn(Optional.of(neverHanded));
-        when(repository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(presenter.updatedEvent(any())).thenReturn(mock(InquiryUpdatedEvent.class));
+        InquiryEntity toClose = register(waiting(SINCE, REMIND_AT));
+        InquiryEntity toRemind = register(waiting(SINCE, null));
+        when(repository.findIdsByAwaitingIn(any())).thenReturn(List.of(toClose.id, toRemind.id));
 
-        assertThat(service.run(closesAt)).isEqualTo(new TimeRuleService.Result(0, 2));
+        assertThat(service.run(closesAt)).isEqualTo(new TimeRuleService.Result(1, 1));
 
-        assertThat(handed.ending).isEqualTo(Ending.ANSWERED);
-        assertThat(neverHanded.ending).isEqualTo(Ending.ANSWERED);
-        verify(events, org.mockito.Mockito.times(1)).publishEvent(any(InquiryUpdatedEvent.class));
-        verify(presenter).updatedEvent(handed);
-        verify(presenter, never()).updatedEvent(neverHanded);
+        assertThat(toClose.ending).isEqualTo(Ending.ANSWERED);
+        assertThat(updates.get(toClose.id).publish()).isEqualTo(InquiryCommitter.Publish.UPDATED_IF_HANDED_OVER);
+        assertThat(toRemind.remindedAt).isEqualTo(closesAt);
+        assertThat(updates.get(toRemind.id).publish()).isEqualTo(InquiryCommitter.Publish.NONE);
     }
 
     @Test
     void 聞き返しへの返事を待つ件は取り下げで終え_起こしたのは時間() {
-        runCallbacksDirectly();
-        InquiryEntity asked = waiting(SINCE, REMIND_AT);
+        commitDirectly();
+        InquiryEntity asked = register(waiting(SINCE, REMIND_AT));
         asked.awaiting = Awaiting.ASKER_REPLY;
         asked.handedOverAt = SINCE;
         when(repository.findIdsByAwaitingIn(any())).thenReturn(List.of(asked.id));
-        when(repository.findById(asked.id)).thenReturn(Optional.of(asked));
-        when(repository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(presenter.updatedEvent(any())).thenReturn(mock(InquiryUpdatedEvent.class));
 
         assertThat(service.run(Instant.parse("2026-01-19T03:00:00Z"))).isEqualTo(new TimeRuleService.Result(0, 1));
 
@@ -151,11 +152,12 @@ class TimeRuleServiceTest {
 
     @Test
     void 引く対象は結果の確かめと聞き返しへの返事() {
-        runCallbacksDirectly();
+        commitDirectly();
         when(repository.findIdsByAwaitingIn(any())).thenReturn(List.of());
 
         service.run(REMIND_AT);
 
         verify(repository).findIdsByAwaitingIn(List.of(Awaiting.RESULT_CONFIRMATION, Awaiting.ASKER_REPLY));
+        verify(committer, never()).update(any(), any());
     }
 }

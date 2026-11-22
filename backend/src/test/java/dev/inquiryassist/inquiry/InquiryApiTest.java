@@ -280,7 +280,8 @@ class InquiryApiTest extends ApiSupport {
         unknown(id, "type");
         unknown(id, "system");
         unknown(id, "q1");
-        write(id, "note", "状況の説明");
+        // 調査は確定の時点で始まる。送るまでに終わらないよう、遅らせる印を添える
+        write(id, "note", "[遅延] 状況の説明");
         confirm(id);
 
         assertState(text(sendNow(id).andExpect(status().isOk())), "KNOW", "OPERATOR", "HANDLING", null);
@@ -421,7 +422,8 @@ class InquiryApiTest extends ApiSupport {
     void 答えを待たずに送れるのは_問いを確かめた後_AIの失敗で進めない場合_作り直しを使い切った場合だけ() throws Exception {
         String intake = idOf(create(SPEC));
         String structured = toStructured(SPEC, null);
-        String answering = toAnswering(SPEC, null);
+        // 調査は確定の時点で始まる。調べている間に送る件は、送るまでに終わらないよう、遅らせる印を添える
+        String answering = toAnswering("[遅延] " + SPEC, null);
         String answered = toAnswering(SPEC, null);
         stream(answered);
 
@@ -499,25 +501,30 @@ class InquiryApiTest extends ApiSupport {
     }
 
     @Test
-    void ANSWERINGでない問い合わせのストリームはINVALID_STATEの失敗を流す() throws Exception {
+    void 調べるのを待つ状態でない問い合わせのストリームは_すぐ現在の状態でdoneを流す() throws Exception {
         String id = idOf(create(SPEC));
 
         var events = events(stream(id));
 
         assertThat(events).singleElement().satisfies(e -> {
-            assertThat(e.getKey()).isEqualTo("failed");
-            assertThat((String) JsonPath.read(e.getValue(), "$.code")).isEqualTo("INVALID_STATE");
+            assertThat(e.getKey()).isEqualTo("done");
+            assertThat((String) JsonPath.read(e.getValue(), "$.awaiting")).isEqualTo("INTAKE_ANSWER");
         });
     }
 
     @Test
-    void 回答済みの問い合わせを再度ストリームするとINVALID_STATEになる() throws Exception {
+    void 調査が終わった後にストリームをつなぐと_進捗なしですぐdoneで_調査は増えない() throws Exception {
         String id = toAnswering(SPEC, null);
         stream(id);
+        List<String> before = usageSteps(id);
 
         var events = events(stream(id));
 
-        assertThat(events).singleElement().satisfies(e -> assertThat(e.getKey()).isEqualTo("failed"));
+        assertThat(events).singleElement().satisfies(e -> {
+            assertThat(e.getKey()).isEqualTo("done");
+            assertThat((String) JsonPath.read(e.getValue(), "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
+        });
+        assertThat(usageSteps(id)).isEqualTo(before);
     }
 
     @Test
@@ -787,16 +794,17 @@ class InquiryApiTest extends ApiSupport {
 
     @Test
     void SSEは進捗を流してから完了を流す() throws Exception {
-        String id = toAnswering(SPEC, null);
+        // 調査は確定の時点で始まり、進捗はつないだ後の分だけが届く。つなぐ前に終わらないよう、遅らせる印を添える
+        String id = toAnswering("[遅延] " + SPEC, null);
 
         String body = stream(id);
 
         var events = events(body);
-        assertThat(events.stream().map(Map.Entry::getKey).toList())
-                .containsExactly("progress", "progress", "progress", "progress", "progress", "done");
+        assertThat(events.get(events.size() - 1).getKey()).isEqualTo("done");
+        assertThat(events.subList(0, events.size() - 1)).isNotEmpty().allSatisfy(e -> assertThat(e.getKey()).isEqualTo("progress"));
         assertThat(events.stream().filter(e -> e.getKey().equals("done")).count()).isEqualTo(1);
-        // 調査の進捗3件に続けて、根拠の確認と説明のまとめ
-        assertThat(events.subList(0, 5).stream().map(e -> (String) JsonPath.read(e.getValue(), "$.message")).toList())
+        // 最後の進捗は、調査の進捗に続く、根拠の確認と説明のまとめ
+        assertThat(events.subList(0, events.size() - 1).stream().map(e -> (String) JsonPath.read(e.getValue(), "$.message")).toList())
                 .endsWith("根拠を確かめています", "答えをまとめています");
         assertThat((String) JsonPath.read(events.get(events.size() - 1).getValue(), "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
     }

@@ -346,8 +346,6 @@ class InquiryStateMachineTest {
     void 渡したことのない件と取り下げた件には追記できず_ほかの状態でも追記できない() {
         assertThatThrownBy(() -> InquiryStateMachine.noted(RESULT, ctx(null)))
                 .isInstanceOf(IllegalTransitionException.class);
-        assertThatThrownBy(() -> InquiryStateMachine.noted(closed(Ending.RESOLVED), ctx(null)))
-                .isInstanceOf(IllegalTransitionException.class);
         assertThatThrownBy(() -> InquiryStateMachine.noted(closed(Ending.WITHDRAWN), handedOver(null)))
                 .isInstanceOf(IllegalTransitionException.class);
         assertThatThrownBy(() -> InquiryStateMachine.noted(INVESTIGATING, handedOver(null)))
@@ -492,6 +490,20 @@ class InquiryStateMachineTest {
     }
 
     @Test
+    void 担当者に渡したことのない解決済みの件への追記も開き直して担当者に初めて渡す() {
+        Context neverHanded = new Context(InquiryType.LOOKS_WRONG, false, Phase.KNOW, false, 2);
+        Transition t = InquiryStateMachine.noted(closed(Ending.RESOLVED), neverHanded);
+
+        assertThat(t.to()).isEqualTo(handling(Phase.DECIDE));
+        assertThat(t.event()).isEqualTo(HistoryEvent.REOPENED);
+        assertThat(t.actor()).isEqualTo(Actor.ASKER);
+        assertThat(t.handsOver()).isTrue();
+        assertThat(t.handoverReason()).isEqualTo(HandoverReason.REOPENED);
+        assertThat(InquiryStateMachine.noted(closed(Ending.RESOLVED), new Context(null, false, Phase.KNOW, false, 2)).to())
+                .isEqualTo(handling(Phase.KNOW));
+    }
+
+    @Test
     void 担当者に渡したことのない回答済みの件への追記は開き直して担当者に初めて渡す() {
         // 終わる前の区間（KNOW）ではなく、種類で決まる区間にする
         Context neverHanded = new Context(InquiryType.LOOKS_WRONG, false, Phase.KNOW, false, 2);
@@ -509,8 +521,8 @@ class InquiryStateMachineTest {
     }
 
     @Test
-    void 担当者に渡したことがなければ_回答済み以外の終わった件には追記できない() {
-        for (Ending ending : List.of(Ending.RESOLVED, Ending.DECLINED, Ending.WITHDRAWN)) {
+    void 担当者に渡したことがなければ_解決済みと回答済み以外の終わった件には追記できない() {
+        for (Ending ending : List.of(Ending.DECLINED, Ending.WITHDRAWN)) {
             assertThatThrownBy(() -> InquiryStateMachine.noted(closed(ending), ctx(InquiryType.HOW_TO)))
                     .isInstanceOf(IllegalTransitionException.class);
         }

@@ -5,6 +5,8 @@ inquiry:
   # 時間で動く決まりは、定期的には回さない。テストは run(now) を直接呼ぶ
   rules:
     sweep-enabled: false
+    # 本人が待つ調査の時間切れは、テストの途中で他の件の状態を変えないよう、長くしておく。時間切れを確かめるテストは、短い値を指定する
+    answer-timeout: 30m
   # 仕様の持ち主（相談先）。全体で1つの一覧
   consultants: [全体の仕様の持ち主]
   systems:

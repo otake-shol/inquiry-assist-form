@@ -410,7 +410,7 @@ class RoundTripApiTest extends ApiSupport {
     @Test
     @SuppressWarnings("unchecked")
     void 置き直すと置いた人がOPERATORになり_種類が変わると区間が変わり_入口の答えは残り_履歴に前後が残る() throws Exception {
-        String id = toAnswering("期限の仕様", "job-admin");
+        String id = toAnswering("[遅延] 期限の仕様", "job-admin");
         sendNow(id);
         String intakeBefore = JsonPath.read(operatorDetail(id), "$.intake[*].answer.kind").toString();
 
@@ -534,15 +534,12 @@ class RoundTripApiTest extends ApiSupport {
     }
 
     @Test
-    void 渡したことのない件と取り下げた件への追記はINVALID_STATE() throws Exception {
+    void 渡したことのない入口の途中の件と取り下げた件への追記はINVALID_STATE() throws Exception {
         String inProgress = idOf(create("期限の仕様"));
-        String resolvedByAi = toAnswering("期限の仕様", null);
-        stream(resolvedByAi);
-        resolve(resolvedByAi, true);
         String withdrawn = handedOver("取り下げる件");
         withdraw(withdrawn);
 
-        for (String id : List.of(inProgress, resolvedByAi, withdrawn)) {
+        for (String id : List.of(inProgress, withdrawn)) {
             append(id, "追記").andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_STATE"));
         }
     }
@@ -727,7 +724,8 @@ class RoundTripApiTest extends ApiSupport {
 
     @Test
     void 入口の途中の遷移も履歴に残る() throws Exception {
-        String id = toStructured("期限の仕様", null);
+        // 調査は確定の時点で始まる。送るまでに終わらないよう、遅らせる印を添える
+        String id = toStructured("[遅延] 期限の仕様", null);
         mvc.perform(post("/api/inquiries/" + id + "/reopen")).andExpect(status().isOk());
         finishIntake(id, null);
         confirm(id);

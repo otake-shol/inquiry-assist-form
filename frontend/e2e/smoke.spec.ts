@@ -114,6 +114,70 @@ test("選択肢を押すだけで、入口から結果まで通せる", async ({
     page.getByText("解決してよかったです。この内容は記録しておきます。"),
   ).toBeVisible();
 
+  // 解決したと伝えた後でも、やはり足りなければ、続きを送って担当者に渡せる
+  await page
+    .getByLabel("追加で伝える")
+    .fill("やはり、うまくいきませんでした。");
+  await page.getByRole("button", { name: "送る", exact: true }).click();
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * 調査は、問いを確かめた時点で API が始める。本人がその直後にページを閉じても、
+ * 調査は進み、結果に行き着く（AI の番のまま、誰にも見えずに残る件を作らない）。
+ */
+test("問いを確かめた直後にページを閉じても、調査は進む", async ({
+  page,
+  request,
+}) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+
+  await startByText(page, "請求書の宛名の変え方を知りたい");
+  const unknown = page.getByRole("button", { name: "わからない", exact: true });
+  const confirm = page.getByRole("button", { name: "合っています" });
+  const answered = page.locator(".answered-row");
+  for (let i = 0; i < 6; i++) {
+    await expect(unknown.or(confirm)).toBeVisible();
+    if (await confirm.isVisible()) break;
+    const before = await answered.count();
+    await unknown.click();
+    await expect(answered).not.toHaveCount(before);
+  }
+  const url = page.url();
+  const id = url.split("/").pop();
+
+  // ページを離れてから、問いを確かめる（画面は、進捗の受信につながない）
+  await page.goto("about:blank");
+  const confirmed = await request.put(
+    `http://localhost:8080/api/inquiries/${id}/structured`,
+    { data: {} },
+  );
+  expect(confirmed.ok()).toBe(true);
+  expect((await confirmed.json()).awaiting).toBe("INVESTIGATION");
+
+  // 画面がつながなくても、調査は終わる
+  await expect
+    .poll(
+      async () =>
+        (
+          await (
+            await request.get(`http://localhost:8080/api/inquiries/${id}`)
+          ).json()
+        ).awaiting,
+      { timeout: 30_000 },
+    )
+    .toBe("RESULT_CONFIRMATION");
+
+  // 戻ってくると、結果が出ている
+  await page.goto(url);
+  await expect(page.getByRole("heading", { name: "調べた結果" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "解決しました" }),
+  ).toBeVisible();
+
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
@@ -231,8 +295,10 @@ test("文章で書いて、入口から結果まで通せる", async ({ page }) 
   await expect(
     page.getByText("解決してよかったです。この内容は記録しておきます。"),
   ).toBeVisible();
+  // 終わった後は、続きを送ることも、別の問い合わせを書くこともできる
+  await expect(page.getByLabel("追加で伝える")).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "新しい問い合わせを書く" }),
+    page.getByRole("button", { name: "別の問い合わせを書く" }),
   ).toBeVisible();
 
   expect(consoleErrors).toEqual([]);

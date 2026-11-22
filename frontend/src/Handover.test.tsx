@@ -744,77 +744,90 @@ describe("本人のページ: 返事がないときの知らせ", () => {
   });
 });
 
-describe("本人のページ: 返事がないまま「回答済み」で終わった件", () => {
-  const unhandedAnswered = () =>
+describe("本人のページ: 担当者に渡していない終わり（解決済み、返事がないまま回答済み）", () => {
+  const unhandedAnswered = (ending: "RESOLVED" | "ANSWERED" = "ANSWERED") =>
     makeStructuredView({
-      ...closedState("ANSWERED"),
+      ...closedState(ending),
       answer: groundedAnswer,
       handedOverAt: null,
       noReply: null,
     });
 
-  it("担当者に渡したことがなくても、終わりの文言と、続きを送る欄を出す。渡したとは言わない", async () => {
-    openInquiry(unhandedAnswered());
+  it.each([
+    [
+      "RESOLVED",
+      "解決済み",
+      "解決してよかったです。この内容は記録しておきます。",
+    ],
+    [
+      "ANSWERED",
+      "回答済み",
+      "お返事がなかったため、いったん終了しました。解決していなければ、このページから続きを送れます。",
+    ],
+  ] as const)(
+    "%s: 担当者に渡したことがなくても、終わりの文言と、続きを送る欄を出す。渡したとは言わない",
+    async (ending, label, text) => {
+      openInquiry(unhandedAnswered(ending));
 
-    expect(
-      await screen.findByText(
-        "お返事がなかったため、いったん終了しました。解決していなければ、このページから続きを送れます。",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("回答済み", { selector: ".handling-status" }),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("追加で伝える")).toBeInTheDocument();
-    expect(screen.queryByText(/担当者に送りました/)).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("担当者からの返信は、ここに表示されます。"),
-    ).not.toBeInTheDocument();
-    // 別の問い合わせの入口は、やり取りの最後に置く
-    expect(
-      screen.getByRole("button", { name: "別の問い合わせを書く" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "新しい問い合わせを書く" }),
-    ).not.toBeInTheDocument();
-  });
+      expect(await screen.findByText(text)).toBeInTheDocument();
+      expect(
+        screen.getByText(label, { selector: ".handling-status" }),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText("追加で伝える")).toBeInTheDocument();
+      expect(screen.queryByText(/担当者に送りました/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("担当者からの返信は、ここに表示されます。"),
+      ).not.toBeInTheDocument();
+      // 別の問い合わせの入口は、やり取りの最後に置く
+      expect(
+        screen.getByRole("button", { name: "別の問い合わせを書く" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "新しい問い合わせを書く" }),
+      ).not.toBeInTheDocument();
+    },
+  );
 
-  it("続きを送ると POST …/messages を呼び、担当者に渡った状態になる", async () => {
-    const user = userEvent.setup();
-    const calls = openInquiry(unhandedAnswered(), {
-      "POST /api/inquiries/inq-1/messages": {
-        body: makeFiledView({
-          answer: groundedAnswer,
-          sentImmediately: false,
-          messages: [
-            makeMessage({
-              id: "m1",
-              from: "ASKER",
-              kind: "NOTE",
-              body: "まだ直っていません。",
-            }),
-          ],
-        }),
-      },
-    });
+  it.each(["RESOLVED", "ANSWERED"] as const)(
+    "%s: 続きを送ると POST …/messages を呼び、担当者に渡った状態になる",
+    async (ending) => {
+      const user = userEvent.setup();
+      const calls = openInquiry(unhandedAnswered(ending), {
+        "POST /api/inquiries/inq-1/messages": {
+          body: makeFiledView({
+            answer: groundedAnswer,
+            sentImmediately: false,
+            messages: [
+              makeMessage({
+                id: "m1",
+                from: "ASKER",
+                kind: "NOTE",
+                body: "まだ直っていません。",
+              }),
+            ],
+          }),
+        },
+      });
 
-    await user.type(
-      await screen.findByLabelText("追加で伝える"),
-      "まだ直っていません。",
-    );
-    await user.click(screen.getByRole("button", { name: "送る" }));
+      await user.type(
+        await screen.findByLabelText("追加で伝える"),
+        "まだ直っていません。",
+      );
+      await user.click(screen.getByRole("button", { name: "送る" }));
 
-    expect(
-      callsTo(calls, "POST", "/api/inquiries/inq-1/messages")[0].body,
-    ).toEqual({ body: "まだ直っていません。" });
-    expect(
-      await screen.findByText("担当者が確認しています"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
-      ),
-    ).toBeInTheDocument();
-  });
+      expect(
+        callsTo(calls, "POST", "/api/inquiries/inq-1/messages")[0].body,
+      ).toEqual({ body: "まだ直っていません。" });
+      expect(
+        await screen.findByText("担当者が確認しています"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。",
+        ),
+      ).toBeInTheDocument();
+    },
+  );
 });
 
 describe("本人のページ: 聞き返しに返事がないときの知らせ", () => {

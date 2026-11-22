@@ -1,6 +1,7 @@
 package dev.inquiryassist.inquiry;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -257,13 +258,16 @@ class SlackNotificationTest extends ApiSupport {
 
     @Test
     void Slackがタイムアウトしても送付は取り消されず失敗が記録される() throws Exception {
-        String id = toAnswering("期限の仕様", "slow");
+        String id = toAnswering("[遅延] 期限の仕様", "slow");
         long start = System.nanoTime();
 
-        sendNow(id).andExpect(status().isOk()).andExpect(jsonPath("$.awaiting").value("HANDLING"));
+        mvc.perform(post("/api/inquiries/" + id + "/send-now"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"));
 
         // 投稿の完了を待たずに応答が返る（タイムアウトは2秒）
         assertThat(java.time.Duration.ofNanos(System.nanoTime() - start)).isLessThan(java.time.Duration.ofMillis(900));
+        awaitInvestigationIdle(id);
         awaitRecorded(id);
         var row = jdbc.queryForMap("select awaiting, slack_notified, slack_error from inquiries where id = ?::uuid", id);
         assertThat(row.get("awaiting")).isEqualTo("HANDLING");
