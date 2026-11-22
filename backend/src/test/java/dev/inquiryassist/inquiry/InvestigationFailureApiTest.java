@@ -49,6 +49,6 @@ class InvestigationFailureApiTest extends ApiSupport {
         // 前の結果は、そのまま残る。本人向けの答えも、前に見せた答えのまま
         assertThat((List<String>) JsonPath.read(after, "$.answer.memo.findings")).isEqualTo(findings);
         mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.answer").isNotEmpty());
-        assertThat(usageSteps(id)).endsWith("investigator", "explainer", "investigator");
+        assertThat(usageSteps(id)).endsWith("investigator", "explainer", "advisor", "investigator");
     }
 }

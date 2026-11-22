@@ -8,7 +8,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
 /**
- * 起動時に、調べている最中（{@code RUNNING}）のまま残っている調査を失敗にする。裏での調査は API のプロセスの中で走るので、
+ * 起動時に、調べている最中（{@code RUNNING}）のまま残っている調査と、作っている最中のまま残っている案を失敗にする。裏での調査は API のプロセスの中で走るので、
  * 止まった後には、終わらないまま残る（契約書「調査の状況と、裏での調査」）。
  */
 @Component
@@ -17,12 +17,15 @@ class InvestigationRecovery implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(InvestigationRecovery.class);
 
     private final InvestigationRunner runner;
+    private final AdviceRunner adviceRunner;
 
     /**
      * @param runner 調査の実行役
+     * @param adviceRunner 案の実行役
      */
-    InvestigationRecovery(InvestigationRunner runner) {
+    InvestigationRecovery(InvestigationRunner runner, AdviceRunner adviceRunner) {
         this.runner = runner;
+        this.adviceRunner = adviceRunner;
     }
 
     @Override
@@ -30,6 +33,10 @@ class InvestigationRecovery implements ApplicationRunner {
         int failed = runner.failRunning(Instant.now());
         if (failed > 0) {
             log.warn("止まった調査を失敗にしました count={}", failed);
+        }
+        int failedAdvice = adviceRunner.failRunning();
+        if (failedAdvice > 0) {
+            log.warn("止まった案の作成を失敗にしました count={}", failedAdvice);
         }
     }
 }

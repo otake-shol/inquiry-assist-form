@@ -43,6 +43,7 @@ import java.util.UUID;
  * @param declined 見送りの内容。見送りで終わった件だけ非 null
  * @param handoverReason 直近に担当者へ渡した理由
  * @param investigation 調査の状況
+ * @param advice AI の案（判断の案と手順の案）
  * @param noReply 返事がないときの決まりの予定。本人の返事（結果の確かめ、聞き返しへの返事）を待っている間だけ非 null
  * @param messages 担当者の発言と本人の追記（古い順）
  * @param history 状態の履歴（起きた順）
@@ -74,10 +75,20 @@ public record OperatorDetail(
         Declined declined,
         HandoverReason handoverReason,
         InvestigationView investigation,
+        AdviceView advice,
         InquiryView.NoReplyView noReply,
         List<MessageView> messages,
         List<HistoryEntry> history,
         List<TraceEntry> trace) {
+
+    /**
+     * AI の案（契約書「AI の案（advice）」）。
+     *
+     * @param status 案の状況
+     * @param judgment 判断の案。なければ null（できていない場合を含む）
+     * @param procedure 手順の案。なければ null（できていない場合を含む）
+     */
+    public record AdviceView(AdviceStatus status, AdviceContent.Judgment judgment, AdviceContent.Procedure procedure) {}
 
     /**
      * 調査の状況（契約書「調査の状況と、裏での調査」）。

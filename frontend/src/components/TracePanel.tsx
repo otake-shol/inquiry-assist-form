@@ -53,24 +53,34 @@ function StageRow({
             `${messages.meta.separator}${trace.noFailure}`}
         </p>
       )}
-      {ran && code && <p className="trace-detail">{trace.codeDetail}</p>}
+      {ran && code && (
+        <p className="trace-detail">
+          {stage.key === "adviceVerifier"
+            ? trace.adviceCodeDetail
+            : trace.codeDetail}
+        </p>
+      )}
     </li>
   );
 }
 
 /**
  * 「裏側を見る（開発者向け）」。スキルの実行記録を、流れの順（受付 → 聞き手 → 言い直し →
- * 調査 → 照合（コード） → 説明）に並べる。既定は閉じておく。
+ * 調査 → 照合（コード） → 説明）に並べる。担当者の詳細では、さらに 助言 → 案の確認（コード） → 下書き を足す。
+ * 既定は閉じておく。
  * 開発者向けなので、この中に限りスキルやモデルの名前を使う。
  * @param props 実行記録（無ければすべての段が「まだ動いていません」になる）
  */
 export function TracePanel({
   entries,
+  operator = false,
 }: {
   entries: TraceEntry[] | null | undefined;
+  /** 担当者の詳細か（そうなら、助言、案の確認（コード）、下書きの3段を足す） */
+  operator?: boolean;
 }) {
   const messages = useMessages();
-  const stages = summarizeTrace(entries, messages.trace);
+  const stages = summarizeTrace(entries, messages.trace, operator);
   return (
     <details className="trace-panel">
       <summary>{messages.user.traceSummary}</summary>

@@ -406,6 +406,30 @@ export const ja = {
     investigationStart: "AI に調べさせる",
     investigationRetry: "調べ直す",
     investigationHint: "番は変わりません。結果は、担当者だけに見えます。",
+    /** AI の案（「調べた結果」のすぐ下の節） */
+    adviceTitle: "AI の案",
+    adviceMark: "案",
+    adviceIntro: "AI が、上の事実から考えた案です。決めるのは担当者です。",
+    adviceRunning: "AI が案を作っています。",
+    adviceFailed: "AI の案は作れませんでした。",
+    judgmentTitle: "判断の案",
+    /** 相談が要りそうなときの見出し。続けて「: （理由）」を添える */
+    consultationNeeded: "仕様の持ち主への相談が要りそうです",
+    consultationNotNeeded: "相談は要らなそうです。",
+    adviceBasedOn: "基づく事実",
+    procedureTitle: "手順の案",
+    stepTarget: "対象",
+    stepAction: "操作",
+    stepCheck: "確かめ方",
+    adviceRollback: "元に戻す方法",
+    adviceStaffCarryOut: "実行するのは担当者です。",
+    /** 返信の下書き（「本人に送る」の入力欄のすぐ上） */
+    draftNote: "伝えたいこと（任意）",
+    draftAsk: "聞き返しを下書きさせる",
+    draftResult: "結果を下書きさせる",
+    draftHint: "入力欄が空のときに使えます",
+    draftNotice: (language: string) =>
+      `AI の下書きです。確かめて、直してから送ってください。本人の言語（${language}）で書かれています。`,
     noReplyPlanned: (remindDate: string) =>
       `返事がなければ、${remindDate}に本人へ知らせます`,
     noReplyReminded: (remindedDate: string, closeDate: string) =>
@@ -467,6 +491,8 @@ export const ja = {
       ["restater", "言い直し"],
       ["investigator", "調査"],
       ["explainer", "説明"],
+      ["advisor", "助言"],
+      ["drafter", "下書き"],
     ] as [id: string, label: string][],
     /** 内訳の文。例: 「受付・聞き手は手元のモデル、調査はモックで動いています」 */
     mixText: (real: string[], mock: string[]) =>
@@ -485,7 +511,12 @@ export const ja = {
       investigator: "調査",
       verifier: "照合（コード）",
       explainer: "説明",
+      advisor: "助言",
+      adviceVerifier: "案の確認（コード）",
+      drafter: "下書き",
     } as Record<string, string>,
+    /** 案の確認（コード）の段の説明 */
+    adviceCodeDetail: "案が基づく事実を確かめる",
     codeKind: "通常のコード",
     skillKind: "AI のスキル",
     idle: "まだ動いていません",

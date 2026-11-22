@@ -4,13 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
+import dev.inquiryassist.core.skill.AdvisorSkill;
 import dev.inquiryassist.core.skill.AnswerPipeline;
+import dev.inquiryassist.core.skill.DrafterSkill;
 import dev.inquiryassist.core.skill.ExplainerSkill;
 import dev.inquiryassist.core.skill.InterviewerSkill;
 import dev.inquiryassist.core.skill.InvestigatorSkill;
 import dev.inquiryassist.core.skill.ReceptionSkill;
 import dev.inquiryassist.core.skill.RestaterSkill;
 import dev.inquiryassist.inquiry.SkillImplementations;
+import dev.inquiryassist.mock.MockAdvisorSkill;
+import dev.inquiryassist.mock.MockDrafterSkill;
 import dev.inquiryassist.mock.MockExplainerSkill;
 import dev.inquiryassist.mock.MockInterviewerSkill;
 import dev.inquiryassist.mock.MockInvestigatorSkill;
@@ -36,6 +40,8 @@ class BackendApplicationTests {
     @Autowired RestaterSkill restater;
     @Autowired InvestigatorSkill investigator;
     @Autowired ExplainerSkill explainer;
+    @Autowired AdvisorSkill advisor;
+    @Autowired DrafterSkill drafter;
     @Autowired KnowledgeSearch knowledge;
     @Autowired AnswerPipeline pipeline;
     @Autowired SkillImplementations implementations;
@@ -48,10 +54,12 @@ class BackendApplicationTests {
         assertThat(restater).isInstanceOf(MockRestaterSkill.class);
         assertThat(investigator).isInstanceOf(MockInvestigatorSkill.class);
         assertThat(explainer).isInstanceOf(MockExplainerSkill.class);
+        assertThat(advisor).isInstanceOf(MockAdvisorSkill.class);
+        assertThat(drafter).isInstanceOf(MockDrafterSkill.class);
         assertThat(knowledge).isInstanceOf(MockKnowledgeSearch.class);
         assertThat(pipeline).isNotNull();
         assertThat(implementations.includesMock()).isTrue();
-        assertThat(implementations.byId().values()).containsOnly("mock").hasSize(5);
+        assertThat(implementations.byId().values()).containsOnly("mock").hasSize(7);
     }
 
     @Test
@@ -62,6 +70,9 @@ class BackendApplicationTests {
                 .andExpect(jsonPath("$.skills.interviewer").value("mock"))
                 .andExpect(jsonPath("$.skills.restater").value("mock"))
                 .andExpect(jsonPath("$.skills.investigator").value("mock"))
-                .andExpect(jsonPath("$.skills.explainer").value("mock"));
+                .andExpect(jsonPath("$.skills.explainer").value("mock"))
+                .andExpect(jsonPath("$.skills.advisor").value("mock"))
+                .andExpect(jsonPath("$.skills.drafter").value("mock"))
+                .andExpect(jsonPath("$.skills.length()").value(7));
     }
 }

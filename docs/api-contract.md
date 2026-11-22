@@ -323,7 +323,7 @@ inquiry:
 ```json
 {
   "mock": true,
-  "skills": { "reception": "mock", "interviewer": "mock", "restater": "mock", "investigator": "mock", "explainer": "mock" },
+  "skills": { "reception": "mock", "interviewer": "mock", "restater": "mock", "investigator": "mock", "explainer": "mock", "advisor": "mock", "drafter": "mock" },
   "trace": true,
   "user": { "id": "local-user", "name": "開発用ユーザー" },
   "operatorName": "担当者（開発用）",
@@ -506,6 +506,19 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | `[拒否]` | 調査 | 進捗を流した後に `AI_REFUSED` |
 | `[説明エラー]` | 説明 | 調査と照合は成功し、説明が `AI_UNAVAILABLE` で失敗する。調査の結果は保存される |
 | `[的外れ]` | 説明 | 調査は通常の事実を返し、説明が「問いに答えていない」と判定する。根拠あり（`grounded: true`）で `answered: false` になる |
+| `[相談]` | 助言 | 判断の案の `needsConsultation` を `true` にし、理由を添える |
+| `[手順]` | 助言 | 種類にかかわらず、手順の案を返す（タグがなければ、手順の案を返すのは種類が `DO_FOR_ME` と `CHANGE_REQUEST` のときだけ） |
+| `[根拠なしの案]` | 助言 | 判断の案の `basedOn` に、存在しない番号だけを入れて返す。コードが案を捨て、`judgment` は `null` になる |
+| `[案エラー]` | 助言 | 助言が `AI_UNAVAILABLE` で失敗する。`advice.status` は `FAILED` |
+| `[下書きエラー]` | 下書き | 下書きが `AI_UNAVAILABLE` で失敗する |
+
+### 助言と下書き
+
+- **助言**: タグがなければ、判断の案を1つ返す（1件目の事実に基づく。`needsConsultation` は `false`。文章は「資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。」）。種類が `DO_FOR_ME` か `CHANGE_REQUEST` のときは、手順の案も返す（手順2つと、元に戻す方法。最後の事実に基づく）。
+- **下書き**: 種類（`kind`）と本人の言語で、決まった文章を返す。`note` があれば、文章の中にそのまま入れる。
+  - `ASK`、`ja`: 「確認させてください。（note、なければ「起きている場面を、もう少し詳しく教えていただけますか。」）」
+  - `RESULT`、`ja`: 「お待たせしました。確認した結果をお伝えします。（note、なければ判断の案の文章。それもなければ1件目の事実の文）」
+  - `en` は、同じ組み立ての英語（"Let me check one thing. …"、"Thank you for waiting. Here is what we found. …"）。
 
 ### 聞き手（設定に質問があり、文章が書かれている場合）
 
@@ -602,7 +615,7 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 ### `GET /api/operator/inquiries/{id}`
 
-`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`handoverReason`、`investigation`（「調査の状況と、裏での調査」の節）、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
+`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`handoverReason`、`investigation`（「調査の状況と、裏での調査」の節）、`advice`（「AI の案」の節）、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
 
 `followUps` は廃止し、`intake` に置き換える。入力を終える前に担当者へ送られることがなくなったため、「未回答」の状態は要らなくなった。
 
@@ -641,7 +654,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 - **`answer.memo.unconfirmed`**: 調査が挙げたが、根拠の実在を確かめられなかった事実の文の一覧。該当がなければ空配列。**担当者にだけ返す。** 中身が入るのはオペレータの詳細（`GET /api/operator/inquiries/{id}`）の `answer.memo.unconfirmed` だけで、本人向けの InquiryView（2〜9 と進捗ストリームの `done`）では常に空配列にする。裏づけのない内容は、本人には真偽を判断できず、読めばそのまま試してしまうおそれがあるため。画面で隠すのではなく、API が本人向けの応答に含めない。オペレータ画面は「根拠を確かめられなかったこと」として、分かったこと（`findings`）と区別して示す。本人向けの説明（`askerExplanation`）は `findings` の内容だけから書かれ、`unconfirmed` の内容を含まない。
 - **0次回答の進捗**: 調査の進捗に続けて「根拠を確かめています」が流れ、根拠ありの場合はさらに「答えをまとめています」が流れる。
 - **説明の失敗**: 調査と照合が成功し、説明だけが失敗した場合、進捗ストリームは `failed`（`AI_UNAVAILABLE` または `AI_REFUSED`）を流し、`awaiting` は `INVESTIGATION` のまま。調査の結果（技術メモ、出典と照合結果、利用量）は保存する。ただし本人向けの InquiryView の `answer` は `ANSWERING` の間は `null` のままにする（説明がない状態を「答えが見つからなかった」と誤って見せないため）。画面は従来どおり再試行と「今すぐ担当者に送る」を出す。送った場合、オペレータの詳細（`GET /api/operator/inquiries/{id}`）の `answer` に保存済みの調査の内容が入り、`grounded` は `false`、`askerExplanation` は `null` になる。再試行で調査が成功すれば、保存済みの内容は新しい結果で置き換える。
-- **利用量の記録**: `usages[].step` はスキルの識別子（`reception`、`interviewer`、`restater`、`investigator`、`explainer`）。押して答えただけの入口では、受付は呼ばれない（記録にも現れない）。
+- **利用量の記録**: `usages[].step` はスキルの識別子（`reception`、`interviewer`、`restater`、`investigator`、`explainer`、`advisor`、`drafter`）。押して答えただけの入口では、受付は呼ばれない（記録にも現れない）。
 - **問いに答えられたか（`answer.answered`）**: 確かめられた事実があること（`grounded`）と、その事実が本人の問いに答えていること（`answered`）を区別する。根拠はあるが的外れな事実しか集まらなかった場合に、それを答えとして見せないため。
   - `answered` は真偽値。`grounded` が `false` のときは常に `false`。`grounded` が `true` のときは、説明のスキルの判定（問いに答えているか）をそのまま入れる。
   - `grounded: true`、`answered: false` の場合も、`askerExplanation`（確認できなかったことと、関連して分かったこと）、`citations`、`memo` は従来どおり返す。
@@ -730,6 +743,40 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 | --- | --- | --- |
 | `inquiry.rules.answer-timeout` | `60s` | 本人が待つ調査を、担当者に引き継ぐまでの時間。プロファイル `local-ai` では `10m`（手元のモデルは、調査に60秒以上かかるのが普通のため） |
 
+### AI の案（advice）
+
+担当者に渡った件には、AI が、確かめられた事実から、判断の案と、作業の手順の案を添える（スキルの構成と、案を確かめる決まりは `skill-architecture.md` の「担当者を支える2つのスキル」が正）。担当者向けの詳細が `advice` として返す。本人向けの InquiryView には含めない。
+
+```json
+"advice": {
+  "status": "DONE",
+  "judgment": {
+    "text": "資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。",
+    "needsConsultation": false,
+    "consultationReason": null,
+    "basedOn": ["求人は、掲載期限の時刻ちょうどから期限切れとして扱われる。"]
+  },
+  "procedure": {
+    "steps": [{ "target": "求人管理画面の求人の編集", "action": "掲載期限を、翌日の日付に変える", "check": "応募者向けの一覧に、求人が表示されること" }],
+    "rollback": "掲載期限を、元の日付に戻す",
+    "basedOn": ["期限切れの求人は、応募者向けの一覧に表示されない。"]
+  }
+}
+```
+
+| 項目 | 意味 |
+| --- | --- |
+| `status` | `NOT_RUN`（作っていない。確かめられた事実がない場合を含む）、`RUNNING`、`DONE`、`FAILED` |
+| `judgment` | 判断の案。なければ `null`。`needsConsultation` は、仕様の持ち主への相談が要りそうか。`consultationReason` は、その理由（要らなければ `null`） |
+| `procedure` | 作業の手順の案。なければ `null`。`steps` は、行う順。`rollback` は、元に戻す方法（なければ `null`） |
+| `basedOn` | その案が基づく事実の文（`answer.memo.findings` の文と同じもの）。1件以上。基づく事実のない案は、API が返さない |
+
+- 案は、担当者の番の問い合わせに、確かめられた事実が1つ以上あるときに、裏で作る。調べ直して調査の結果が置き換わると、前の案は消え、作り直される。
+- 案ができたとき、失敗したときは、担当者のストリームに `updated` を流す（未読には戻さない。未読に戻すのは、調査の結果が届いたとき）。
+- 案の文章は、既定の言語で書かれる（書かれた内容なので、見る人の言語では切り替わらない）。
+- 担当者の操作が、案を保存する瞬間と重なると、操作が `INVALID_STATE`（他の操作と競合しました）になることがある。やり直せば通る（裏での調査の結果の保存と同じ）。
+- API を止めると、作っている途中の案は失われる。起動時に、`RUNNING` のまま残っている件を `FAILED` にする。作り直すには、調べ直す。
+
 ### 担当者の操作
 
 すべて、担当者に渡したことのある問い合わせが対象。そうでない問い合わせは `NOT_FOUND`。`200` で、詳細（`GET /api/operator/inquiries/{id}`）と同じ全内容を返す。
@@ -742,6 +789,7 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 | 区間を変える | `PUT /api/operator/inquiries/{id}/phase` | `{ "phase": "ACT" }` | 担当者の番 | 区間を `KNOW`、`DECIDE`、`ACT` のいずれかにする。番は変えない |
 | 置き直す | `PUT /api/operator/inquiries/{id}/placement` | `{ "type": "DO_FOR_ME", "systemId": "system-a", "functionId": "a-1" }`（どれも `null` にできる） | 終わっていない | 置き場所を変える。置いた人（`by`）は `OPERATOR` になる。種類が変わった場合は、区間を新しい種類の「担当者に渡す」の決まりに合わせる。番は変えない |
 | 調べ直す | `POST /api/operator/inquiries/{id}/investigation` | 本文なし | 終わっていない。言い直しがある。いま調べていない（`investigation.status` が `RUNNING` でない） | 裏での調査を始める（`investigation.status: RUNNING`）。番は変えない。種類が `CHANGE_REQUEST` でも、担当者が頼めば調べる。結果は担当者だけに見せる（`audience: OPERATOR`）。前の結果は、新しい結果が出た時点で置き換える（失敗した場合は、前の結果を残す） |
+| 返信の下書きを作る | `POST /api/operator/inquiries/{id}/draft` | `{ "kind": "ASK" または "RESULT", "note": "伝えたいこと（任意。1〜2000文字）" }` | 担当者の番 | AI が、本人に送る文章の下書きを作って返す。**状態は変えず、何も送らない。** 応答は、ほかの操作と違い `{ "body": "下書きの文章", "language": "ja" }`。下書きは、本人の言語（`language`）で書かれる。担当者が確かめ、直してから、「本人に聞き返す」か「結果を伝える」で送る。失敗したときは `AI_UNAVAILABLE`／`AI_REFUSED` |
 | 既読にする | `POST /api/operator/inquiries/{id}/read` | 本文なし | いつでも | `read: true` |
 
 - `reasonKind` は `NOT_REPRODUCIBLE`（再現しない）、`KNOWN_LIMITATION`（既知の制限）、`OUT_OF_SCOPE`（対象外）、`DUPLICATE`（重複）、`OTHER`（その他）のいずれか。
@@ -865,6 +913,8 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 - `provider` は、その呼び出しがモックなら `mock`、そうでなければ設定上の実装名（`ollama`）。
 - `durationMillis` は、呼び出しにかかった時間。この項目を加える前の記録では `null`。
 - 照合（根拠の実在の確認）は通常のコードで、スキルではないため、記録には現れない。画面は、調査と説明の間に「照合（コード）」を固定で描く。
+- 助言の案を確かめる処理（基づく事実のない案を捨てる）も通常のコードで、記録には現れない。画面は、助言の後に「案の確認（コード）」を固定で描く。
+- 助言と下書きの呼び出しは、担当者向けの詳細の `trace` にだけ含める。本人向けの InquiryView の `trace` には含めない（担当者だけに見せる案があることを、本人のページに出さない）。
 
 ## 利用者の表示と仮の文言
 

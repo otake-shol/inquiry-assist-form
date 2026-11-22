@@ -4,6 +4,7 @@ import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.lifecycle.DeclineReason;
 import dev.inquiryassist.core.lifecycle.Phase;
 import dev.inquiryassist.core.lifecycle.ReplyKind;
+import dev.inquiryassist.inquiry.DraftResult;
 import dev.inquiryassist.inquiry.OperatorDetail;
 import dev.inquiryassist.inquiry.OperatorList;
 import dev.inquiryassist.inquiry.OperatorService;
@@ -29,6 +30,9 @@ public class OperatorController {
 
     /** 担当者の返信。{@code kind} は {@code ASK} か {@code RESULT}。長さの検証は、前後の空白を除いてから行うためサービスで行う。 */
     public record ReplyRequest(@NotNull ReplyKind kind, @NotNull String body) {}
+
+    /** 返信の下書きの依頼。{@code note} は任意（長さの検証は、前後の空白を除いてからサービスで行う）。 */
+    public record DraftRequest(@NotNull ReplyKind kind, String note) {}
 
     /** 見送り。理由の長さの検証は、前後の空白を除いてから行うためサービスで行う。 */
     public record DeclineRequest(@NotNull DeclineReason reasonKind, @NotNull String reason) {}
@@ -106,6 +110,18 @@ public class OperatorController {
     @PostMapping("/inquiries/{id}/decline")
     public OperatorDetail decline(@PathVariable UUID id, @Valid @RequestBody DeclineRequest request, @ViewerLang String lang) {
         return operators.decline(id, request.reasonKind(), request.reason(), lang);
+    }
+
+    /**
+     * 担当者が本人に送る文章の下書きを作る。状態は変えず、何も送らない。
+     *
+     * @param id 問い合わせの識別子
+     * @param request 何を書くか（聞き返し、結果）と、伝えたいこと
+     * @return 下書きと、書いた言語（本人の言語）
+     */
+    @PostMapping("/inquiries/{id}/draft")
+    public DraftResult draft(@PathVariable UUID id, @Valid @RequestBody DraftRequest request) {
+        return operators.draft(id, request.kind(), request.note());
     }
 
     /**

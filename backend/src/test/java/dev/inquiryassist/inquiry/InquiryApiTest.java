@@ -154,7 +154,7 @@ class InquiryApiTest extends ApiSupport {
         assertThat(row.get("mock")).isEqualTo(true);
         assertThat(row.get("asker_id")).isEqualTo("local-user");
         // 押して答えただけなので、受付は呼ばれない。聞き手、言い直し、調査、説明をスキルの識別子で追記している
-        assertThat(usageSteps(id)).containsExactly("interviewer", "restater", "investigator", "explainer");
+        assertThat(usageSteps(id)).containsExactly("interviewer", "restater", "investigator", "explainer", "advisor");
     }
 
     @Test

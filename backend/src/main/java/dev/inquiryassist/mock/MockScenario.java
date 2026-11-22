@@ -36,7 +36,23 @@ final class MockScenario {
     /** 言い直し（問いの組み立て）が AI_UNAVAILABLE になる。 */
     static final String TAG_RESTATE_ERROR = "[言い直しエラー]";
 
+    /** 助言の判断の案で、仕様の持ち主への相談が要るとする。 */
+    static final String TAG_CONSULT = "[相談]";
+    /** 助言が、種類にかかわらず手順の案を返す。 */
+    static final String TAG_PROCEDURE = "[手順]";
+    /** 助言の判断の案が、存在しない事実の番号だけに基づく（コードが案を捨てる）。 */
+    static final String TAG_UNGROUNDED_ADVICE = "[根拠なしの案]";
+    /** 助言が AI_UNAVAILABLE になる。 */
+    static final String TAG_ADVICE_ERROR = "[案エラー]";
+    /** 下書きが AI_UNAVAILABLE になる。 */
+    static final String TAG_DRAFT_ERROR = "[下書きエラー]";
+
     private static final List<String> ALL_TAGS = List.of(
+            TAG_CONSULT,
+            TAG_PROCEDURE,
+            TAG_UNGROUNDED_ADVICE,
+            TAG_ADVICE_ERROR,
+            TAG_DRAFT_ERROR,
             TAG_NO_QUESTIONS,
             TAG_QUESTION_ERROR,
             TAG_NO_GROUNDS,

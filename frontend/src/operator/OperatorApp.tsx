@@ -589,6 +589,20 @@ export function OperatorApp({
                 onReply={(kind, body) =>
                   operate(detail.id, () => api.postReply(detail.id, kind, body))
                 }
+                adviceLanguage={config?.languages?.[0]}
+                onDraft={async (kind, note) => {
+                  setFailedId(null);
+                  try {
+                    return await api.draft(
+                      detail.id,
+                      kind,
+                      note === "" ? undefined : note,
+                    );
+                  } catch {
+                    setFailedId(detail.id);
+                    return null;
+                  }
+                }}
                 onInvestigate={() =>
                   operate(detail.id, () => api.investigate(detail.id))
                 }

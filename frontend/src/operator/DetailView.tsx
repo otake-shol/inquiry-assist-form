@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { PlacementInput, ReplyKind } from "../api/client.ts";
 import type {
+  Advice,
   ConfigSystem,
   DeclineReasonKind,
+  DraftResult,
   Investigation,
   OperatorDetail,
   Phase,
@@ -67,6 +69,10 @@ interface DetailViewProps {
   onPlacement: (placement: PlacementInput) => Promise<boolean>;
   /** 本人に聞き返す、または結果を伝える。成功したら true */
   onReply: (kind: ReplyKind, body: string) => Promise<boolean>;
+  /** AI の案の文章の言語（既定の言語。`GET /api/config` の `languages` の先頭） */
+  adviceLanguage?: string;
+  /** 返信の下書きを作らせる。失敗したら null */
+  onDraft: (kind: ReplyKind, note: string) => Promise<DraftResult | null>;
   /** AI に調べさせる（調べ直す）。成功したら true */
   onInvestigate: () => Promise<boolean>;
   /** 見送りとして終える。成功したら true */
@@ -99,6 +105,101 @@ function List({
         ))}
       </ul>
     </>
+  );
+}
+
+/**
+ * AI の案（判断の案、手順の案）。「調べた結果」のすぐ下に出す。事実と見分けがつくように、枠を点線にし、
+ * 見出しに「案」の印をつける。作っている最中と失敗は1行で示し、作っていない件や案が1つもない件は節を出さない。
+ * 案の文章は書かれたときの言語（既定の言語）のまま出す。基づく事実は、調べた結果の事実と同じ言語。
+ * @param props 案と、案の文章の言語、事実の言語
+ */
+function AdviceSection({
+  advice,
+  adviceLanguage,
+  factsLanguage,
+  op,
+}: {
+  advice: Advice;
+  adviceLanguage?: string;
+  factsLanguage?: string;
+  op: Messages["op"];
+}) {
+  const { status, judgment, procedure } = advice;
+  const hasSuggestion = judgment !== null || procedure !== null;
+  if (status === "NOT_RUN" || (status === "DONE" && !hasSuggestion)) {
+    return null;
+  }
+  const basedOn = (facts: string[]) => (
+    <>
+      <h5>{op.adviceBasedOn}</h5>
+      <ul>
+        {facts.map((fact) => (
+          <li key={fact} lang={factsLanguage}>
+            {fact}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+  return (
+    <section className="op-advice" aria-live="polite">
+      <h3>
+        <span className="op-advice-mark" aria-hidden="true">
+          {op.adviceMark}
+        </span>
+        {op.adviceTitle}
+      </h3>
+      <p className="op-muted">{op.adviceIntro}</p>
+      {status === "RUNNING" && <p>{op.adviceRunning}</p>}
+      {status === "FAILED" && <p>{op.adviceFailed}</p>}
+      {status === "DONE" && judgment !== null && (
+        <div className="op-advice-part">
+          <h4>{op.judgmentTitle}</h4>
+          <p className="op-pre" lang={adviceLanguage}>
+            {judgment.text}
+          </p>
+          <p>
+            {judgment.needsConsultation ? (
+              <>
+                {op.consultationNeeded}:{" "}
+                <span lang={adviceLanguage}>{judgment.consultationReason}</span>
+              </>
+            ) : (
+              op.consultationNotNeeded
+            )}
+          </p>
+          {basedOn(judgment.basedOn)}
+        </div>
+      )}
+      {status === "DONE" && procedure !== null && (
+        <div className="op-advice-part">
+          <h4>{op.procedureTitle}</h4>
+          <ol className="op-steps" lang={adviceLanguage}>
+            {procedure.steps.map((step, index) => (
+              <li key={`${index}:${step.action}`}>
+                <dl>
+                  <dt>{op.stepTarget}</dt>
+                  <dd>{step.target}</dd>
+                  <dt>{op.stepAction}</dt>
+                  <dd>{step.action}</dd>
+                  <dt>{op.stepCheck}</dt>
+                  <dd>{step.check}</dd>
+                </dl>
+              </li>
+            ))}
+          </ol>
+          {procedure.rollback !== null && (
+            <>
+              <h5>{op.adviceRollback}</h5>
+              <p lang={adviceLanguage}>{procedure.rollback}</p>
+            </>
+          )}
+          {basedOn(procedure.basedOn)}
+          <p className="op-muted">{op.adviceStaffCarryOut}</p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -160,6 +261,8 @@ export function DetailView({
   onPhase,
   onPlacement,
   onReply,
+  adviceLanguage,
+  onDraft,
   onInvestigate,
   onDecline,
 }: DetailViewProps) {
@@ -439,6 +542,13 @@ export function DetailView({
         )}
       </section>
 
+      <AdviceSection
+        advice={detail.advice}
+        adviceLanguage={adviceLanguage}
+        factsLanguage={askerLang}
+        op={OP_TEXT}
+      />
+
       <section className="op-exchange">
         <h3>{OP_TEXT.exchange}</h3>
         <MessageThread
@@ -451,7 +561,12 @@ export function DetailView({
         )}
         {operatorsTurn ? (
           <>
-            <SendToAsker busy={busy} inputRef={sendRef} onSend={onReply} />
+            <SendToAsker
+              busy={busy}
+              inputRef={sendRef}
+              onSend={onReply}
+              onDraft={onDraft}
+            />
             <DeclineForm
               open={declineOpen}
               onToggle={setDeclineOpen}
@@ -472,7 +587,7 @@ export function DetailView({
 
       <HistoryList history={detail.history} />
 
-      {trace && <TracePanel entries={detail.trace} />}
+      {trace && <TracePanel entries={detail.trace} operator />}
     </article>
   );
 }

@@ -38,12 +38,16 @@ class TraceApiTest extends ApiSupport {
         resolve(id, false).andExpect(status().isOk());
 
         assertThat(done).contains("\"trace\":[");
+        // 担当者に渡した後の、担当者向けの案（助言）の呼び出しも、担当者の記録には入る（本人向けには入らない）
         mvc.perform(get("/api/operator/inquiries/" + id))
-                .andExpect(jsonPath("$.trace.length()").value(5))
+                .andExpect(jsonPath("$.trace.length()").value(6))
                 .andExpect(jsonPath("$.trace[3].skill").value("investigator"))
                 .andExpect(jsonPath("$.trace[3].provider").value("mock"))
                 .andExpect(jsonPath("$.trace[4].skill").value("explainer"))
-                .andExpect(jsonPath("$.trace[4].durationMillis").isNumber());
+                .andExpect(jsonPath("$.trace[4].durationMillis").isNumber())
+                .andExpect(jsonPath("$.trace[5].skill").value("advisor"))
+                .andExpect(jsonPath("$.trace[5].provider").value("mock"));
+        mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.trace.length()").value(5));
     }
 
     @Test

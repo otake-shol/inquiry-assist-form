@@ -36,6 +36,16 @@ const STAGES: { key: string; kind: StageKind }[] = [
 ];
 
 /**
+ * 担当者の詳細にだけ出す、助言から後ろの段（助言、案の確認（コード）、下書き）。
+ * 本人のページには出さない（担当者だけに見せる案があることを、本人に伝えないため）。
+ */
+const OPERATOR_STAGES: { key: string; kind: StageKind }[] = [
+  { key: "advisor", kind: "skill" },
+  { key: "adviceVerifier", kind: "code" },
+  { key: "drafter", kind: "skill" },
+];
+
+/**
  * スキルの実行記録を、流れの順の段ごとに集計する純粋関数。
  * 受付 → 聞き手 → 言い直し → 調査 → 照合（コード） → 説明の6段を必ず返し、
  * 動いていない段は `calls` が 0 になる。同じスキルが複数回動いたときは回数と合計を持つ。
@@ -43,13 +53,20 @@ const STAGES: { key: string; kind: StageKind }[] = [
  * 一覧にないスキルの識別子は、末尾にスキルの段として足す。
  * @param entries 実行記録（無効または古い応答では null / undefined）
  * @param trace 辞書の、実行記録の文言（`messages.trace`。段の名前を持つ）
+ * @param operator 担当者の詳細か。そうなら、説明の後に 助言 → 案の確認（コード） → 下書き の3段を足す
  */
 export function summarizeTrace(
   entries: TraceEntry[] | null | undefined,
   trace: Messages["trace"],
+  operator = false,
 ): TraceStage[] {
-  const list = entries ?? [];
-  const known = new Set(STAGES.map((stage) => stage.key));
+  const base = operator ? [...STAGES, ...OPERATOR_STAGES] : STAGES;
+  // 助言と下書きは担当者だけのもの。本人のページには、記録があっても出さない
+  const operatorOnly = new Set(OPERATOR_STAGES.map((stage) => stage.key));
+  const list = (entries ?? []).filter(
+    (entry) => operator || !operatorOnly.has(entry.skill),
+  );
+  const known = new Set(base.map((stage) => stage.key));
   const extra: string[] = [];
   for (const entry of list) {
     if (!known.has(entry.skill) && !extra.includes(entry.skill)) {
@@ -57,7 +74,7 @@ export function summarizeTrace(
     }
   }
   const defs = [
-    ...STAGES,
+    ...base,
     ...extra.map((key) => ({ key, kind: "skill" as StageKind })),
   ];
 
@@ -99,6 +116,16 @@ export function summarizeTrace(
     investigator.calls > investigator.failedCalls
   ) {
     verifier.calls = 1;
+  }
+  // 案の確認（コード）は記録に現れない。助言が1回でも成功していれば、動いたものとして `calls` を 1 にする
+  const advisor = stages.find((stage) => stage.key === "advisor");
+  const adviceVerifier = stages.find((stage) => stage.key === "adviceVerifier");
+  if (
+    advisor !== undefined &&
+    adviceVerifier !== undefined &&
+    advisor.calls > advisor.failedCalls
+  ) {
+    adviceVerifier.calls = 1;
   }
   return stages;
 }

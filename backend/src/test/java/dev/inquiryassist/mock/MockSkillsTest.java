@@ -512,4 +512,144 @@ class MockSkillsTest {
         assertThat(text).endsWith("Whether this behavior is intended will be confirmed by the support team.");
         assertThat(text).matches("^[\\x00-\\x7F]+$");
     }
+
+    // ---- 助言と下書き（契約書「助言と下書き」） ----
+
+    private static List<dev.inquiryassist.core.skill.Finding> twoFindings() {
+        var citation = new dev.inquiryassist.core.Citation(
+                dev.inquiryassist.core.Citation.SourceType.FAQ, "faq", "a.md", 1, 1, "x", null);
+        return List.of(
+                new dev.inquiryassist.core.skill.Finding("事実1", List.of(citation)),
+                new dev.inquiryassist.core.skill.Finding("事実2", List.of(citation)));
+    }
+
+    private final MockAdvisorSkill advisor = new MockAdvisorSkill();
+    private final MockDrafterSkill drafter = new MockDrafterSkill();
+
+    @Test
+    void 助言はタグがなければ判断の案を1つ返し_1件目の事実に基づく() {
+        var advice = advisor.advise(inquiry(InquiryType.HOW_IT_WORKS, "期限"), InquiryType.HOW_IT_WORKS, twoFindings(), "ja")
+                .value();
+
+        assertThat(advice.judgment().text()).isEqualTo("資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。");
+        assertThat(advice.judgment().needsConsultation()).isFalse();
+        assertThat(advice.judgment().consultationReason()).isNull();
+        assertThat(advice.judgment().basedOn()).containsExactly(1);
+        // 種類が DO_FOR_ME と CHANGE_REQUEST 以外は、手順の案を返さない
+        assertThat(advice.procedure()).isNull();
+    }
+
+    @Test
+    void 助言はDO_FOR_MEとCHANGE_REQUESTで手順の案も返し_最後の事実に基づく() {
+        for (InquiryType type : List.of(InquiryType.DO_FOR_ME, InquiryType.CHANGE_REQUEST)) {
+            var procedure = advisor.advise(inquiry(type, "延長"), type, twoFindings(), "ja").value().procedure();
+
+            assertThat(procedure.steps()).hasSize(2);
+            assertThat(procedure.rollback()).isEqualTo("掲載期限を、元の日付に戻す");
+            assertThat(procedure.basedOn()).containsExactly(2);
+        }
+    }
+
+    @Test
+    void 助言の相談_手順_根拠なしの案のタグ() {
+        var consult = advisor.advise(inquiry(InquiryType.HOW_TO, "[相談] 期限"), InquiryType.HOW_TO, twoFindings(), "ja")
+                .value()
+                .judgment();
+        assertThat(consult.needsConsultation()).isTrue();
+        assertThat(consult.consultationReason()).isNotBlank();
+
+        // [手順] は、種類にかかわらず手順の案を返す
+        var withProcedure = advisor.advise(inquiry(InquiryType.HOW_TO, "[手順] 期限"), InquiryType.HOW_TO, twoFindings(), "ja")
+                .value();
+        assertThat(withProcedure.procedure()).isNotNull();
+
+        // [根拠なしの案] は、存在しない番号だけに基づく案を返す（コードが捨てる）
+        var ungrounded = advisor.advise(
+                        inquiry(InquiryType.HOW_TO, "[根拠なしの案] 期限"), InquiryType.HOW_TO, twoFindings(), "ja")
+                .value();
+        assertThat(ungrounded.judgment().basedOn()).containsExactly(999);
+        var verified = dev.inquiryassist.core.AdviceVerifier.verify(ungrounded, 2);
+        assertThat(verified.judgment()).isNull();
+    }
+
+    @Test
+    void 助言のエラータグはAI利用不可になる() {
+        assertThatThrownBy(() -> advisor.advise(
+                        inquiry(InquiryType.HOW_TO, "[案エラー] 期限"), InquiryType.HOW_TO, twoFindings(), "ja"))
+                .isInstanceOf(AiUnavailableException.class);
+    }
+
+    @Test
+    void 助言は英語なら英語で書く() {
+        var advice = advisor.advise(inquiry(InquiryType.DO_FOR_ME, "x"), InquiryType.DO_FOR_ME, twoFindings(), "en").value();
+
+        assertThat(advice.judgment().text()).matches("^[\\x00-\\x7F]+$");
+        assertThat(advice.procedure().steps()).allSatisfy(s -> assertThat(s.action()).matches("^[\\x00-\\x7F]+$"));
+        assertThat(advice.procedure().rollback()).matches("^[\\x00-\\x7F]+$");
+    }
+
+    private dev.inquiryassist.core.skill.DraftRequest draftRequest(
+            dev.inquiryassist.core.lifecycle.ReplyKind kind, String goal, String note, String judgment, String language) {
+        return new dev.inquiryassist.core.skill.DraftRequest(
+                kind,
+                goal == null ? null : inquiry(InquiryType.HOW_IT_WORKS, goal),
+                twoFindings(),
+                judgment,
+                List.of(),
+                note,
+                language);
+    }
+
+    @Test
+    void 下書きの聞き返しは決まった文章で_noteがあればそのまま入る() {
+        var kind = dev.inquiryassist.core.lifecycle.ReplyKind.ASK;
+
+        assertThat(drafter.draft(draftRequest(kind, "期限", null, null, "ja")).value().text())
+                .isEqualTo("確認させてください。起きている場面を、もう少し詳しく教えていただけますか。");
+        assertThat(drafter.draft(draftRequest(kind, "期限", "画面名を教えてください", null, "ja")).value().text())
+                .isEqualTo("確認させてください。画面名を教えてください");
+        assertThat(drafter.draft(draftRequest(kind, "期限", "Which screen?", null, "en")).value().text())
+                .isEqualTo("Let me check one thing. Which screen?");
+        assertThat(drafter.draft(draftRequest(kind, "期限", null, null, "en")).value().text())
+                .startsWith("Let me check one thing. ")
+                .matches("^[\\x00-\\x7F]+$");
+    }
+
+    @Test
+    void 下書きの結果はnote_判断の案_1件目の事実の順で入る() {
+        var kind = dev.inquiryassist.core.lifecycle.ReplyKind.RESULT;
+        String lead = "お待たせしました。確認した結果をお伝えします。";
+
+        assertThat(drafter.draft(draftRequest(kind, "期限", "仕様どおりです", "判断の案", "ja")).value().text())
+                .isEqualTo(lead + "仕様どおりです");
+        assertThat(drafter.draft(draftRequest(kind, "期限", null, "判断の案", "ja")).value().text())
+                .isEqualTo(lead + "判断の案");
+        assertThat(drafter.draft(draftRequest(kind, "期限", null, null, "ja")).value().text()).isEqualTo(lead + "事実1");
+        assertThat(drafter.draft(draftRequest(kind, "期限", "It works as documented.", null, "en")).value().text())
+                .isEqualTo("Thank you for waiting. Here is what we found. It works as documented.");
+        // 言い直しがなくても書ける
+        assertThat(drafter.draft(draftRequest(kind, null, null, null, "ja")).value().text()).isEqualTo(lead + "事実1");
+    }
+
+    @Test
+    void 下書きのエラータグはAI利用不可になる() {
+        assertThatThrownBy(() -> drafter.draft(draftRequest(
+                        dev.inquiryassist.core.lifecycle.ReplyKind.ASK, "[下書きエラー] 期限", null, null, "ja")))
+                .isInstanceOf(AiUnavailableException.class);
+    }
+
+    @Test
+    void 新しいタグは言い直しの文章から取り除かれる() {
+        var restated = restater.restate(
+                        "[相談] [手順] [根拠なしの案] [案エラー] [下書きエラー] 期限",
+                        InquiryType.HOW_IT_WORKS,
+                        null,
+                        null,
+                        List.of(),
+                        List.of(),
+                        "ja")
+                .value();
+
+        assertThat(restated.summary()).doesNotContain("[相談]", "[手順]", "[根拠なしの案]", "[案エラー]", "[下書きエラー]");
+    }
 }

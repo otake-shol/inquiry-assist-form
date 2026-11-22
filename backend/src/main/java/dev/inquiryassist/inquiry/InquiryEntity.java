@@ -275,6 +275,16 @@ class InquiryEntity {
     @Column(name = "investigation_unconfirmed_question", nullable = false)
     boolean investigationUnconfirmedQuestion;
 
+    /** AI の案（助言）の状況。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "advice_status", nullable = false)
+    AdviceStatus adviceStatus = AdviceStatus.NOT_RUN;
+
+    /** AI の案の中身。できた（{@code DONE}）ときだけ持つ。調査の結果が置き換わると消える。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "advice")
+    AdviceContent advice;
+
     /** 担当者に初めて渡した時刻。渡したことがなければ null。 */
     @Column(name = "handed_over_at")
     Instant handedOverAt;

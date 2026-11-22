@@ -185,17 +185,28 @@ abstract class ApiSupport {
         return sent;
     }
 
-    /** 調査が走っていない状態（{@code RUNNING} でない）になるまで待つ。 */
+    /**
+     * 調査と、担当者向けの AI の案の作成が、どちらも走っていない状態（{@code RUNNING} でない）になるまで待つ。
+     * 案の作成は、調査の結果の保存と同時に始まる印が付くので、調査が終わった直後に「どちらも走っていない」と誤って見えることはない。
+     */
     void awaitInvestigationIdle(String id) throws InterruptedException {
         boolean idle = waitFor(
-                () -> !"RUNNING".equals(row(id).get("investigation_status")), 15_000);
-        org.assertj.core.api.Assertions.assertThat(idle).as("調査が終わらない: " + id).isTrue();
+                () -> {
+                    Map<String, Object> row = row(id);
+                    return !"RUNNING".equals(row.get("investigation_status"))
+                            && !"RUNNING".equals(row.get("advice_status"));
+                },
+                15_000);
+        org.assertj.core.api.Assertions.assertThat(idle).as("調査か案の作成が終わらない: " + id).isTrue();
     }
 
+    /** 結果を確かめる。解決していないと答えると担当者に渡り、AI の案が裏で作られるので、終わるまで待つ。 */
     ResultActions resolve(String id, boolean resolved) throws Exception {
-        return mvc.perform(post("/api/inquiries/" + id + "/resolution")
+        ResultActions actions = mvc.perform(post("/api/inquiries/" + id + "/resolution")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"resolved\":" + resolved + "}"));
+        awaitInvestigationIdle(id);
+        return actions;
     }
 
     /** 文章で始めて入口を終え、言い直しを確定した、ANSWERING の問い合わせの id を返す。 */
@@ -212,8 +223,16 @@ abstract class ApiSupport {
         return id;
     }
 
-    /** 0次回答の SSE を最後まで読み、本文を返す。 */
+    /** 0次回答の SSE を最後まで読み、本文を返す。担当者に渡った場合は、裏の案の作成が終わるまで待つ。 */
     String stream(String id) throws Exception {
+        String body = streamOnly(id);
+        // 担当者に渡った場合は、続けて案の作成が裏で走る。続く操作と保存が重ならないよう、終わるまで待つ
+        awaitInvestigationIdle(id);
+        return body;
+    }
+
+    /** 0次回答の SSE を最後まで読み、本文を返す。裏の処理（調査、案の作成）は待たない。 */
+    String streamOnly(String id) throws Exception {
         MvcResult started = mvc.perform(get("/api/inquiries/" + id + "/answer-stream").accept(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(request().asyncStarted())
                 .andReturn();

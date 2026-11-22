@@ -413,6 +413,7 @@ export function makeDetail(
       finishedAt: null,
       unconfirmedQuestion: false,
     },
+    advice: { status: "NOT_RUN", judgment: null, procedure: null },
     noReply: null,
     filedAt: "2026-11-21T05:00:00Z",
     askerId: "local-user",

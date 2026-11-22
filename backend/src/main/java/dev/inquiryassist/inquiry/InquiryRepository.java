@@ -41,6 +41,13 @@ interface InquiryRepository extends JpaRepository<InquiryEntity, UUID> {
     int startInvestigation(
             @Param("id") UUID id, @Param("now") Instant now, @Param("unconfirmed") boolean unconfirmed);
 
+    /** 起動時に、作っている最中のまま残っている案を失敗にする。 */
+    @Transactional
+    @Modifying(clearAutomatically = true)
+    @Query("update InquiryEntity e set e.adviceStatus = dev.inquiryassist.inquiry.AdviceStatus.FAILED"
+            + " where e.adviceStatus = dev.inquiryassist.inquiry.AdviceStatus.RUNNING")
+    int failRunningAdvice();
+
     /** 起動時に、調べている最中のまま残っている調査を失敗にする。楽観ロックの対象外で、起動直後の1回だけ使う。 */
     @Transactional
     @Modifying(clearAutomatically = true)

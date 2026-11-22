@@ -1190,6 +1190,179 @@ describe("英語の引き継ぎと調査の状況", () => {
   });
 });
 
+describe("英語の AI の案と返信の下書き", () => {
+  const judgment = {
+    text: "The behavior matches the documentation.",
+    needsConsultation: true,
+    consultationReason: "The spec is not documented",
+    basedOn: ["A posting expires at its deadline."],
+  };
+  const procedure = {
+    steps: [
+      {
+        target: "Job edit screen",
+        action: "Change the deadline to tomorrow",
+        check: "The posting appears in the list",
+      },
+    ],
+    rollback: "Set the deadline back",
+    basedOn: ["Expired postings are hidden."],
+  };
+
+  async function openAdvice(
+    advice: object,
+    extra: Parameters<typeof installFakeFetch>[0] = {},
+  ) {
+    const user = userEvent.setup();
+    storedEnglish();
+    installFakeFetch({
+      ...bilingualConfig(),
+      "GET /api/operator/inquiries": {
+        body: {
+          unreadCount: 0,
+          items: [makeItem({ read: true, language: "en" })],
+        },
+      },
+      "GET /api/operator/inquiries/op-1": {
+        body: makeDetail({
+          read: true,
+          language: "en",
+          messages: [],
+          advice: advice as never,
+        }),
+      },
+      ...extra,
+    });
+    open("/operator");
+    await user.click(
+      await screen.findByRole("button", { name: /求人が一覧に出なくなった/ }),
+    );
+    const panel = await screen.findByRole("region", {
+      name: "Inquiry details",
+    });
+    await within(panel).findByText("Original text");
+    return { user, panel };
+  }
+
+  it("案の節の4通りが英語で出る", async () => {
+    const running = await openAdvice({
+      status: "RUNNING",
+      judgment: null,
+      procedure: null,
+    });
+    expect(
+      within(running.panel).getByRole("heading", { name: /AI's suggestion/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(running.panel).getByText(
+        "This is a suggestion AI drew from the facts above. The decision is yours.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(running.panel).getByText("AI is preparing a suggestion."),
+    ).toBeInTheDocument();
+    cleanup();
+    vi.unstubAllGlobals();
+
+    const failed = await openAdvice({
+      status: "FAILED",
+      judgment: null,
+      procedure: null,
+    });
+    expect(
+      within(failed.panel).getByText("AI could not prepare a suggestion."),
+    ).toBeInTheDocument();
+    cleanup();
+    vi.unstubAllGlobals();
+
+    const none = await openAdvice({
+      status: "NOT_RUN",
+      judgment: null,
+      procedure: null,
+    });
+    expect(
+      within(none.panel).queryByRole("heading", { name: /AI's suggestion/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("判断の案（相談が要りそう／要らなそう）と手順の案の項目が、英語で出る", async () => {
+    const { panel } = await openAdvice({ status: "DONE", judgment, procedure });
+
+    expect(
+      within(panel).getByRole("heading", { name: "Suggested decision" }),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByText(/Consulting the spec owner looks necessary:/),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByText("The spec is not documented"),
+    ).toBeInTheDocument();
+    expect(within(panel).getAllByText("Based on")).toHaveLength(2);
+    expect(
+      within(panel).getByRole("heading", { name: "Suggested steps" }),
+    ).toBeInTheDocument();
+    const advice = within(panel)
+      .getByRole("heading", { name: /AI's suggestion/ })
+      .closest("section")!;
+    for (const label of ["Target", "Action", "How to check"]) {
+      expect(within(advice).getByText(label)).toBeInTheDocument();
+    }
+    expect(within(panel).getByText("How to undo")).toBeInTheDocument();
+    expect(
+      within(panel).getByText("Staff carry this out."),
+    ).toBeInTheDocument();
+    cleanup();
+    vi.unstubAllGlobals();
+
+    const calm = await openAdvice({
+      status: "DONE",
+      judgment: {
+        ...judgment,
+        needsConsultation: false,
+        consultationReason: null,
+      },
+      procedure: null,
+    });
+    expect(
+      within(calm.panel).getByText("Consultation does not look necessary."),
+    ).toBeInTheDocument();
+  });
+
+  it("返信の下書きの欄が英語で出て、下書きが入ると英語の注意書きが出る", async () => {
+    const { user, panel } = await openAdvice(
+      { status: "NOT_RUN", judgment: null, procedure: null },
+      {
+        "POST /api/operator/inquiries/op-1/draft": {
+          body: { body: "Let me check one thing.", language: "en" },
+        },
+      },
+    );
+
+    expect(
+      within(panel).getByLabelText("What you want to say (optional)"),
+    ).toBeInTheDocument();
+    await user.click(
+      within(panel).getByRole("button", { name: "Draft a question" }),
+    );
+    await waitFor(() =>
+      expect(within(panel).getByLabelText("Send to the requester")).toHaveValue(
+        "Let me check one thing.",
+      ),
+    );
+    expect(
+      within(panel).getByText(
+        "This is an AI draft. Check and edit it before sending. It is written in the requester's language (English).",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByText("Available when the box is empty"),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByRole("button", { name: "Draft a result" }),
+    ).toBeDisabled();
+  });
+});
+
 describe("書かれた内容の言語（lang 属性）", () => {
   it("本人の文章、言い直し、説明、AI が書いた事実には問い合わせの language、根拠の引用には ja が付く。画面の言語とは別", async () => {
     storedEnglish();

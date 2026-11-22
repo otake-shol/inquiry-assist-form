@@ -270,6 +270,7 @@ class InvestigationRunner {
             inquiry.askerExplanation = null;
             inquiry.technicalMemo = AnswerPipeline.memoOf(e.investigation());
             inquiry.citations = storedCitations(e.investigation().citationResults());
+            discardAdvice(inquiry);
             e.usages().forEach(inquiry::addUsage);
             failureForAsker = (RuntimeException) e.getCause();
             resultStored = true;
@@ -309,7 +310,14 @@ class InvestigationRunner {
         return new InquiryCommitter.Update(null, InquiryCommitter.Publish.UPDATED_IF_HANDED_OVER);
     }
 
+    /** 調査の結果が置き換わったので、前の結果への案を消す（担当者の番なら、新しい結果への案が作り直される）。 */
+    private static void discardAdvice(InquiryEntity inquiry) {
+        inquiry.adviceStatus = AdviceStatus.NOT_RUN;
+        inquiry.advice = null;
+    }
+
     private static void store(InquiryEntity inquiry, AnswerPipeline.Result result) {
+        discardAdvice(inquiry);
         inquiry.answerGrounded = result.answer().grounded();
         inquiry.answerAnswered = result.answer().answered();
         inquiry.askerExplanation = result.answer().askerExplanation();

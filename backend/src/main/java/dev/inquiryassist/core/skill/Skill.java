@@ -11,7 +11,11 @@ public enum Skill {
     /** 一次情報を調べ、根拠つきの事実を集める。 */
     INVESTIGATOR("investigator"),
     /** 確かめられた事実だけから、本人向けの説明を書く。 */
-    EXPLAINER("explainer");
+    EXPLAINER("explainer"),
+    /** 確かめられた事実から、担当者向けの判断の案と手順の案を作る。 */
+    ADVISOR("advisor"),
+    /** 担当者が本人に送る文章（聞き返し、結果）の下書きを作る。 */
+    DRAFTER("drafter");
 
     private final String id;
 

@@ -23,6 +23,7 @@ import {
   makeMessage,
   makeTraceEntry,
   type RecordedCall,
+  type RouteResult,
 } from "../test/fakes.ts";
 
 beforeEach(() => {
@@ -1513,6 +1514,586 @@ describe("担当者のパネル: 調査の状況と調べ直す", () => {
   });
 });
 
+describe("担当者のパネル: AI の案", () => {
+  const judgment = {
+    text: "資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。",
+    needsConsultation: false,
+    consultationReason: null,
+    basedOn: ["求人は、掲載期限の時刻ちょうどから期限切れとして扱われる。"],
+  };
+  const procedure = {
+    steps: [
+      {
+        target: "求人管理画面の求人の編集",
+        action: "掲載期限を、翌日の日付に変える",
+        check: "応募者向けの一覧に、求人が表示されること",
+      },
+      {
+        target: "応募者向けの一覧",
+        action: "一覧を開き直す",
+        check: "求人が先頭に出ること",
+      },
+    ],
+    rollback: "掲載期限を、元の日付に戻す",
+    basedOn: ["期限切れの求人は、応募者向けの一覧に表示されない。"],
+  };
+
+  /** 指定の案で1件目のパネルを開く。 */
+  async function openAdvice(advice: object, languages?: string[]) {
+    const user = userEvent.setup();
+    const board = await renderBoard({
+      ...(languages === undefined
+        ? {}
+        : { "GET /api/config": { body: makeConfig({ languages }) } }),
+      "GET /api/operator/inquiries/op-1": {
+        body: makeDetail({ read: true, messages: [], advice: advice as never }),
+      },
+    });
+    const panel = await openPanel(user, board.card);
+    return { ...board, user, panel };
+  }
+  const heading = (panel: HTMLElement) =>
+    within(panel).queryByRole("heading", { name: /AI の案/ });
+
+  it("作っていない（NOT_RUN）件と、案が1つもない（DONE）件には、節を出さない", async () => {
+    const { panel } = await openAdvice({
+      status: "NOT_RUN",
+      judgment: null,
+      procedure: null,
+    });
+    expect(heading(panel)).not.toBeInTheDocument();
+    cleanup();
+    vi.unstubAllGlobals();
+
+    const done = await openAdvice({
+      status: "DONE",
+      judgment: null,
+      procedure: null,
+    });
+    expect(heading(done.panel)).not.toBeInTheDocument();
+  });
+
+  it("作っている最中は、見出しと「AI が案を作っています。」を出す", async () => {
+    const { panel } = await openAdvice({
+      status: "RUNNING",
+      judgment: null,
+      procedure: null,
+    });
+
+    expect(heading(panel)).toBeInTheDocument();
+    expect(
+      within(panel).getByText("AI が案を作っています。"),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByText(
+        "AI が、上の事実から考えた案です。決めるのは担当者です。",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("失敗したときは、「AI の案は作れませんでした。」だけを示す", async () => {
+    const { panel } = await openAdvice({
+      status: "FAILED",
+      judgment: null,
+      procedure: null,
+    });
+
+    expect(
+      within(panel).getByText("AI の案は作れませんでした。"),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).queryByRole("heading", { name: "判断の案" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("案があるときは、点線の枠と「案」の印をつけた節を、「調べた結果」のすぐ下（やり取りの前）に出す", async () => {
+    const { panel } = await openAdvice({
+      status: "DONE",
+      judgment,
+      procedure: null,
+    });
+
+    const section = within(panel)
+      .getByRole("heading", { name: /AI の案/ })
+      .closest("section")!;
+    expect(section).toHaveClass("op-advice");
+    expect(section.querySelector(".op-advice-mark")).toHaveTextContent("案");
+    const result = within(panel)
+      .getByRole("heading", { name: "調べた結果" })
+      .closest("section")!;
+    const exchange = within(panel)
+      .getByRole("heading", { name: "やり取り" })
+      .closest("section")!;
+    expect(result.nextElementSibling).toBe(section);
+    expect(section.nextElementSibling).toBe(exchange);
+  });
+
+  it("判断の案: 文章、相談は要らなそうである旨、基づく事実を出す", async () => {
+    const { panel } = await openAdvice({
+      status: "DONE",
+      judgment,
+      procedure: null,
+    });
+
+    expect(
+      within(panel).getByRole("heading", { name: "判断の案" }),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText(judgment.text)).toBeInTheDocument();
+    expect(
+      within(panel).getByText("相談は要らなそうです。"),
+    ).toBeInTheDocument();
+    const basis = within(panel).getByText("基づく事実");
+    expect(basis.nextElementSibling).toHaveTextContent(judgment.basedOn[0]);
+    expect(
+      within(panel).queryByRole("heading", { name: "手順の案" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("判断の案: 相談が要りそうなときは、その理由を添える", async () => {
+    const { panel } = await openAdvice({
+      status: "DONE",
+      judgment: {
+        ...judgment,
+        needsConsultation: true,
+        consultationReason: "仕様が資料に書かれていないため",
+      },
+      procedure: null,
+    });
+
+    expect(
+      within(panel).getByText(/仕様の持ち主への相談が要りそうです:/),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByText("仕様が資料に書かれていないため"),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).queryByText("相談は要らなそうです。"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("手順の案: 番号つきの手順ごとに対象・操作・確かめ方、元に戻す方法、基づく事実、「実行するのは担当者です。」", async () => {
+    const { panel } = await openAdvice({
+      status: "DONE",
+      judgment: null,
+      procedure,
+    });
+
+    expect(
+      within(panel).getByRole("heading", { name: "手順の案" }),
+    ).toBeInTheDocument();
+    const steps = within(panel)
+      .getAllByRole("listitem", {
+        name: "",
+      })
+      .filter(
+        (li) => li.parentElement?.tagName === "OL" && li.closest(".op-steps"),
+      );
+    expect(steps).toHaveLength(2);
+    expect(
+      within(steps[0]).getByText("対象").nextElementSibling,
+    ).toHaveTextContent("求人管理画面の求人の編集");
+    expect(
+      within(steps[0]).getByText("操作").nextElementSibling,
+    ).toHaveTextContent("掲載期限を、翌日の日付に変える");
+    expect(
+      within(steps[0]).getByText("確かめ方").nextElementSibling,
+    ).toHaveTextContent("応募者向けの一覧に、求人が表示されること");
+    expect(steps[1]).toHaveTextContent("一覧を開き直す");
+    // 番号つきの並び
+    expect(steps[0].closest("ol")).toBeInTheDocument();
+    const rollback = within(panel).getByText("元に戻す方法");
+    expect(rollback.nextElementSibling).toHaveTextContent(
+      "掲載期限を、元の日付に戻す",
+    );
+    expect(
+      within(panel).getByText("基づく事実").nextElementSibling,
+    ).toHaveTextContent("期限切れの求人は、応募者向けの一覧に表示されない。");
+    expect(
+      within(panel).getByText("実行するのは担当者です。"),
+    ).toBeInTheDocument();
+  });
+
+  it("元に戻す方法が無い（null）手順の案には、その見出しを出さない", async () => {
+    const { panel } = await openAdvice({
+      status: "DONE",
+      judgment: null,
+      procedure: { ...procedure, rollback: null },
+    });
+    expect(within(panel).queryByText("元に戻す方法")).not.toBeInTheDocument();
+  });
+
+  it("案の文章には、既定の言語（config.languages の先頭）の lang が付き、基づく事実には本人の言語が付く", async () => {
+    const { panel } = await openAdvice(
+      { status: "DONE", judgment, procedure },
+      ["en", "ja"],
+    );
+
+    expect(within(panel).getByText(judgment.text)).toHaveAttribute(
+      "lang",
+      "en",
+    );
+    expect(
+      within(panel).getByText("掲載期限を、翌日の日付に変える").closest("ol"),
+    ).toHaveAttribute("lang", "en");
+    expect(within(panel).getByText(judgment.basedOn[0])).toHaveAttribute(
+      "lang",
+      "ja",
+    );
+    expect(
+      within(panel).getByText("掲載期限を、元の日付に戻す"),
+    ).toHaveAttribute("lang", "en");
+  });
+});
+
+describe("担当者のパネル: 返信の下書き", () => {
+  const detailWithBox = () => makeDetail({ read: true, messages: [] });
+
+  /** 下書きの応答を登録して、1件目のパネルを開く。 */
+  async function openDraft(
+    draft: RouteResult | ((body: unknown) => RouteResult) = {
+      body: { body: "確認させてください。いつからですか。", language: "ja" },
+    },
+  ) {
+    const user = userEvent.setup();
+    const board = await renderBoard({
+      "GET /api/operator/inquiries/op-1": { body: detailWithBox() },
+      "POST /api/operator/inquiries/op-1/draft": draft,
+    });
+    const panel = await openPanel(user, board.card);
+    return { ...board, user, panel };
+  }
+  const draftCalls = (calls: RecordedCall[]) =>
+    callsTo(calls, "POST", "/api/operator/inquiries/op-1/draft");
+
+  it("入力欄のすぐ上に、「伝えたいこと（任意）」の1行の入力欄と、2つの小さなボタンを置く", async () => {
+    const { panel } = await openDraft();
+
+    const note = within(panel).getByLabelText("伝えたいこと（任意）");
+    expect(note.tagName).toBe("INPUT");
+    const ask = within(panel).getByRole("button", {
+      name: "聞き返しを下書きさせる",
+    });
+    const result = within(panel).getByRole("button", {
+      name: "結果を下書きさせる",
+    });
+    const box = within(panel).getByLabelText("本人に送る");
+    const follows = (a: Node, b: Node) =>
+      Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(note, ask)).toBe(true);
+    expect(follows(ask, box)).toBe(true);
+    expect(follows(result, box)).toBe(true);
+    expect(ask).toHaveClass("small");
+    expect(ask).toBeEnabled();
+    expect(result).toBeEnabled();
+    // 入力欄が空のときは、説明を出さない
+    expect(
+      within(panel).queryByText("入力欄が空のときに使えます"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("入力欄に書きかけの文章があるときは押せず、説明を添える。空に戻すと押せる", async () => {
+    const { user, panel } = await openDraft();
+
+    const box = within(panel).getByLabelText("本人に送る");
+    await user.type(box, "確認します");
+    expect(
+      within(panel).getByRole("button", { name: "聞き返しを下書きさせる" }),
+    ).toBeDisabled();
+    expect(
+      within(panel).getByRole("button", { name: "結果を下書きさせる" }),
+    ).toBeDisabled();
+    expect(
+      within(panel).getByText("入力欄が空のときに使えます"),
+    ).toBeInTheDocument();
+
+    await user.clear(box);
+    expect(
+      within(panel).getByRole("button", { name: "聞き返しを下書きさせる" }),
+    ).toBeEnabled();
+    expect(
+      within(panel).queryByText("入力欄が空のときに使えます"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("押すと POST …/draft を呼び（note が空なら kind だけ）、下書きが入力欄に入る。注意書きに本人の言語の名前が出る。何も送らない", async () => {
+    const { calls, user, panel } = await openDraft({
+      body: { body: "Let me check one thing. Since when?", language: "en" },
+    });
+
+    await user.click(
+      within(panel).getByRole("button", { name: "聞き返しを下書きさせる" }),
+    );
+
+    const box = within(panel).getByLabelText("本人に送る");
+    await waitFor(() =>
+      expect(box).toHaveValue("Let me check one thing. Since when?"),
+    );
+    expect(draftCalls(calls)).toHaveLength(1);
+    expect(draftCalls(calls)[0].body).toEqual({ kind: "ASK" });
+    expect(
+      within(panel).getByText(
+        "AI の下書きです。確かめて、直してから送ってください。本人の言語（English）で書かれています。",
+      ),
+    ).toBeInTheDocument();
+    // 何も送らず、状態も変えない（送るボタンは担当者が選んで押す）
+    expect(
+      callsTo(calls, "POST", "/api/operator/inquiries/op-1/replies"),
+    ).toHaveLength(0);
+    expect(
+      cardIn("担当者の番", /求人が一覧に出なくなった/),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByRole("button", { name: "聞き返す" }),
+    ).toBeEnabled();
+    expect(
+      within(panel).getByRole("button", { name: "結果を伝える" }),
+    ).toBeEnabled();
+    // 下書きが入ったので、もう下書きは押せない
+    expect(
+      within(panel).getByRole("button", { name: "結果を下書きさせる" }),
+    ).toBeDisabled();
+  });
+
+  it("「伝えたいこと」を note として送る（結果の下書き）", async () => {
+    const { calls, user, panel } = await openDraft();
+
+    await user.type(
+      within(panel).getByLabelText("伝えたいこと（任意）"),
+      "  再起動で直ります  ",
+    );
+    await user.click(
+      within(panel).getByRole("button", { name: "結果を下書きさせる" }),
+    );
+
+    await waitFor(() => expect(draftCalls(calls)).toHaveLength(1));
+    expect(draftCalls(calls)[0].body).toEqual({
+      kind: "RESULT",
+      note: "再起動で直ります",
+    });
+  });
+
+  it("入力欄を空にすると、注意書きは消える。送ると消え、「伝えたいこと」の欄はそのまま", async () => {
+    const { user, panel } = await openDraft();
+    const notice =
+      "AI の下書きです。確かめて、直してから送ってください。本人の言語（日本語）で書かれています。";
+
+    await user.type(
+      within(panel).getByLabelText("伝えたいこと（任意）"),
+      "メモ",
+    );
+    await user.click(
+      within(panel).getByRole("button", { name: "聞き返しを下書きさせる" }),
+    );
+    const box = within(panel).getByLabelText("本人に送る");
+    await waitFor(() =>
+      expect(within(panel).getByText(notice)).toBeInTheDocument(),
+    );
+
+    await user.clear(box);
+    expect(within(panel).queryByText(notice)).not.toBeInTheDocument();
+    expect(within(panel).getByLabelText("伝えたいこと（任意）")).toHaveValue(
+      "メモ",
+    );
+
+    // もう一度下書きさせ、直して送ると消える
+    await user.click(
+      within(panel).getByRole("button", { name: "聞き返しを下書きさせる" }),
+    );
+    await waitFor(() =>
+      expect(within(panel).getByText(notice)).toBeInTheDocument(),
+    );
+  });
+
+  it("下書きを直して送ると、注意書きは消え、入力欄は空になる", async () => {
+    const user = userEvent.setup();
+    const board = await renderBoard({
+      "GET /api/operator/inquiries/op-1": { body: detailWithBox() },
+      "POST /api/operator/inquiries/op-1/draft": {
+        body: { body: "確認させてください。", language: "ja" },
+      },
+      "POST /api/operator/inquiries/op-1/replies": {
+        body: makeDetail({
+          read: true,
+          ...ASKER_REPLY_STATE,
+          messages: [makeMessage({ id: "m1", body: "確認させてください。" })],
+        }),
+      },
+    });
+    const panel = await openPanel(user, board.card);
+    await user.click(
+      within(panel).getByRole("button", { name: "聞き返しを下書きさせる" }),
+    );
+    await waitFor(() =>
+      expect(within(panel).getByLabelText("本人に送る")).toHaveValue(
+        "確認させてください。",
+      ),
+    );
+
+    // 下書きの種類にかかわらず、送る種類は担当者が選んで押す
+    await user.click(
+      within(panel).getByRole("button", { name: "結果を伝える" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        callsTo(board.calls, "POST", "/api/operator/inquiries/op-1/replies")[0]
+          .body,
+      ).toEqual({ kind: "RESULT", body: "確認させてください。" }),
+    );
+    expect(
+      within(panel).queryByText(/AI の下書きです/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("押している間は二重に押せない", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { calls, user, panel } = await openDraft();
+    const fake = vi.mocked(fetch);
+    const base = fake.getMockImplementation()!;
+    fake.mockImplementation(async (input, init) => {
+      if (String(input).endsWith("/draft") && init?.method === "POST") {
+        calls.push({
+          method: "POST",
+          path: String(input),
+          body: undefined,
+          headers: {},
+        });
+        await gate;
+        return new Response(
+          JSON.stringify({ body: "下書きです。", language: "ja" }),
+          { status: 200 },
+        );
+      }
+      return base(input, init);
+    });
+
+    const ask = within(panel).getByRole("button", {
+      name: "聞き返しを下書きさせる",
+    });
+    await user.click(ask);
+    expect(ask).toBeDisabled();
+    expect(
+      within(panel).getByRole("button", { name: "結果を下書きさせる" }),
+    ).toBeDisabled();
+    await user.click(ask);
+    release();
+
+    await waitFor(() =>
+      expect(within(panel).getByLabelText("本人に送る")).toHaveValue(
+        "下書きです。",
+      ),
+    );
+    expect(draftCalls(calls)).toHaveLength(1);
+  });
+
+  it("失敗は既存のエラーの出し方で出し、入力欄は空のまま、また押せる", async () => {
+    const { user, panel } = await openDraft({
+      status: 503,
+      body: { code: "AI_UNAVAILABLE", message: "x" },
+    });
+
+    await user.click(
+      within(panel).getByRole("button", { name: "結果を下書きさせる" }),
+    );
+
+    expect(await within(panel).findByRole("alert")).toHaveTextContent(
+      "うまく処理できませんでした",
+    );
+    expect(within(panel).getByLabelText("本人に送る")).toHaveValue("");
+    expect(
+      within(panel).getByRole("button", { name: "結果を下書きさせる" }),
+    ).toBeEnabled();
+    expect(
+      within(panel).queryByText(/AI の下書きです/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("担当者の番でない件には、下書きの欄を出さない", async () => {
+    const user = userEvent.setup();
+    await renderBoard({
+      "GET /api/operator/inquiries/op-2": {
+        body: makeDetail({
+          id: "op-2",
+          read: true,
+          ...ASKER_REPLY_STATE,
+          messages: [],
+        }),
+      },
+    });
+    await user.click(screen.getByRole("button", { name: /返事待ちの件/ }));
+    const panel = await screen.findByRole("region", {
+      name: "問い合わせの詳細",
+    });
+    await within(panel).findByText("本人の返事を待っています。");
+    expect(
+      within(panel).queryByRole("button", { name: /下書きさせる/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("updated で詳細を取り直しても、「伝えたいこと」の入力と、下書きの注意書きは消えない", async () => {
+    const stream = new FakeOperatorStream();
+    const user = userEvent.setup();
+    let gets = 0;
+    const { calls, card } = await renderBoard(
+      {
+        "GET /api/operator/inquiries/op-1": () => ({
+          body: makeDetail({
+            read: true,
+            messages: [],
+            advice: (++gets === 1
+              ? { status: "RUNNING", judgment: null, procedure: null }
+              : {
+                  status: "FAILED",
+                  judgment: null,
+                  procedure: null,
+                }) as never,
+          }),
+        }),
+        "POST /api/operator/inquiries/op-1/draft": {
+          body: { body: "確認させてください。", language: "ja" },
+        },
+      },
+      stream,
+    );
+    const panel = await openPanel(user, card);
+    await user.type(
+      within(panel).getByLabelText("伝えたいこと（任意）"),
+      "メモです",
+    );
+    await user.click(
+      within(panel).getByRole("button", { name: "聞き返しを下書きさせる" }),
+    );
+    await waitFor(() =>
+      expect(within(panel).getByLabelText("本人に送る")).toHaveValue(
+        "確認させてください。",
+      ),
+    );
+
+    act(() => stream.latest.handlers.onUpdated({ ...mine1 }));
+
+    // 取り直した内容（案の状況）が出る
+    expect(
+      await within(panel).findByText("AI の案は作れませんでした。"),
+    ).toBeInTheDocument();
+    expect(callsTo(calls, "GET", "/api/operator/inquiries/op-1")).toHaveLength(
+      2,
+    );
+    // 入力は消えない
+    expect(within(panel).getByLabelText("伝えたいこと（任意）")).toHaveValue(
+      "メモです",
+    );
+    expect(within(panel).getByLabelText("本人に送る")).toHaveValue(
+      "確認させてください。",
+    );
+    expect(
+      within(panel).getByText(
+        "AI の下書きです。確かめて、直してから送ってください。本人の言語（日本語）で書かれています。",
+      ),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("担当者の画面: ストリーム", () => {
   it("filed で「担当者の番」の列の先頭にカードが足され、通知が出る", async () => {
     const { stream } = await renderBoard();
@@ -1736,11 +2317,66 @@ describe("担当者の画面: 実行記録と開発用のリンク", () => {
     }
     await user.click(summary);
     const stages = within(details).getAllByRole("listitem");
-    expect(stages).toHaveLength(6);
+    expect(stages).toHaveLength(9);
     expect(stages[0]).toHaveTextContent("受付");
     expect(stages[3]).toHaveTextContent("失敗 1回");
     expect(stages[4]).toHaveTextContent("照合（コード）");
     expect(stages[4]).toHaveClass("idle");
+  });
+
+  it("実行記録の段は、説明の後に 助言 → 案の確認（コード） → 下書き を並べる（担当者の詳細）", async () => {
+    const user = userEvent.setup();
+    installFakeFetch(
+      routes({
+        "GET /api/config": { body: makeConfig({ trace: true }) },
+        "GET /api/operator/inquiries/op-1": {
+          body: makeDetail({
+            read: true,
+            messages: [],
+            trace: [
+              makeTraceEntry({ skill: "explainer" }),
+              makeTraceEntry({
+                skill: "advisor",
+                provider: "mock",
+                model: null,
+              }),
+              makeTraceEntry({
+                skill: "drafter",
+                provider: "mock",
+                model: null,
+                failed: true,
+              }),
+            ],
+          }),
+        },
+      }),
+    );
+    render(<Root subscribeOperator={new FakeOperatorStream().subscribe} />);
+    await user.click(
+      await screen.findByRole("button", { name: /求人が一覧に出なくなった/ }),
+    );
+    const summary = await screen.findByText("裏側を見る（開発者向け）");
+    await user.click(summary);
+
+    const stages = within(summary.closest("details")!).getAllByRole("listitem");
+    expect(stages.map((s) => s.querySelector("strong")?.textContent)).toEqual([
+      "受付",
+      "聞き手",
+      "言い直し",
+      "調査",
+      "照合（コード）",
+      "説明",
+      "助言",
+      "案の確認（コード）",
+      "下書き",
+    ]);
+    expect(stages[6]).toHaveTextContent("AI のスキル");
+    expect(stages[6]).toHaveTextContent("モック");
+    // 案の確認（コード）は記録に現れないので、助言が成功していれば動いたものとして示す
+    expect(stages[7]).toHaveTextContent("通常のコード");
+    expect(stages[7]).not.toHaveClass("idle");
+    expect(stages[7]).toHaveTextContent("案が基づく事実を確かめる");
+    expect(stages[8]).toHaveTextContent("失敗 1回");
   });
 
   it("mock が true の担当者の画面には、最下部に「開発用: 本人の画面へ」を出す", async () => {

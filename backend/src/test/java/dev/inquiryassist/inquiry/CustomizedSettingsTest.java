@@ -28,10 +28,11 @@ class CustomizedSettingsTest extends ApiSupport {
         mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.trace").value(nullValue()));
         mvc.perform(get("/api/operator/inquiries/" + id)).andExpect(jsonPath("$.trace").value(nullValue()));
         mvc.perform(get("/api/config")).andExpect(jsonPath("$.trace").value(false));
-        // 記録そのものは続ける（画面に見せないだけ）
+        // 記録そのものは続ける（画面に見せないだけ）。担当者に渡した後に、担当者向けの案（助言）も記録される
+        awaitInvestigationIdle(id);
         assertThat(jdbc.queryForObject(
                         "select jsonb_array_length(usages) from inquiries where id = ?::uuid", Integer.class, id))
-                .isEqualTo(5);
+                .isEqualTo(6);
     }
 
     @Test

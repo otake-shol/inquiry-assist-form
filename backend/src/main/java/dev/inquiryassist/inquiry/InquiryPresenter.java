@@ -109,7 +109,7 @@ class InquiryPresenter {
                 e.askerUnreadReply,
                 noReplyOf(e),
                 MessageBodies.viewsOf(e),
-                TraceViews.of(e, properties, implementations),
+                TraceViews.of(e, properties, implementations, false),
                 e.mock);
     }
 
@@ -308,6 +308,20 @@ class InquiryPresenter {
                 e.investigationStartedAt,
                 e.investigationFinishedAt,
                 e.investigationUnconfirmedQuestion);
+    }
+
+    /**
+     * AI の案を作る（担当者向け）。中身は、できた（{@code DONE}）ときだけ。
+     *
+     * @param e 問い合わせ記録
+     * @return AI の案
+     */
+    OperatorDetail.AdviceView adviceOf(InquiryEntity e) {
+        AdviceContent content = e.adviceStatus == AdviceStatus.DONE ? e.advice : null;
+        return new OperatorDetail.AdviceView(
+                e.adviceStatus,
+                content == null ? null : content.judgment(),
+                content == null ? null : content.procedure());
     }
 
     /**

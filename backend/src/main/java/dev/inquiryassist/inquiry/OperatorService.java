@@ -1,16 +1,26 @@
 package dev.inquiryassist.inquiry;
 
+import dev.inquiryassist.core.AiRefusalException;
+import dev.inquiryassist.core.AiResult;
+import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.Urgency;
+import dev.inquiryassist.core.Usage;
 import dev.inquiryassist.core.intake.IntakeCatalog;
 import dev.inquiryassist.core.intake.QuestionKind;
+import dev.inquiryassist.core.lifecycle.Awaiting;
 import dev.inquiryassist.core.lifecycle.Declined;
 import dev.inquiryassist.core.lifecycle.DeclineReason;
 import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
 import dev.inquiryassist.core.lifecycle.Phase;
 import dev.inquiryassist.core.lifecycle.ReplyKind;
 import dev.inquiryassist.core.lifecycle.Transition;
+import dev.inquiryassist.core.skill.Draft;
+import dev.inquiryassist.core.skill.DraftRequest;
+import dev.inquiryassist.core.skill.DrafterSkill;
+import dev.inquiryassist.core.skill.Skill;
+import dev.inquiryassist.core.skill.SkillUsage;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +40,7 @@ public class OperatorService {
 
     private static final Logger log = LoggerFactory.getLogger(OperatorService.class);
     private static final int MAX_REASON_LENGTH = 2000;
+    private static final int MAX_NOTE_LENGTH = 2000;
 
     private final InquiryRepository repository;
     private final InquiryProperties properties;
@@ -38,6 +49,8 @@ public class OperatorService {
     private final IntakeLocales locales;
     private final ApplicationEventPublisher events;
     private final InvestigationRunner runner;
+    private final DrafterSkill drafter;
+    private final InquiryCommitter committer;
 
     /**
      * @param repository 問い合わせ記録の保存先
@@ -47,6 +60,8 @@ public class OperatorService {
      * @param locales 置き直しの入力を確かめる、システムと機能の一覧（言語ごと）
      * @param events 更新の確定後にイベントを発行する
      * @param runner 調べ直しの実行
+     * @param drafter 返信の下書き
+     * @param committer 下書きの利用量の保存
      */
     OperatorService(
             InquiryRepository repository,
@@ -55,7 +70,9 @@ public class OperatorService {
             InquiryPresenter presenter,
             IntakeLocales locales,
             ApplicationEventPublisher events,
-            InvestigationRunner runner) {
+            InvestigationRunner runner,
+            DrafterSkill drafter,
+            InquiryCommitter committer) {
         this.repository = repository;
         this.properties = properties;
         this.implementations = implementations;
@@ -63,6 +80,8 @@ public class OperatorService {
         this.locales = locales;
         this.events = events;
         this.runner = runner;
+        this.drafter = drafter;
+        this.committer = committer;
     }
 
     /**
@@ -229,6 +248,85 @@ public class OperatorService {
         return toDetail(loadHandedOver(id), lang);
     }
 
+    /**
+     * 担当者が本人に送る文章の下書きを作る。状態は変えず、メッセージも足さない。担当者が確かめ、直してから、別の操作で送る。
+     * 利用量だけを記録する（記録の保存が、ほかの操作と競合しても、下書きは返す）。
+     *
+     * @param id 問い合わせの識別子
+     * @param kind 何を書くか（{@code ASK} 聞き返し、{@code RESULT} 結果）
+     * @param note 担当者が伝えたいこと（任意）。前後の空白を除いて1〜2000文字
+     * @return 下書きと、書いた言語（本人の言語）
+     * @throws IllegalArgumentException note が空白だけ、または長すぎる場合
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
+     * @throws dev.inquiryassist.core.lifecycle.IllegalTransitionException 担当者の番でない場合
+     * @throws dev.inquiryassist.core.AiRefusalException モデルが回答を拒否した場合
+     * @throws dev.inquiryassist.core.AiUnavailableException モデルを呼び出せなかった場合
+     */
+    public DraftResult draft(UUID id, ReplyKind kind, String note) {
+        String trimmed = null;
+        if (note != null) {
+            trimmed = note.strip();
+            if (trimmed.isEmpty() || trimmed.length() > MAX_NOTE_LENGTH) {
+                throw new IllegalArgumentException("note は前後の空白を除いて1〜" + MAX_NOTE_LENGTH + "文字");
+            }
+        }
+        InquiryEntity inquiry = loadHandedOver(id);
+        InquiryStateMachine.require(inquiry.state(), Awaiting.HANDLING);
+        List<DraftRequest.Message> messages = inquiry.messages.stream()
+                .map(m -> new DraftRequest.Message(
+                        m.from() == MessageAuthor.OPERATOR ? DraftRequest.Author.OPERATOR : DraftRequest.Author.ASKER,
+                        m.body()))
+                .toList();
+        String judgment = inquiry.adviceStatus == AdviceStatus.DONE && inquiry.advice != null && inquiry.advice.judgment() != null
+                ? inquiry.advice.judgment().text()
+                : null;
+        DraftRequest request = new DraftRequest(
+                kind,
+                inquiry.structured(),
+                AdviceRunner.confirmedFindings(inquiry),
+                judgment,
+                messages,
+                trimmed,
+                inquiry.language);
+        long start = System.nanoTime();
+        AiResult<Draft> result;
+        try {
+            result = drafter.draft(request);
+        } catch (AiRefusalException | AiUnavailableException e) {
+            Usage usage = e instanceof AiUnavailableException u ? u.usage() : ((AiRefusalException) e).usage();
+            recordUsage(
+                    id,
+                    new SkillUsage(
+                            Skill.DRAFTER,
+                            usage != null ? usage : new Usage("unknown", "unknown", 0, 0, 0, implementations.isMock(Skill.DRAFTER)),
+                            true,
+                            (System.nanoTime() - start) / 1_000_000L));
+            throw e;
+        }
+        recordUsage(
+                id,
+                new SkillUsage(Skill.DRAFTER, result.usage(), false, (System.nanoTime() - start) / 1_000_000L));
+        return new DraftResult(result.value().text(), inquiry.language);
+    }
+
+    /** 下書きの利用量を記録する。ほかの操作と競合したら、やり直す。やり直しても競合する場合は、記録を諦める（下書きは返す）。 */
+    private void recordUsage(UUID id, SkillUsage usage) {
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                committer.update(id, inquiry -> {
+                    inquiry.addUsage(usage);
+                    return new InquiryCommitter.Update(null, InquiryCommitter.Publish.NONE);
+                });
+                return;
+            } catch (OptimisticLockingFailureException e) {
+                log.info("下書きの利用量の保存が競合しました attempt={} id={}", attempt, id);
+            } catch (RuntimeException e) {
+                log.warn("下書きの利用量を保存できませんでした id={} cause={}", id, e.getClass().getSimpleName());
+                return;
+            }
+        }
+    }
+
     /** 置き場所を、既定の言語の名前にする。決まっていない項目は null。 */
     private java.util.Map<String, String> namesOf(Placement placement) {
         java.util.Map<String, String> names = new java.util.LinkedHashMap<>();
@@ -344,10 +442,11 @@ public class OperatorService {
                 e.declined,
                 e.handoverReason,
                 presenter.investigationOf(e),
+                presenter.adviceOf(e),
                 presenter.noReplyOf(e),
                 MessageBodies.viewsOf(e),
                 List.copyOf(e.history),
-                TraceViews.of(e, properties, implementations));
+                TraceViews.of(e, properties, implementations, true));
     }
 
     /**

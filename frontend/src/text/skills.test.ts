@@ -42,4 +42,31 @@ describe("skillMixOf", () => {
       "Reception, Interviewer, Restater, Explainer run on the local model, Investigator run as mocks",
     );
   });
+
+  it("スキルが7つ（助言、下書きを含む）になっても、内訳を日英で組み立てられる", () => {
+    const seven = {
+      reception: "mock",
+      interviewer: "mock",
+      restater: "mock",
+      investigator: "mock",
+      explainer: "mock",
+      advisor: "mock",
+      drafter: "mock",
+    };
+    expect(skillMixOf(seven, ja.skills.labels).partial).toBe(false);
+    const mix = skillMixOf(
+      { ...seven, advisor: "ollama", drafter: "ollama" },
+      ja.skills.labels,
+    );
+    expect(mix.real).toEqual(["助言", "下書き"]);
+    expect(mix.mock).toHaveLength(5);
+    expect(skillMixText(mix, ja.skills)).toBe(
+      "助言・下書きは手元のモデル、受付・聞き手・言い直し・調査・説明はモックで動いています",
+    );
+    const english = skillMixOf(
+      { ...seven, advisor: "ollama" },
+      en.skills.labels,
+    );
+    expect(english.real).toEqual(["Advisor"]);
+  });
 });

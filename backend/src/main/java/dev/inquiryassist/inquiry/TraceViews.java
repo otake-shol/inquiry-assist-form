@@ -14,13 +14,17 @@ final class TraceViews {
      * @param entity 問い合わせ記録
      * @param properties 実行記録の有効・無効の設定
      * @param implementations スキルごとの実装
+     * @param forOperator 担当者向けなら true。本人向け（false）は、助言と下書きの呼び出しを含めない
      * @return 呼び出しを実行した順の記録。無効なら null
      */
-    static List<TraceEntry> of(InquiryEntity entity, InquiryProperties properties, SkillImplementations implementations) {
+    static List<TraceEntry> of(
+            InquiryEntity entity, InquiryProperties properties, SkillImplementations implementations, boolean forOperator) {
         if (!properties.trace().enabled()) {
             return null;
         }
         return entity.usages.stream()
+                // 助言と下書きは、担当者だけに見せる（担当者だけに見せる案があることを、本人のページに出さない）
+                .filter(u -> forOperator || !isOperatorSkill(u.step()))
                 .map(u -> new TraceEntry(
                         u.step(),
                         providerOf(u, implementations),
@@ -31,6 +35,10 @@ final class TraceViews {
                         u.durationMillis(),
                         u.failed()))
                 .toList();
+    }
+
+    private static boolean isOperatorSkill(String step) {
+        return Skill.ADVISOR.id().equals(step) || Skill.DRAFTER.id().equals(step);
     }
 
     /** その呼び出しがモックなら mock、そうでなければ設定上の実装名。 */

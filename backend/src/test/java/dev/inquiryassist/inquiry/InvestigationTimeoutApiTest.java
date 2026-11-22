@@ -40,7 +40,7 @@ class InvestigationTimeoutApiTest extends ApiSupport {
     void 時間切れになると担当者に渡して閉じ_調査は続き_結果は担当者だけに届く() throws Exception {
         String id = toAnswering("[遅延] 使い方を教えて", null);
 
-        String done = doneOf(stream(id));
+        String done = doneOf(streamOnly(id));
 
         // 時間切れ: 担当者に渡して done。答えはまだない
         assertThat((String) JsonPath.read(done, "$.phase")).isEqualTo("KNOW");
@@ -90,7 +90,7 @@ class InvestigationTimeoutApiTest extends ApiSupport {
         awaitInvestigationIdle(id);
 
         // 開き直しは調査を待つ状態でないので、失敗（INVALID_STATE）で閉じる。調査が2重に走らない
-        assertThat(usageSteps(id)).endsWith("restater", "investigator", "explainer");
+        assertThat(usageSteps(id)).endsWith("restater", "investigator", "explainer", "advisor");
         assertThat(body).doesNotContain("event:done");
     }
 

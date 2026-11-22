@@ -1947,7 +1947,7 @@ describe("エラーの導線", () => {
 });
 
 describe("モック表示", () => {
-  it("モック時はバッジと例文ボタンが出る。状況の例は5つの種類、動きの例は12個のタグ", async () => {
+  it("モック時はバッジと例文ボタンが出る。状況の例は5つの種類、動きの例は17個のタグ", async () => {
     const user = userEvent.setup();
     installFakeFetch({
       "GET /api/config": { body: makeConfig({ mock: true }) },
@@ -1974,11 +1974,11 @@ describe("モック表示", () => {
       "変えてほしい",
     ]);
     const actions = within(bar).getByRole("group", { name: "動きの例" });
-    expect(within(actions).getAllByRole("button")).toHaveLength(12);
+    expect(within(actions).getAllByRole("button")).toHaveLength(17);
     expect(
       within(actions).getByRole("button", { name: "[言い直しエラー]" }),
     ).toBeInTheDocument();
-    expect(within(bar).getAllByRole("button")).toHaveLength(17);
+    expect(within(bar).getAllByRole("button")).toHaveLength(22);
     expect(
       within(bar).getByText(/「文章で書く」の入力欄に入ります/),
     ).toBeInTheDocument();
@@ -2083,6 +2083,34 @@ describe("モック表示", () => {
       expect(
         screen.queryByText(/求人の掲載期限についての調査結果が返ります/),
       ).not.toBeInTheDocument();
+    });
+
+    it("(d) スキルが7つ（助言、下書きを含む）でも、内訳と注記が崩れず出る", async () => {
+      installFakeFetch({
+        "GET /api/config": {
+          body: makeConfig({
+            mock: true,
+            skills: {
+              ...ollamaExceptInvestigator,
+              advisor: "mock",
+              drafter: "mock",
+            },
+          }),
+        },
+      });
+      render(<App subscribe={new FakeStream().subscribe} />);
+
+      expect(await screen.findByText("一部モック")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "受付・聞き手・言い直し・説明は手元のモデル、調査・助言・下書きはモックで動いています",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "何を尋ねても、求人の掲載期限についての調査結果が返ります",
+        ),
+      ).toBeInTheDocument();
     });
 
     it("(c) mock が false なら案内枠を出さない", async () => {

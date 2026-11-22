@@ -63,6 +63,52 @@ export type HandoverReason =
 /** AI の調査の状況。 */
 export type InvestigationStatus = "NOT_RUN" | "RUNNING" | "DONE" | "FAILED";
 
+/** AI の案の状況。 */
+export type AdviceStatus = "NOT_RUN" | "RUNNING" | "DONE" | "FAILED";
+
+/** 判断の案。`basedOn` は、案が基づく事実の文（`answer.memo.findings` と同じもの）。 */
+export interface AdviceJudgment {
+  text: string;
+  /** 仕様の持ち主への相談が要りそうか */
+  needsConsultation: boolean;
+  consultationReason: string | null;
+  basedOn: string[];
+}
+
+/** 作業の手順の案の、1つの手順。 */
+export interface AdviceStep {
+  /** 対象 */
+  target: string;
+  /** 操作やコマンド */
+  action: string;
+  /** 結果の確かめ方 */
+  check: string;
+}
+
+/** 作業の手順の案。実行するのは担当者。 */
+export interface AdviceProcedure {
+  /** 行う順 */
+  steps: AdviceStep[];
+  /** 元に戻す方法 */
+  rollback: string | null;
+  basedOn: string[];
+}
+
+/** 担当者向けの、AI の案（`GET /api/operator/inquiries/{id}` の `advice`）。 */
+export interface Advice {
+  status: AdviceStatus;
+  judgment: AdviceJudgment | null;
+  procedure: AdviceProcedure | null;
+}
+
+/** 返信の下書き（`POST /api/operator/inquiries/{id}/draft` の応答）。 */
+export interface DraftResult {
+  /** 下書きの文章 */
+  body: string;
+  /** 下書きを書いた言語（本人の言語） */
+  language: string;
+}
+
 /** 担当者向けの、調査の状況（`GET /api/operator/inquiries/{id}` の `investigation`）。 */
 export interface Investigation {
   status: InvestigationStatus;
@@ -417,6 +463,8 @@ export interface OperatorDetail extends StateFields {
   handoverReason: HandoverReason | null;
   /** AI の調査の状況 */
   investigation: Investigation;
+  /** AI の案（判断の案、手順の案） */
+  advice: Advice;
   /** 返事がないときの予定（本人の返事を待っている間だけ非 null） */
   noReply: NoReply | null;
   filedAt: string;

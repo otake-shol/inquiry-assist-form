@@ -865,6 +865,69 @@ test("調査が時間切れになると担当者に引き継ぎ、裏で調べ�
   expect(pageErrors).toEqual([]);
 });
 
+/**
+ * 担当者に渡った件には、AI が、確かめられた事実から判断の案を添える（事実と区別して示す）。
+ * 担当者は、返信の下書きを AI に作らせ、確かめてから自分で送る。AI が直接送ることはない。
+ */
+test("担当者のパネルに AI の案が出て、下書きを確かめてから結果を伝えられる", async ({
+  page,
+}) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+  const mark = `案と下書き ${Date.now()}`;
+
+  await fileByText(page, `${mark} 請求書の宛名を知りたい`);
+  const askerUrl = page.url();
+  // 案は担当者だけに見せる
+  await expect(page.getByText("AI の案")).toHaveCount(0);
+
+  await page.goto("/operator");
+  const board = page.getByRole("region", { name: "受付一覧" });
+  const cardIn = (name: RegExp) =>
+    board
+      .getByRole("region", { name })
+      .getByRole("listitem")
+      .filter({ hasText: mark });
+  await cardIn(/^担当者の番/)
+    .getByRole("button")
+    .click();
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+
+  // 案は裏で作られ、開いたままのパネルに出る。基づく事実が並ぶ
+  await expect(detail.getByText("判断の案")).toBeVisible({ timeout: 30_000 });
+  await expect(detail.getByText(/決めるのは担当者です/)).toBeVisible();
+  await expect(detail.getByText("基づく事実").first()).toBeVisible();
+  await expect(detail.getByText("相談は要らなそうです。")).toBeVisible();
+
+  // 下書きは入力欄に入るだけで、送られない
+  const box = detail.getByLabel("本人に送る");
+  await detail.getByRole("button", { name: "結果を下書きさせる" }).click();
+  await expect(box).toHaveValue(
+    /お待たせしました。確認した結果をお伝えします。/,
+  );
+  await expect(
+    detail.getByText(/AI の下書きです。確かめて、直してから送ってください/),
+  ).toBeVisible();
+  await expect(cardIn(/^担当者の番/)).toBeVisible();
+  // 書きかけの文章があるときは、下書きで上書きできない
+  await expect(
+    detail.getByRole("button", { name: "聞き返しを下書きさせる" }),
+  ).toBeDisabled();
+
+  // 担当者が直してから、自分で送る
+  const edited = `${await box.inputValue()} 宛名は、取引先の設定から変えられます。`;
+  await box.fill(edited);
+  await detail.getByRole("button", { name: "結果を伝える" }).click();
+  await expect(cardIn(/^本人の番/)).toBeVisible();
+
+  await page.goto(askerUrl);
+  await expect(page.getByText("担当者から結果が届いています")).toBeVisible();
+  await expect(page.getByText(edited)).toBeVisible();
+  await expect(page.getByText("AI の案")).toHaveCount(0);
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
 test("スマホの幅でボードがページの横幅からはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   for (const path of ["/operator", "/inquiries"]) {

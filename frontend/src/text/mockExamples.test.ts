@@ -60,15 +60,18 @@ describe("モックの例文", () => {
       expect(typeExampleList(messages.mock)).toHaveLength(5);
     });
 
-    it(`${name}: 動きの例は、契約書の12個のタグを表の順に並べ、正常系の例文にタグを付ける`, () => {
+    it(`${name}: 動きの例は、契約書の17個のタグを表の順に並べ、正常系の例文にタグを付ける`, () => {
       const list = tagExampleList(messages.mock);
       expect(list.map((e) => e.label)).toEqual([...SCENARIO_TAGS]);
-      expect(list).toHaveLength(12);
+      expect(list).toHaveLength(17);
       for (const example of list) {
         expect(example.text).toBe(
           `${messages.mock.typeExamples.HOW_IT_WORKS.text} ${example.label}`,
         );
-        expect(receptionTypeOf(example.text)).toBe("HOW_IT_WORKS");
+        // タグ `[手順]` は、受付の語（HOW_TO の「手順」）を含むので、種類が変わる（契約書の決まりどおり）
+        expect(receptionTypeOf(example.text)).toBe(
+          example.label === "[手順]" ? "HOW_TO" : "HOW_IT_WORKS",
+        );
       }
     });
   }
@@ -79,7 +82,7 @@ describe("モックの例文", () => {
     }
   });
 
-  it("タグは識別子で、言語によらず同じ12個", () => {
+  it("タグは識別子で、言語によらず同じ17個", () => {
     expect(SCENARIO_TAGS).toEqual([
       "[判定エラー]",
       "[質問なし]",
@@ -93,6 +96,11 @@ describe("モックの例文", () => {
       "[拒否]",
       "[説明エラー]",
       "[的外れ]",
+      "[相談]",
+      "[手順]",
+      "[根拠なしの案]",
+      "[案エラー]",
+      "[下書きエラー]",
     ]);
   });
 });

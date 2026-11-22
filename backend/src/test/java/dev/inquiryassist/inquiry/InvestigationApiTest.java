@@ -91,8 +91,10 @@ class InvestigationApiTest extends ApiSupport {
 
     @Test
     void 根拠がない件と的外れの件は自動で担当者に渡り_調べた結果は本人にも見える() throws Exception {
+        List<String> filed = new ArrayList<>();
         for (String tag : List.of("[根拠なし]", "[的外れ]")) {
             String id = toAnswering(tag + " " + HOW_TO, null);
+            filed.add(id);
             assertThat((String) JsonPath.read(view(id), "$.type.id")).isEqualTo("HOW_TO");
 
             String done = doneOf(stream(id));
@@ -109,7 +111,8 @@ class InvestigationApiTest extends ApiSupport {
             assertThat((List<String>) JsonPath.read(detail, "$.history[-1:].event")).containsExactly("HANDED_OVER");
             assertThat((List<String>) JsonPath.read(detail, "$.history[-1:].actor")).containsExactly("AI");
         }
-        assertThat(notifier.notices()).hasSize(2);
+        // 初めて渡したので、どちらも担当者に通知される（通知の一覧は、ほかのテストの分も含むので、この2件で確かめる）
+        assertThat(notifier.notices()).extracting(n -> n.inquiryId().toString()).containsAll(filed);
     }
 
     @Test
@@ -249,7 +252,7 @@ class InvestigationApiTest extends ApiSupport {
         assertThat(row(id).get("investigation_audience")).isEqualTo("ASKER");
         assertThat(((Timestamp) row(id).get("investigation_started_at")).toInstant()).isEqualTo(startedAt);
         assertThat((Object) JsonPath.read(view(id), "$.answer")).isNotNull();
-        assertThat(usageSteps(id)).endsWith("restater", "investigator", "explainer");
+        assertThat(usageSteps(id)).endsWith("restater", "investigator", "explainer", "advisor");
     }
 
     @Test
@@ -328,7 +331,7 @@ class InvestigationApiTest extends ApiSupport {
         assertThat(((Timestamp) row(id).get("investigation_finished_at")).toInstant()).isAfter(firstFinish);
         assertThat((Boolean) JsonPath.read(detail, "$.read")).isFalse();
         assertThat((Object) JsonPath.read(view(id), "$.answer")).isNull();
-        assertThat(usageSteps(id)).endsWith("restater", "investigator", "explainer", "investigator", "explainer");
+        assertThat(usageSteps(id)).endsWith("restater", "investigator", "explainer", "advisor", "investigator", "explainer", "advisor");
     }
 
     @Test

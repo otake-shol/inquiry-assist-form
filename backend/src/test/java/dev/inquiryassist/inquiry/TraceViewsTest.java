@@ -44,7 +44,7 @@ class TraceViewsTest {
 
     @Test
     void モックの呼び出しはmock_そうでなければ設定上の実装名になり実行した順に並ぶ() {
-        List<TraceEntry> trace = TraceViews.of(entity(), properties(true), implementations());
+        List<TraceEntry> trace = TraceViews.of(entity(), properties(true), implementations(), true);
 
         assertThat(trace).extracting(TraceEntry::skill).containsExactly("reception", "investigator");
         assertThat(trace).extracting(TraceEntry::provider).containsExactly("mock", "ollama");
@@ -57,7 +57,7 @@ class TraceViewsTest {
         // 調査は ollama の設定だが、この呼び出しはモックだった（切り替え前の記録など）
         e.addUsage(Skill.INVESTIGATOR, Usage.ofMock(), 1);
 
-        assertThat(TraceViews.of(e, properties(true), implementations()).get(0).provider()).isEqualTo("mock");
+        assertThat(TraceViews.of(e, properties(true), implementations(), true).get(0).provider()).isEqualTo("mock");
     }
 
     @Test
@@ -65,11 +65,25 @@ class TraceViewsTest {
         InquiryEntity e = new InquiryEntity("local-user", Urgency.NORMAL, Instant.now());
         e.usages.add(new InquiryEntity.StoredUsage("restater", "mock", "mock", 0, 0, 0, true, false, null));
 
-        assertThat(TraceViews.of(e, properties(true), implementations()).get(0).durationMillis()).isNull();
+        assertThat(TraceViews.of(e, properties(true), implementations(), true).get(0).durationMillis()).isNull();
     }
 
     @Test
     void 無効にするとnullを返す() {
-        assertThat(TraceViews.of(entity(), properties(false), implementations())).isNull();
+        assertThat(TraceViews.of(entity(), properties(false), implementations(), true)).isNull();
+    }
+
+    @Test
+    void 助言と下書きの呼び出しは担当者向けにだけ含め_本人向けからは除く() {
+        InquiryEntity e = entity();
+        e.addUsage(Skill.ADVISOR, Usage.ofMock(), 4);
+        e.addUsage(Skill.DRAFTER, Usage.ofMock(), 5);
+
+        assertThat(TraceViews.of(e, properties(true), implementations(), true))
+                .extracting(TraceEntry::skill)
+                .containsExactly("reception", "investigator", "advisor", "drafter");
+        assertThat(TraceViews.of(e, properties(true), implementations(), false))
+                .extracting(TraceEntry::skill)
+                .containsExactly("reception", "investigator");
     }
 }

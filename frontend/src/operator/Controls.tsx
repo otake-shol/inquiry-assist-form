@@ -3,6 +3,7 @@ import type { ReplyKind, PlacementInput } from "../api/client.ts";
 import type {
   ConfigSystem,
   DeclineReasonKind,
+  DraftResult,
   HistoryEntry,
   OperatorDetail,
   Phase,
@@ -10,6 +11,7 @@ import type {
 } from "../api/types.ts";
 import { MAX_MESSAGE_LENGTH } from "../components/Exchange.tsx";
 import { useMessages } from "../i18n/context.ts";
+import { languageName } from "../i18n/messages.ts";
 import {
   SWITCHABLE_PHASES,
   eventLabel,
@@ -17,6 +19,9 @@ import {
   placementChangeText,
   stateLine,
 } from "./labels.ts";
+
+/** 返信の下書きで、伝えたいことの最大文字数（契約書: 1〜2000文字）。 */
+const MAX_DRAFT_NOTE_LENGTH = 2000;
 
 /** 見送りの理由の文章の最大文字数（契約書: 1〜2000文字）。 */
 const MAX_DECLINE_REASON_LENGTH = 2000;
@@ -174,24 +179,57 @@ interface SendToAskerProps {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   /** 本人に送る。成功したら true */
   onSend: (kind: ReplyKind, body: string) => Promise<boolean>;
+  /** 返信の下書きを作らせる。失敗したら null（失敗の表示は呼び出し側） */
+  onDraft: (kind: ReplyKind, note: string) => Promise<DraftResult | null>;
 }
 
 /**
  * 本人に送る（担当者の番のときだけ）。入力欄1つと、2つのボタン「聞き返す」「結果を伝える」。
  * 押したボタンで、本人の番になったときに本人が何を求められるかが決まる。
- * @param props 入力欄の参照と、送る処理
+ * 入力欄のすぐ上に、返信の下書き（「伝えたいこと（任意）」の1行の入力欄と、2つの小さなボタン）を置く。
+ * 下書きは入力欄が空のときだけ作らせられ、入ったら注意書きを出す（送るか、入力欄を空にすると消える）。
+ * AI が直接送ることはなく、送るボタンは担当者が選んで押す（下書きの種類では決めない）。
+ * @param props 入力欄の参照と、送る処理、下書きの処理
  */
-export function SendToAsker({ busy, inputRef, onSend }: SendToAskerProps) {
+export function SendToAsker({
+  busy,
+  inputRef,
+  onSend,
+  onDraft,
+}: SendToAskerProps) {
   const messages = useMessages();
   const OP_TEXT = messages.op;
   const id = useId();
+  const noteId = useId();
   const [text, setText] = useState("");
+  const [note, setNote] = useState("");
+  const [drafting, setDrafting] = useState(false);
+  // 下書きが入っているか。入っていれば、書かれた言語（本人の言語）を持つ
+  const [draftLanguage, setDraftLanguage] = useState<string | null>(null);
   const body = text.trim();
 
   const send = async (kind: ReplyKind) => {
     if (body === "" || busy) return;
-    if (await onSend(kind, body)) setText("");
+    if (await onSend(kind, body)) {
+      setText("");
+      setDraftLanguage(null);
+    }
   };
+
+  const draft = async (kind: ReplyKind) => {
+    if (body !== "" || busy || drafting) return;
+    setDrafting(true);
+    try {
+      const result = await onDraft(kind, note.trim());
+      if (result !== null) {
+        setText(result.body);
+        setDraftLanguage(result.language);
+      }
+    } finally {
+      setDrafting(false);
+    }
+  };
+  const draftDisabled = busy || drafting || body !== "";
   return (
     <form
       className="op-send"
@@ -200,6 +238,35 @@ export function SendToAsker({ busy, inputRef, onSend }: SendToAskerProps) {
         event.preventDefault();
       }}
     >
+      <div className="op-draft">
+        <label htmlFor={noteId}>{OP_TEXT.draftNote}</label>
+        <input
+          id={noteId}
+          type="text"
+          maxLength={MAX_DRAFT_NOTE_LENGTH}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+        <div className="op-draft-actions">
+          <button
+            type="button"
+            className="small"
+            disabled={draftDisabled}
+            onClick={() => void draft("ASK")}
+          >
+            {OP_TEXT.draftAsk}
+          </button>
+          <button
+            type="button"
+            className="small"
+            disabled={draftDisabled}
+            onClick={() => void draft("RESULT")}
+          >
+            {OP_TEXT.draftResult}
+          </button>
+        </div>
+        {body !== "" && <p className="op-muted">{OP_TEXT.draftHint}</p>}
+      </div>
       <label htmlFor={id}>{OP_TEXT.sendLabel}</label>
       <textarea
         id={id}
@@ -207,8 +274,16 @@ export function SendToAsker({ busy, inputRef, onSend }: SendToAskerProps) {
         rows={4}
         maxLength={MAX_MESSAGE_LENGTH}
         value={text}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(event) => {
+          setText(event.target.value);
+          if (event.target.value.trim() === "") setDraftLanguage(null);
+        }}
       />
+      {draftLanguage !== null && body !== "" && (
+        <p className="op-draft-notice" role="status">
+          {OP_TEXT.draftNotice(languageName(draftLanguage))}
+        </p>
+      )}
       <div className="actions">
         <button
           type="button"

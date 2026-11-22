@@ -937,6 +937,9 @@ blockquote {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
+  /* 長いファイルのパスは、途中で折り返す（折り返さないと、パネルが横にはみ出す） */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .op-badge.quiet {
@@ -1586,5 +1589,104 @@ blockquote {
 
 .op-investigate .op-muted {
   margin: 4px 0 0;
+  font-size: 0.85rem;
+}
+
+/* 担当者のパネル: AI の案（事実と見分けがつくよう、点線の枠にする）と、返信の下書き */
+.op-advice {
+  margin-top: 16px;
+  padding: 10px 14px 12px;
+  border: 2px dotted var(--accent);
+  border-radius: 10px;
+  background: var(--accent-soft);
+}
+
+.op-advice h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.op-advice-mark {
+  padding: 0 8px;
+  border: 1px dashed var(--accent);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.op-advice h4,
+.op-advice h5 {
+  margin: 10px 0 2px;
+}
+
+.op-advice h5 {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.op-advice ul,
+.op-advice ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.op-steps dl {
+  margin: 0 0 8px;
+}
+
+.op-steps dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.op-steps dd {
+  margin: 0 0 2px;
+  overflow-wrap: anywhere;
+}
+
+.op-draft {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+}
+
+.op-draft input {
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: inherit;
+}
+
+.op-draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button.small {
+  min-height: 36px;
+  padding: 4px 14px;
+  font-size: 0.85rem;
+}
+
+.op-draft .op-muted {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.op-draft-notice {
+  margin: 4px 0 0;
+  padding: 6px 10px;
+  background: var(--warn-bg);
+  border-radius: 8px;
   font-size: 0.85rem;
 }

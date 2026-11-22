@@ -3,6 +3,7 @@ import type { Language } from "../i18n/language.ts";
 import type {
   AppConfig,
   DeclineReasonKind,
+  DraftResult,
   ErrorBody,
   InquiryList,
   InquiryView,
@@ -329,6 +330,25 @@ export function createClient(language: Language) {
   }
 
   /**
+   * `POST /api/operator/inquiries/{id}/draft`。本人に送る文章の下書きを AI に作らせる。
+   * 状態は変えず、何も送らない（下書きは担当者が確かめ、直してから送る）。
+   * @param id 問い合わせ ID
+   * @param kind 聞き返し（`ASK`）か、結果（`RESULT`）か
+   * @param note 担当者が伝えたいこと（任意。1〜2000文字）
+   */
+  function draft(
+    id: string,
+    kind: ReplyKind,
+    note?: string,
+  ): Promise<DraftResult> {
+    return request<DraftResult>(
+      "POST",
+      `/api/operator/inquiries/${id}/draft`,
+      note === undefined ? { kind } : { kind, note },
+    );
+  }
+
+  /**
    * `PUT /api/operator/inquiries/{id}/phase`。区間を変える（分かる、決まる、行われる）。
    * @param id 問い合わせ ID
    * @param phase 新しい区間
@@ -382,6 +402,7 @@ export function createClient(language: Language) {
     postReply,
     declineInquiry,
     investigate,
+    draft,
     setPhase,
     setPlacement,
   };

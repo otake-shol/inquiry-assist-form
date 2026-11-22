@@ -29,6 +29,7 @@ class InquiryCommitter {
     private final IntakeLocales locales;
     private final InquiryPresenter presenter;
     private final ApplicationEventPublisher events;
+    private final org.springframework.beans.factory.ObjectProvider<AdviceRunner> adviceRunner;
 
     /**
      * @param repository 問い合わせ記録の保存先
@@ -37,6 +38,7 @@ class InquiryCommitter {
      * @param locales 通知に載せる名前（既定の言語）を引く
      * @param presenter 担当者向けのイベントの内容を作る
      * @param events 保存の確定後にイベントを発行する
+     * @param adviceRunner 保存の確定後に、AI の案を作り始めるか判断する（案を保存する役も、この保存を通るので、循環を避けて遅く引く）
      */
     InquiryCommitter(
             InquiryRepository repository,
@@ -44,13 +46,15 @@ class InquiryCommitter {
             TransactionTemplate transaction,
             IntakeLocales locales,
             InquiryPresenter presenter,
-            ApplicationEventPublisher events) {
+            ApplicationEventPublisher events,
+            org.springframework.beans.factory.ObjectProvider<AdviceRunner> adviceRunner) {
         this.repository = repository;
         this.notifier = notifier;
         this.transaction = transaction;
         this.locales = locales;
         this.presenter = presenter;
         this.events = events;
+        this.adviceRunner = adviceRunner;
     }
 
     /**
@@ -112,6 +116,8 @@ class InquiryCommitter {
      */
     InquiryEntity commitOrConflict(InquiryEntity inquiry, FilingNotifier.FilingNotice notice) {
         inquiry.updatedAt = Instant.now();
+        // 保存と同時に、AI の案を作り始める印を付ける（担当者の番で、材料があり、案がないとき）
+        boolean advise = adviceRunner.getObject().claim(inquiry);
         InquiryEntity saved = transaction.execute(status -> {
             InquiryEntity s = repository.saveAndFlush(inquiry);
             if (notice != null) {
@@ -130,6 +136,9 @@ class InquiryCommitter {
             }
         } else if (saved.handedOverAt != null) {
             publishUpdated(saved);
+        }
+        if (advise) {
+            adviceRunner.getObject().launch(saved.id);
         }
         return saved;
     }
@@ -175,7 +184,7 @@ class InquiryCommitter {
      * @throws OptimisticLockingFailureException 他の操作と競合した場合
      */
     InquiryEntity update(java.util.UUID id, java.util.function.Function<InquiryEntity, Update> mutator) {
-        record Done(InquiryEntity saved, Update update) {}
+        record Done(InquiryEntity saved, Update update, boolean advise) {}
         Done done = transaction.execute(status -> {
             InquiryEntity inquiry = repository.findById(id).orElse(null);
             if (inquiry == null) {
@@ -186,11 +195,13 @@ class InquiryCommitter {
                 return null;
             }
             inquiry.updatedAt = Instant.now();
+            // 保存と同時に、AI の案を作り始める印を付ける（担当者の番で、材料があり、案がないとき）
+            boolean advise = adviceRunner.getObject().claim(inquiry);
             InquiryEntity saved = repository.saveAndFlush(inquiry);
             if (update.notice() != null) {
                 notifier.notifyFiled(update.notice());
             }
-            return new Done(saved, update);
+            return new Done(saved, update, advise);
         });
         if (done == null) {
             return null;
@@ -204,6 +215,9 @@ class InquiryCommitter {
             }
         } else if (done.update().publish() == Publish.UPDATED_IF_HANDED_OVER && saved.handedOverAt != null) {
             publishUpdated(saved);
+        }
+        if (done.advise()) {
+            adviceRunner.getObject().launch(saved.id);
         }
         return saved;
     }
