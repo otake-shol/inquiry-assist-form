@@ -6,7 +6,7 @@
     <title>問い合わせアシスト｜業務フローとスキル設計</title>
     <meta
       name="description"
-      content="悩みの発話を答えられる問いに直し、根拠を確かめて答える問い合わせフォームの業務フローと、AIに任せる5つのスキルの設計。"
+      content="問い合わせを、誰の番かを見失わずに終わりまで運ぶ業務フローと、AIに任せる8つのスキルの設計。"
     />
     <style>
       :root {
@@ -19,6 +19,8 @@
         --ai-bg: #e8effa;
         --human: #8a5a12;
         --human-bg: #fbf1dc;
+        --staff: #1f6b4f;
+        --staff-bg: #e3f2ea;
         --code: #3d4756;
         --code-bg: #eeeeea;
         --branch: #6b7482;
@@ -35,6 +37,8 @@
           --ai-bg: #1b2a40;
           --human: #e6bd6f;
           --human-bg: #33291a;
+          --staff: #7fd0ab;
+          --staff-bg: #17302a;
           --code: #c3cad4;
           --code-bg: #262d36;
           --branch: #98a2b0;
@@ -434,6 +438,52 @@
           break-inside: avoid;
         }
       }
+
+      /* 担当者と仕様の持ち主 */
+      .swatch.staff {
+        background: var(--staff-bg);
+        border-color: var(--staff);
+      }
+      .staff .card {
+        grid-column: 1;
+        background: var(--staff-bg);
+        border-color: var(--staff);
+      }
+      .staff::before {
+        border-color: var(--staff);
+        color: var(--staff);
+      }
+      .staff .kind {
+        color: var(--staff);
+      }
+      .ai.aside .card {
+        border-style: dashed;
+      }
+      h3.part {
+        margin: 48px 0 0;
+        font-size: 1.1rem;
+        color: var(--muted);
+        letter-spacing: 0.04em;
+      }
+      .scope {
+        margin: 24px 0 0;
+        padding: 14px 20px;
+        border: 1.5px dashed var(--branch);
+        border-radius: var(--radius);
+        font-size: 0.95rem;
+        max-width: 46em;
+      }
+      .scope strong {
+        display: block;
+        color: var(--branch);
+        font-size: 0.8rem;
+        letter-spacing: 0.06em;
+      }
+      @media (max-width: 760px) {
+        .staff .card {
+          grid-column: 2;
+        }
+      }
     </style>
   </head>
   <body>
@@ -442,23 +492,29 @@
         <p class="eyebrow">問い合わせアシスト</p>
         <h1>業務フローとスキル設計</h1>
         <p class="lead">
-          人が持ってくるのは問いではなく状況です。その状況を答えられる問いに直し、根拠を確かめて答えるまでの流れと、AIに任せる5つのスキルをまとめます。
+          人が持ってくるのは問いではなく状況です。その状況を答えられる問いに直し、根拠を確かめて答え、答えきれない件は材料と案を添えて担当者に渡します。問い合わせが誰の番で止まっているかを見失わずに、終わりまで運ぶ流れと、AIに任せる8つのスキルをまとめます。
         </p>
         <ul class="legend" aria-label="凡例">
           <li><span class="swatch human"></span>本人の操作</li>
+          <li><span class="swatch staff"></span>担当者と、仕様の持ち主の操作</li>
           <li><span class="swatch ai"></span>AIのスキル</li>
           <li><span class="swatch code"></span>通常のコード</li>
         </ul>
+        <p class="scope">
+          <strong>このページが表す範囲</strong>
+          実装は骨組みです。流れ、状態、スキルの置き場所と受け渡す型は動きますが、資料、利用者、先例は見本です。担当者向けの3つのスキル（助言、下書き、訳）は、決まった文面を返す見本の実装だけを持ちます。
+        </p>
       </header>
 
       <section aria-labelledby="flow-title">
         <h2 id="flow-title">業務フロー</h2>
         <p>
-          左が本人、右がシステムです。上から下へ、会話のように交互に進みます。点線の枠は途中で分かれる経路です。
+          左が人、右がシステムです。上から下へ、会話のように交互に進みます。点線の枠は途中で分かれる経路です。
         </p>
 
+        <h3 class="part">1. 本人と AI で、答えまで進む</h3>
         <div class="lanes" aria-hidden="true">
-          <span>本人</span>
+          <span>人</span>
           <span>システム</span>
         </div>
 
@@ -466,8 +522,8 @@
           <li class="step human">
             <div class="card">
               <span class="kind">本人の操作</span>
-              <h3>悩みをそのまま書く</h3>
-              <p>まとまっていなくて構いません。分類も件名も求めません。</p>
+              <h3>選択肢を押して答える</h3>
+              <p>何をしたいか（種類）、どのシステムか、どの機能かを、1問ずつ押して答えます。文章で書く道もあります。どの質問も「わからない」で進めます。</p>
             </div>
           </li>
 
@@ -475,24 +531,15 @@
             <div class="card">
               <span class="kind">AIのスキル 1</span>
               <h3>受付</h3>
-              <p>書かれた内容から、問い合わせの種別を判定します。</p>
+              <p>本人が文章を書いたときだけ、文章から置き場所を読み取ります。</p>
               <dl class="spec">
                 <dt>入力</dt>
-                <dd>元の発話</dd>
+                <dd>本人の文章、システムと機能の候補</dd>
                 <dt>出力</dt>
-                <dd>種別（仕様の確認・相談／不具合かもしれない件／作業の依頼／障害）</dd>
+                <dd>まだ決まっていない置き場所（種類、システム、機能）</dd>
                 <dt>道具</dt>
                 <dd>なし</dd>
-                <dt>モデル</dt>
-                <dd>小さいモデル</dd>
               </dl>
-            </div>
-          </li>
-
-          <li class="branch right">
-            <div class="note">
-              <strong>障害のとき</strong>
-              「いま業務やサービスが止まっていますか」と1問だけ聞き、専用の窓口を案内して終わります。このフォームでは受け付けません。
             </div>
           </li>
 
@@ -500,32 +547,29 @@
             <div class="card">
               <span class="kind">AIのスキル 2</span>
               <h3>聞き手</h3>
-              <p>答えるのに足りない情報を、エンジニアでなくても答えられる質問にします。</p>
+              <p>足りない情報だけを本人に聞きます。設定にある質問は、文章に答えが書かれていれば聞きません。設定に質問がなければ、質問を作ります。</p>
               <dl class="spec">
                 <dt>入力</dt>
-                <dd>元の発話、種別</dd>
+                <dd>置き場所、本人の文章、設定の質問</dd>
                 <dt>出力</dt>
-                <dd>選択肢つきの質問（最大3個）</dd>
+                <dd>読み取れた答え、または質問（0〜2個）</dd>
                 <dt>道具</dt>
                 <dd>用語対応表とFAQの軽い検索</dd>
-                <dt>モデル</dt>
-                <dd>中程度のモデル</dd>
               </dl>
             </div>
           </li>
 
           <li class="branch right">
             <div class="note">
-              <strong>作業の依頼のとき</strong>
-              聞き手を呼ばず、決まった3問（何を、いつまでに、対象は何か）を聞きます。
+              <strong>押して答えただけのとき</strong>
+              ここまで AI を呼びません。入口は、AI が止まっていても最後の質問まで進めます。
             </div>
           </li>
 
-          <li class="step human">
-            <div class="card">
-              <span class="kind">本人の操作</span>
-              <h3>質問に答える</h3>
-              <p>1問ずつ、選択肢を押すだけです。「わからない」も選べます。</p>
+          <li class="branch right">
+            <div class="note">
+              <strong>業務が止まっているとき</strong>
+              詳しい質問を省き、すぐ担当者に渡します。調査は、渡した後に裏で行います。
             </div>
           </li>
 
@@ -533,16 +577,14 @@
             <div class="card">
               <span class="kind">AIのスキル 3</span>
               <h3>言い直し</h3>
-              <p>「つまり、こういうことですね」と、問いを文章で言い直します。</p>
+              <p>「つまり、こういうことですね」と、選んだ内容と書いた内容から、問いを組み立てます。</p>
               <dl class="spec">
                 <dt>入力</dt>
-                <dd>元の発話、種別、質問への回答</dd>
+                <dd>置き場所、質問と答え、本人の文章、本人が直したこと</dd>
                 <dt>出力</dt>
-                <dd>言い直しの文章、保存と引き継ぎに使う構造化データ</dd>
+                <dd>言い直しの文章と、問いの構造</dd>
                 <dt>道具</dt>
                 <dd>用語対応表</dd>
-                <dt>モデル</dt>
-                <dd>上位のモデル（体験の要のため）</dd>
               </dl>
             </div>
           </li>
@@ -551,21 +593,14 @@
             <div class="card">
               <span class="kind">本人の操作</span>
               <h3>言い直しを確かめる</h3>
-              <p>「合っています」か「少し違います」を選びます。</p>
+              <p>「合っています」か「少し違う」を選びます。違う点を一言伝えると、言い直しを作り直します（2回まで）。</p>
             </div>
           </li>
 
           <li class="branch left">
             <div class="note">
-              <strong>少し違うとき</strong>
-              違う点を一言伝えると、スキル3が言い直しを作り直します（2回まで）。自分で書き直すこともできます。
-            </div>
-          </li>
-
-          <li class="branch left">
-            <div class="note">
-              <strong>作業の依頼のとき</strong>
-              調べずに、そのまま担当者へ送ります（11へ）。
+              <strong>「変えてほしい」のとき</strong>
+              調べずに、担当者に渡します。採るかどうかは、人が決めることだからです。
             </div>
           </li>
 
@@ -573,16 +608,14 @@
             <div class="card">
               <span class="kind">AIのスキル 4</span>
               <h3>調査</h3>
-              <p>コード、FAQ、用語対応表を調べ、根拠つきの事実をまとめます。</p>
+              <p>コード、FAQ、用語対応表を調べ、事実と根拠を対にして集めます。</p>
               <dl class="spec">
                 <dt>入力</dt>
-                <dd>確定した言い直しと構造化データ</dd>
+                <dd>確かめた問い</dd>
                 <dt>出力</dt>
-                <dd>事実とその根拠の対、調べたが見つからなかったこと、次に確認すること</dd>
+                <dd>事実と根拠の対、見つからなかったこと、次に確認すること</dd>
                 <dt>道具</dt>
                 <dd>読み取り専用の検索とファイル読み取り（繰り返し使う）</dd>
-                <dt>モデル</dt>
-                <dd>最上位のモデル</dd>
               </dl>
             </div>
           </li>
@@ -592,15 +625,8 @@
               <span class="kind">通常のコード</span>
               <h3>照合</h3>
               <p>
-                調査が挙げた根拠が実在するかを、機械的に確かめます。根拠を確かめられた事実だけを、次の説明に渡します。確かめられた事実が1つもなければ、「わからない」と答えます。
+                調査が挙げた根拠が実在するかを、機械的に確かめます。確かめられた事実だけを、説明に渡します。確かめられなかった事実は、本人には見せず、担当者にだけ手がかりとして渡します。
               </p>
-            </div>
-          </li>
-
-          <li class="branch right">
-            <div class="note">
-              <strong>根拠を確かめられなかった事実</strong>
-              説明には渡さず、問い合わせた本人にも見せません。担当者にだけ、調べる手がかりとして事実とは区別して渡します。
             </div>
           </li>
 
@@ -608,99 +634,265 @@
             <div class="card">
               <span class="kind">AIのスキル 5</span>
               <h3>説明</h3>
-              <p>確かめられた事実だけから、本人向けの説明を業務の言葉で書きます。</p>
+              <p>確かめられた事実だけから、本人向けの説明を業務の言葉で書きます。操作の順に並べられるときは、番号つきの手順も出します。</p>
               <dl class="spec">
                 <dt>入力</dt>
-                <dd>確定した言い直し、確かめられた事実と根拠</dd>
+                <dd>確かめた問い、確かめられた事実と根拠</dd>
                 <dt>出力</dt>
-                <dd>本人向けの説明</dd>
+                <dd>説明、手順、問いに答えているかの判定</dd>
                 <dt>道具</dt>
                 <dd>用語対応表</dd>
-                <dt>モデル</dt>
-                <dd>中程度のモデル</dd>
               </dl>
             </div>
           </li>
 
           <li class="branch right">
             <div class="note">
-              <strong>不具合かもしれない件のとき</strong>
-              結果を本人に見せたうえで、調べた内容を添えて必ず担当者へ送ります（11へ）。
+              <strong>60秒を超えたとき</strong>
+              打ち切らずに担当者へ引き継ぎ、調査は裏で続けます。長く待たせた末に、失敗を見せません。
+            </div>
+          </li>
+
+          <li class="branch right">
+            <div class="note">
+              <strong>AI が答えられなかったとき、「おかしいかもしれない」のとき</strong>
+              調べた結果を本人に見せたうえで、担当者に渡します。本人に、送るかどうかを選ばせません。
             </div>
           </li>
 
           <li class="step human">
             <div class="card">
               <span class="kind">本人の操作</span>
-              <h3>解決したかを選ぶ</h3>
-              <p>解決したら、記録して終わりです。まだなら担当者へ送ります。</p>
+              <h3>結果を確かめる</h3>
+              <p>「やりたかったことは、進められそうですか」。解決したら終わりです（解決済み）。まだなら、担当者の番になります。</p>
+            </div>
+          </li>
+        </ol>
+
+        <p class="always">
+          <strong>問いを確かめた後は、いつでも「答えを待たずに担当者に送る」を使えます。</strong>
+          AIは使えば早く答えが出る近道であり、人にたどり着く前の関門ではありません。送った後も、調査は裏で続きます。
+        </p>
+
+        <h3 class="part">2. 担当者が、自分のところで終わらせる</h3>
+        <div class="lanes" aria-hidden="true">
+          <span>人</span>
+          <span>システム</span>
+        </div>
+
+        <ol class="flow">
+          <li class="step code">
+            <div class="card">
+              <span class="kind">通常のコード</span>
+              <h3>担当者に渡す</h3>
+              <p>
+                番を担当者にします。問い合わせは終わりません。なぜ渡ったか（本人が送った、AI が答えられなかった、時間切れなど）を持ち、初めて渡したときに通知します。
+              </p>
+            </div>
+          </li>
+
+          <li class="step ai">
+            <div class="card">
+              <span class="kind">AIのスキル 6</span>
+              <h3>助言</h3>
+              <p>確かめられた事実と、同じ置き場所の先例から、判断の案（相談が要りそうかを含む）と、作業の手順の案を作ります。</p>
+              <dl class="spec">
+                <dt>入力</dt>
+                <dd>問い、確かめられた事実、先例</dd>
+                <dt>出力</dt>
+                <dd>判断の案、手順の案。それぞれが、基づく事実と先例を指す</dd>
+                <dt>道具</dt>
+                <dd>なし（自分では調べない）</dd>
+              </dl>
             </div>
           </li>
 
           <li class="step code">
             <div class="card">
               <span class="kind">通常のコード</span>
-              <h3>担当者に送る</h3>
+              <h3>案の確認</h3>
+              <p>基づく事実も先例もない案は、捨てます。担当者の画面では、案を事実と区別して示します。</p>
+            </div>
+          </li>
+
+          <li class="step staff">
+            <div class="card">
+              <span class="kind">担当者の操作</span>
+              <h3>材料と案を読んで、決める</h3>
+              <p>本人に聞き返す、結果を伝える、見送る、のどれかを選びます。番を本人に渡すには、本人へのメッセージが要ります。</p>
+            </div>
+          </li>
+
+          <li class="step ai aside">
+            <div class="card">
+              <span class="kind">AIのスキル 7（担当者が頼んだとき）</span>
+              <h3>下書き</h3>
+              <p>本人に送る文章の下書きを、本人の言語で作ります。入力欄に入るだけで、AI が直接送ることはありません。</p>
+            </div>
+          </li>
+
+          <li class="step ai aside">
+            <div class="card">
+              <span class="kind">AIのスキル 8（担当者が頼んだとき）</span>
+              <h3>訳</h3>
+              <p>本人の言語と担当者の言語が違うとき、本人が書いた文章の訳を、原文の下に添えます。原文は置き換えません。</p>
+            </div>
+          </li>
+
+          <li class="branch left">
+            <div class="note">
+              <strong>新しい決定が要るとき</strong>
+              担当者が自分で決めてよいのは、既にある仕様や先例を当てはめる判断までです。新しい決定が要る件は、仕様の持ち主に相談します。
+            </div>
+          </li>
+
+          <li class="step staff">
+            <div class="card">
+              <span class="kind">仕様の持ち主の操作</span>
+              <h3>決める</h3>
+              <p>担当者と同じ材料を読んで、決定と理由を書きます。相談している間は、仕様の持ち主の番です。決めると、担当者の番に戻ります。</p>
+            </div>
+          </li>
+
+          <li class="step code">
+            <div class="card">
+              <span class="kind">通常のコード</span>
+              <h3>先例を残す</h3>
               <p>
-                言い直した問いと調査の内容を添えて送ります。担当者は調査済みの状態から始められ、本人は同じ説明を繰り返さずに済みます。
+                決定は、置き場所（種類、システム、機能）ごとの先例として残ります。次の同じ置き場所の件で、助言が先例を示し、担当者のところで終わる件が増えます。
               </p>
             </div>
           </li>
-        </ol>
 
-        <p class="always">
-          <strong>どの段階からでも「今すぐ担当者に送る」を使えます。</strong>
-          AIは使えば早く答えが出る近道であり、人にたどり着く前の関門ではありません。
-        </p>
+          <li class="step human">
+            <div class="card">
+              <span class="kind">本人の操作</span>
+              <h3>結果を確かめる</h3>
+              <p>答えたのが AI でも担当者でも、結果は本人が確かめます。解決を伝えると終わりです。終わった後でも、追記すれば開き直せます。</p>
+            </div>
+          </li>
+
+          <li class="branch right">
+            <div class="note">
+              <strong>本人の返事がないとき</strong>
+              5営業日で1度知らせ、さらに5営業日で終えます。結果を伝えた後なら「回答済み」、聞き返した後なら「取り下げ」です。
+            </div>
+          </li>
+        </ol>
       </section>
 
-      <section aria-labelledby="route-title">
-        <h2 id="route-title">種別ごとに使うスキル</h2>
-        <p>費用と待ち時間がかかる調査は、答えが役に立つ種別でだけ呼びます。</p>
+      <section aria-labelledby="state-title">
+        <h2 id="state-title">状態と終わり方</h2>
+        <p>問い合わせは、いつも誰かの番で止まっています。ボードの列は、誰の番かで分けます。</p>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th scope="col">種別</th>
-                <th scope="col">受付</th>
-                <th scope="col">聞き手</th>
-                <th scope="col">言い直し</th>
-                <th scope="col">調査・照合・説明</th>
-                <th scope="col">終わり方</th>
+                <th scope="col">誰の番か</th>
+                <th scope="col">待っていること</th>
+                <th scope="col">次に起きること</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <th scope="row">仕様の確認・相談</th>
-                <td class="yes">使う</td>
-                <td class="yes">使う</td>
-                <td class="yes">使う</td>
-                <td class="yes">使う</td>
-                <td>本人が解決したかを選ぶ</td>
+                <th scope="row">本人</th>
+                <td>入口の質問、問いの確認、結果の確かめ、聞き返しへの返事</td>
+                <td>本人が答える。返事がなければ、知らせた後に終える</td>
               </tr>
               <tr>
-                <th scope="row">不具合かもしれない件</th>
-                <td class="yes">使う</td>
-                <td class="yes">使う</td>
-                <td class="yes">使う</td>
-                <td class="yes">使う</td>
-                <td>調べた内容を添えて必ず担当者へ送る</td>
+                <th scope="row">AI</th>
+                <td>調査</td>
+                <td>答えるか、担当者に渡す。60秒を超えたら担当者に渡す</td>
               </tr>
               <tr>
-                <th scope="row">作業の依頼</th>
-                <td class="yes">使う</td>
-                <td class="no">使わない（決まった3問）</td>
-                <td class="yes">使う</td>
-                <td class="no">使わない</td>
-                <td>必ず担当者へ送る</td>
+                <th scope="row">担当者</th>
+                <td>担当者の対応</td>
+                <td>聞き返す、結果を伝える、見送る、相談する</td>
               </tr>
               <tr>
-                <th scope="row">障害</th>
-                <td class="yes">使う</td>
-                <td class="no">使わない（決まった1問）</td>
-                <td class="no">使わない</td>
-                <td class="no">使わない</td>
-                <td>専用の窓口を案内する</td>
+                <th scope="row">仕様の持ち主</th>
+                <td>相談への決定</td>
+                <td>決めると先例が残り、担当者の番に戻る</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">終わり方</th>
+                <th scope="col">不足は埋まったか</th>
+                <th scope="col">誰が終わらせるか</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">解決済み</th>
+                <td>埋まった</td>
+                <td>本人が解決を伝えた</td>
+              </tr>
+              <tr>
+                <th scope="row">回答済み</th>
+                <td>分からない</td>
+                <td>結果を伝えた後、返事がないまま期間が過ぎた</td>
+              </tr>
+              <tr>
+                <th scope="row">見送り</th>
+                <td>埋めないと決めた</td>
+                <td>担当者が、応じないと決めて伝えた</td>
+              </tr>
+              <tr>
+                <th scope="row">取り下げ</th>
+                <td>本人がやめた</td>
+                <td>本人が取り下げた。または、聞き返しに返事がないまま期間が過ぎた</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="always">
+          <strong>AI は問い合わせを終わらせません。</strong>
+          終わらせるのは、不足を持っていた本人です。担当者が終わらせるのは、応じないと決めた場合だけです。
+        </p>
+      </section>
+
+      <section aria-labelledby="route-title">
+        <h2 id="route-title">種類ごとの経路</h2>
+        <p>費用と待ち時間がかかる調査は、答えが役に立つ種類でだけ、本人を待たせて行います。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">種類</th>
+                <th scope="col">調べるか</th>
+                <th scope="col">問いを確かめた後</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">使い方を知りたい</th>
+                <td class="yes">調べる</td>
+                <td>答えられれば、本人が確かめる。答えられなければ、担当者に渡す</td>
+              </tr>
+              <tr>
+                <th scope="row">仕組みを知りたい</th>
+                <td class="yes">調べる</td>
+                <td>同上</td>
+              </tr>
+              <tr>
+                <th scope="row">おかしいかもしれない</th>
+                <td class="yes">調べる</td>
+                <td>いまの動きを本人に見せたうえで、必ず担当者に渡す（意図した動きかは、人が判断する）</td>
+              </tr>
+              <tr>
+                <th scope="row">やってほしい</th>
+                <td class="yes">調べる</td>
+                <td>本人が自分でできる手順が見つかれば示し、本人が、自分で行うか担当者に頼むかを選ぶ。見つからなければ、担当者に渡す</td>
+              </tr>
+              <tr>
+                <th scope="row">変えてほしい</th>
+                <td class="no">調べない</td>
+                <td>担当者に渡す（担当者が頼めば、後から調べられる）</td>
               </tr>
             </tbody>
           </table>
@@ -717,6 +909,7 @@
             <thead>
               <tr>
                 <th scope="col">スキル</th>
+                <th scope="col">読み手</th>
                 <th scope="col">品質の基準</th>
                 <th scope="col">失敗したとき</th>
               </tr>
@@ -724,28 +917,51 @@
             <tbody>
               <tr>
                 <th scope="row">1 受付</th>
-                <td>種別の正答率。障害を見逃さないこと</td>
-                <td>本人が種別を変更できる。迷ったら人に送る側へ倒す</td>
+                <td>—</td>
+                <td>置き場所を正しく読み取れるか。読み取れないものを、無理に置かないか</td>
+                <td>置かれなかった分を、質問として本人に聞く</td>
               </tr>
               <tr>
                 <th scope="row">2 聞き手</th>
-                <td>本人が答えられるか。答えが調査の役に立つか</td>
-                <td>「わからない」で先へ進める</td>
+                <td>本人</td>
+                <td>聞かなくてよいことを聞かないか。本人が答えられる質問か</td>
+                <td>質問なしで先へ進む</td>
               </tr>
               <tr>
                 <th scope="row">3 言い直し</th>
+                <td>本人</td>
                 <td>本人が1回で「合っています」を選ぶ割合</td>
-                <td>一言で作り直すか、本人が書き直す</td>
+                <td>作り直すか、その時点の内容で担当者に送る</td>
               </tr>
               <tr>
                 <th scope="row">4 調査</th>
+                <td>—</td>
                 <td>事実の正しさ。根拠が照合を通る割合</td>
-                <td>照合で根拠を捨て、残らなければ「わからない」と答える</td>
+                <td>本人が待っていれば、やり直すか担当者に送る。裏での調査なら、担当者が調べ直せる</td>
               </tr>
               <tr>
                 <th scope="row">5 説明</th>
+                <td>本人</td>
                 <td>エンジニアでない人が読めるか。事実を足していないか</td>
-                <td>根拠と詳しい内容を折りたたんで添え、確かめられるようにする</td>
+                <td>調査の結果を残したうえで、失敗を伝える</td>
+              </tr>
+              <tr>
+                <th scope="row">6 助言</th>
+                <td>担当者</td>
+                <td>案が、事実と先例から導かれているか。相談が要る件を見逃さないか</td>
+                <td>案なしで進める。担当者は、材料から自分で判断できる</td>
+              </tr>
+              <tr>
+                <th scope="row">7 下書き</th>
+                <td>本人（担当者が確かめる）</td>
+                <td>担当者が伝えたいことを、本人の言語で、変えずに伝えているか</td>
+                <td>担当者が自分で書く</td>
+              </tr>
+              <tr>
+                <th scope="row">8 訳</th>
+                <td>担当者</td>
+                <td>原文の意味を変えない、足さない、省かない</td>
+                <td>原文は見えたまま。訳だけが出ない</td>
               </tr>
             </tbody>
           </table>
@@ -761,23 +977,35 @@
           </li>
           <li>
             <strong>確かめられることはAIに任せない</strong>
-            <span>根拠の照合、閲覧権限の適用、回数の上限は通常のコードが担います。</span>
+            <span>根拠の照合、基づく事実のない案を捨てること、訳の数の確認、閲覧権限、状態の遷移、期間の判定は、通常のコードが担います。</span>
+          </li>
+          <li>
+            <strong>出どころを分けて見せる</strong>
+            <span>本人が書いたこと、確かめられた事実、確かめられなかった内容、先例、AI の案を、別々の欄で持ちます。どの欄に入るかは、AI ではなくコードが決めます。</span>
+          </li>
+          <li>
+            <strong>AI は終わらせず、送らない</strong>
+            <span>問い合わせを終わらせるのは本人です。本人への連絡を送るのは担当者です。AI が出すのは、答え、案、下書きまでです。</span>
+          </li>
+          <li>
+            <strong>担当者に、材料のない件を渡さない</strong>
+            <span>本人が答えを待たずに送っても、時間切れになっても、調査は裏で続け、結果と案を担当者に渡します。裏での結果は、担当者だけに見せます。</span>
+          </li>
+          <li>
+            <strong>答えは溜めず、決定を溜める</strong>
+            <span>AI の答えは、毎回、資料から調べ直します。溜めるのは、人が下した決定（先例）だけです。先例が増えるほど、担当者のところで終わる件が増えます。</span>
           </li>
           <li>
             <strong>道具は必要なスキルにだけ渡す</strong>
-            <span>コードを検索できるのは調査だけです。繰り返し処理を持つのも調査だけです。</span>
+            <span>コードを検索できるのは調査だけです。助言は、調査の結果を受け取るだけで、自分では調べません。</span>
           </li>
           <li>
-            <strong>調査と説明を分ける</strong>
-            <span>調査は事実と根拠を対で返します。照合で根拠を失った事実を外してから説明を書くことで、実在を確かめた根拠だけに基づく答えになります。</span>
+            <strong>書かれた内容は訳さない</strong>
+            <span>本人が書いた文章、AI が書いた答え、資料の引用、先例は、書かれたときのまま持ちます。訳は、原文に添えるだけです。</span>
           </li>
           <li>
             <strong>分けすぎない</strong>
             <span>基準も道具も変わらない分割はしません。呼び出しが増えるほど待ち時間が増え、受け渡しで情報が落ちます。</span>
-          </li>
-          <li>
-            <strong>スキルごとに記録する</strong>
-            <span>使ったモデル、プロンプトの版、トークン数を残し、スキル単位で費用と品質を追います。</span>
           </li>
         </ul>
       </section>

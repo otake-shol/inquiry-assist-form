@@ -16,8 +16,8 @@
         "messagebus": {
           "label": "通常のコード"
         },
-        "database": {
-          "label": "知識源"
+        "external": {
+          "label": "担当者と仕様の持ち主"
         }
       }
     },
@@ -26,14 +26,12 @@
         "id": "make-question",
         "label": "問いを作る",
         "focus": [
-          "write",
-          "reception",
-          "interviewer",
-          "answer",
+          "intake",
+          "intake-ai",
           "restater",
           "confirm"
         ],
-        "note": "悩みの発話を、本人が「合っています」と言える問いに直すまで。"
+        "note": "選んだ内容と書いた内容を、本人が「合っています」と言える問いに直すまで。"
       },
       {
         "id": "investigate",
@@ -41,27 +39,42 @@
         "focus": [
           "confirm",
           "investigator",
-          "knowledge",
           "verifier",
           "explainer",
-          "resolve"
+          "check"
         ],
-        "note": "根拠を集め、実在を確かめ、確かめた事実だけから答えを書く。"
+        "note": "根拠を集め、実在を確かめ、確かめた事実だけから答えを書く。結果は本人が確かめる。"
       },
       {
-        "id": "handoff",
-        "label": "人に渡す",
+        "id": "handle",
+        "label": "担当者で終わらせる",
         "focus": [
-          "confirm",
           "explainer",
-          "resolve",
-          "filing"
+          "check",
+          "handover",
+          "advisor",
+          "operator"
         ],
-        "note": "担当者に届く3つの経路。どの経路でも問いと調査内容を添える。"
+        "note": "答えきれない件は、材料と案を添えて担当者に渡す。担当者が結果を伝え、本人が確かめる。"
+      },
+      {
+        "id": "precedent",
+        "label": "相談と先例",
+        "focus": [
+          "operator",
+          "owner",
+          "precedent",
+          "advisor"
+        ],
+        "note": "新しい決定は仕様の持ち主が下し、先例として残る。次の同じ置き場所の件で、助言が先例を示す。"
       }
     ]
   },
   "lanes": [
+    {
+      "id": "staff",
+      "label": "担当者・仕様の持ち主"
+    },
     {
       "id": "asker",
       "label": "本人"
@@ -73,10 +86,6 @@
     {
       "id": "code",
       "label": "通常のコード"
-    },
-    {
-      "id": "sources",
-      "label": "知識源"
     }
   ],
   "phases": [
@@ -84,107 +93,96 @@
       "id": "shape",
       "label": "問いを作る",
       "fromCol": 0,
-      "toCol": 2
+      "toCol": 1
     },
     {
       "id": "answer-phase",
       "label": "調べて答える",
-      "fromCol": 3,
-      "toCol": 4,
+      "fromCol": 2,
+      "toCol": 3,
       "variant": "emphasis"
     },
     {
-      "id": "handoff-phase",
-      "label": "人に渡す",
+      "id": "handle-phase",
+      "label": "担当者で終わらせる",
+      "fromCol": 4,
+      "toCol": 4
+    },
+    {
+      "id": "precedent-phase",
+      "label": "相談と先例",
       "fromCol": 5,
       "toCol": 5,
       "variant": "dashed"
     }
   ],
   "mainPath": [
-    "write",
-    "reception",
-    "interviewer",
-    "answer",
+    "intake",
+    "intake-ai",
     "restater",
     "confirm",
     "investigator",
     "verifier",
     "explainer",
-    "resolve",
-    "filing"
+    "check",
+    "handover",
+    "advisor",
+    "operator",
+    "owner",
+    "precedent"
   ],
   "nodes": [
     {
-      "id": "write",
+      "id": "intake",
       "lane": "asker",
       "col": 0,
       "type": "frontend",
-      "label": "悩みを書く",
-      "sublabel": "まとまっていなくてよい",
-      "width": 148
-    },
-    {
-      "id": "answer",
-      "lane": "asker",
-      "col": 1,
-      "type": "frontend",
-      "label": "質問に答える",
-      "sublabel": "「わからない」も選べる",
+      "label": "押して答える",
+      "sublabel": "文章で書いてもよい",
       "width": 148
     },
     {
       "id": "confirm",
       "lane": "asker",
-      "col": 2,
+      "col": 1,
       "type": "frontend",
-      "label": "言い直しを確かめる",
-      "sublabel": "自分で書き直してもよい",
+      "label": "問いを確かめる",
+      "sublabel": "違えば作り直す",
       "width": 148
     },
     {
-      "id": "resolve",
+      "id": "check",
       "lane": "asker",
-      "col": 4,
+      "col": 3,
       "type": "frontend",
-      "label": "解決したかを選ぶ",
-      "sublabel": "解決なら記録して終わり",
+      "label": "結果を確かめる",
+      "sublabel": "解決なら終わり",
       "width": 148
     },
     {
-      "id": "reception",
+      "id": "intake-ai",
       "lane": "ai",
       "col": 0,
       "type": "backend",
-      "label": "受付",
-      "sublabel": "種別を判定する",
-      "tag": "スキル1",
-      "width": 148
-    },
-    {
-      "id": "interviewer",
-      "lane": "ai",
-      "col": 1,
-      "type": "backend",
-      "label": "聞き手",
-      "sublabel": "足りない情報を質問にする",
-      "tag": "スキル2",
+      "label": "受付・聞き手",
+      "sublabel": "足りない分だけ聞く",
+      "tag": "スキル1・2",
       "width": 148
     },
     {
       "id": "restater",
       "lane": "ai",
-      "col": 2,
+      "col": 1,
       "type": "backend",
       "label": "言い直し",
-      "sublabel": "問いを文章と構造にする",
+      "sublabel": "問いを組み立てる",
       "tag": "スキル3",
       "width": 148
     },
     {
       "id": "investigator",
       "lane": "ai",
-      "col": 3,
+      "col": 2,
       "type": "backend",
       "label": "調査",
       "sublabel": "根拠つきの事実を集める",
@@ -194,64 +192,79 @@
     {
       "id": "explainer",
       "lane": "ai",
-      "col": 4,
+      "col": 3,
       "type": "backend",
       "label": "説明",
-      "sublabel": "業務の言葉で答えを書く",
+      "sublabel": "答えと手順を書く",
       "tag": "スキル5",
+      "width": 148
+    },
+    {
+      "id": "advisor",
+      "lane": "ai",
+      "col": 4,
+      "type": "backend",
+      "label": "助言",
+      "sublabel": "判断と手順の案",
+      "tag": "スキル6",
       "width": 148
     },
     {
       "id": "verifier",
       "lane": "code",
-      "col": 3,
+      "col": 2,
       "type": "messagebus",
       "label": "照合",
       "sublabel": "根拠の実在を確かめる",
       "width": 148
     },
     {
-      "id": "filing",
+      "id": "handover",
       "lane": "code",
-      "col": 5,
+      "col": 4,
       "type": "messagebus",
-      "label": "担当者に送る",
-      "sublabel": "問いと調査内容を添える",
+      "label": "担当者に渡す",
+      "sublabel": "番が移る。終わらない",
       "width": 148
     },
     {
-      "id": "knowledge",
-      "lane": "sources",
-      "col": 2,
-      "type": "database",
-      "label": "コード・FAQ・用語",
-      "sublabel": "読み取り専用の検索",
+      "id": "precedent",
+      "lane": "code",
+      "col": 5,
+      "type": "messagebus",
+      "label": "先例を残す",
+      "sublabel": "置き場所ごとに溜める",
+      "width": 148
+    },
+    {
+      "id": "operator",
+      "lane": "staff",
+      "col": 4,
+      "type": "external",
+      "label": "担当者が決める",
+      "sublabel": "聞き返す・伝える・見送る",
+      "width": 160
+    },
+    {
+      "id": "owner",
+      "lane": "staff",
+      "col": 5,
+      "type": "external",
+      "label": "持ち主が決める",
+      "sublabel": "新しい決定だけ",
       "width": 148
     }
   ],
   "edges": [
     {
-      "id": "write-reception",
-      "from": "write",
-      "to": "reception",
+      "id": "intake-ai-in",
+      "from": "intake",
+      "to": "intake-ai",
       "variant": "emphasis"
     },
     {
-      "id": "reception-interviewer",
-      "from": "reception",
-      "to": "interviewer",
-      "label": "仕様の確認・不具合",
-      "variant": "emphasis"
-    },
-    {
-      "id": "interviewer-answer",
-      "from": "interviewer",
-      "to": "answer",
-      "variant": "emphasis"
-    },
-    {
-      "id": "answer-restater",
-      "from": "answer",
+      "id": "intake-restater",
+      "from": "intake-ai",
       "to": "restater",
       "variant": "emphasis"
     },
@@ -272,43 +285,62 @@
       "id": "investigator-verifier",
       "from": "investigator",
       "to": "verifier",
-      "variant": "emphasis",
-      "route": "drop",
-      "fromSide": "bottom",
-      "toSide": "top"
+      "variant": "emphasis"
     },
     {
       "id": "verifier-explainer",
       "from": "verifier",
       "to": "explainer",
-      "label": "確かめた根拠だけ",
+      "label": "確かめた事実だけ",
       "variant": "emphasis"
     },
     {
-      "id": "explainer-resolve",
+      "id": "explainer-check",
       "from": "explainer",
-      "to": "resolve",
+      "to": "check",
       "variant": "emphasis"
     },
     {
-      "id": "resolve-filing",
-      "from": "resolve",
-      "to": "filing",
-      "label": "未解決",
-      "variant": "default"
+      "id": "check-handover",
+      "from": "check",
+      "to": "handover",
+      "label": "解決していない",
+      "variant": "emphasis"
     },
     {
-      "id": "knowledge-investigator",
-      "from": "knowledge",
-      "to": "investigator",
-      "label": "検索して読む",
-      "variant": "dashed"
+      "id": "handover-advisor",
+      "from": "handover",
+      "to": "advisor",
+      "variant": "emphasis",
+      "route": "straight",
+      "fromSide": "top",
+      "toSide": "bottom"
     },
     {
-      "id": "explainer-filing",
+      "id": "advisor-operator",
+      "from": "advisor",
+      "to": "operator",
+      "label": "材料と案",
+      "variant": "emphasis"
+    },
+    {
+      "id": "operator-owner",
+      "from": "operator",
+      "to": "owner",
+      "label": "相談する",
+      "variant": "emphasis"
+    },
+    {
+      "id": "owner-precedent",
+      "from": "owner",
+      "to": "precedent",
+      "variant": "emphasis"
+    },
+    {
+      "id": "explainer-handover",
       "from": "explainer",
-      "to": "filing",
-      "label": "不具合は必ず送る",
+      "to": "handover",
+      "label": "答えられない・時間切れ",
       "variant": "default",
       "role": "branch"
     }

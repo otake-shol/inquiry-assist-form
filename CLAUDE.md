@@ -1,8 +1,10 @@
 # inquiry-assist-form
 
-社内メンバーの悩みを答えられる問いに整形し、ソースコードとFAQを根拠にした0次回答を返す問い合わせフォーム。
+社内の問い合わせを、誰の番かを見失わずに終わりまで運ぶ、AI 補助つきの問い合わせ対応ツール。本人の状況を答えられる問いに直し、ソースコードと FAQ を根拠に答え、答えきれない件は材料と案を添えて担当者に渡す。新しい決定は仕様の持ち主が下し、先例として残る。
 
-要件定義と実装計画: https://claude.ai/artifact/6ZYgbeXb2hwfhN9jN7F8pi
+- 枠組み（問い合わせとは何か、課題、登場人物、状態、規則）: `docs/framework.md`
+- 要件定義（要件ごとの実装状況つき）: `docs/requirements.md`
+- 業務フローとスキル設計の図解: `site/index.html`（GitHub Pages で公開）
 
 ## 構成
 
@@ -10,7 +12,7 @@
 | --- | --- |
 | `backend/` | Spring Boot（Java 21、Gradle Kotlin DSL） |
 | `backend/src/main/java/dev/inquiryassist/core/` | AI処理の型。画面・HTTP・Spring に依存させない |
-| `backend/src/main/java/dev/inquiryassist/core/skill/` | 5つのスキルの境界、受け渡す型、調査から説明までの流れ（`AnswerPipeline`） |
+| `backend/src/main/java/dev/inquiryassist/core/skill/` | 8つのスキルの境界、受け渡す型、調査から説明までの流れ（`AnswerPipeline`） |
 | `backend/src/main/java/dev/inquiryassist/mock/` | スキルと一次情報の検索のモック実装 |
 | `backend/src/main/resources/db/migration/` | 保存スキーマ（Flyway）。適用済みの版は書き換えず、新しい版を足す |
 | `frontend/` | React + TypeScript + Vite（SPA）。`/`、`/inquiries`、`/inquiries/{id}` が本人向け、`/operator` が担当者向け、`/owner` が仕様の持ち主向け、`/precedents` が先例の一覧 |
