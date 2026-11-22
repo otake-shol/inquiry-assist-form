@@ -1,12 +1,24 @@
 ---
 type: spec
-title: フォームAPIの契約
-description: 問い合わせフォームの画面とAPIの間のHTTP契約。状態遷移、エンドポイント、エラー、モックのシナリオを定める。
+title: 画面と API の契約
+description: 問い合わせアシストの画面と API の間の HTTP の契約。状態と遷移、本人・担当者・仕様の持ち主それぞれの口、エラー、設定、モックのシナリオを定める。
 ---
 
-# フォームAPIの契約
+# 画面と API の契約
 
-画面（`frontend/`）とAPI（`backend/`）はこの契約だけを共有する。変更するときは両方の実装とテストを同時に直す。
+画面（`frontend/`）と API（`backend/`）は、この契約だけを共有する。変更するときは、両方の実装とテストを同時に直す。
+
+この文書は、いまの仕様だけを書く。経緯（何を足し、何を削ったか）は書かない。削った機能の一覧は `status.md` にある。
+
+| 章 | 内容 |
+| --- | --- |
+| 用語、状態、言語、入口の質問 | どの口にも共通する決まり |
+| 本人向けの API | 問い合わせる本人の口（`/api/inquiries`）と、応答の形（InquiryView） |
+| 担当者向けの API | 担当者の口（`/api/operator`）。調査の状況、AI の案、訳、通知 |
+| 仕様の持ち主への相談 | 相談、決定、先例（`/api/owner`、`/api/precedents`） |
+| 画面の URL、スキルの実行記録、エラー、設定、開発用、モックのシナリオ | そのほか |
+
+本人向けの口には、1 から 12 の番号がある。番号は口の名前で、本文から「（7）」のように指す。
 
 ## 用語
 
@@ -19,7 +31,7 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 
 ## 状態
 
-問い合わせ1件の状態は、4つの項目で表す。以前の「段階」「結果」「対応状況」は、これに置き換えた。
+問い合わせ1件の状態は、4つの項目で表す。
 
 | 項目 | 値 | 意味 |
 | --- | --- | --- |
@@ -71,7 +83,7 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
   | `REOPENED` | 本人が、終わった件に追記した |
   | `DECIDED` | 仕様の持ち主が、相談に答えて決めた（担当者の番に戻った） |
 
-- 初めて渡したときに、担当者に通知する（「オペレータへの通知」の節）。その時刻を `handedOverAt` に持つ。2回目以降は通知しない（担当者のボードには、番が戻ったことが即時に届く）。
+- 初めて渡したときに、担当者に通知する（「担当者への通知」の節）。その時刻を `handedOverAt` に持つ。2回目以降は通知しない（担当者のボードには、番が戻ったことが即時に届く）。
 - 担当者の側の未読（`read`）を `false` にする。
 
 ### 本人が結果を確かめる
@@ -132,74 +144,100 @@ InquiryView と担当者向けの詳細は、`noReply` を持つ。
 - `endsAs` は、期間が過ぎたときの終わり方。`ANSWERED` か `WITHDRAWN`。
 - `remindAt` は、知らせる予定の時刻。`remindedAt` は、実際に知らせた時刻（まだなら `null`）。`closesAt` は、終わる予定の時刻（知らせた後だけ非 null）。
 
-### 開発用: 決まりの判定を、時刻を指定して行う
+### 状態の履歴（history）
 
-`POST /api/dev/rules/run`。リクエスト `{ "now": "2026-12-01T00:00:00Z" }`（`now` は省略でき、省略すると現在時刻）。与えた時刻を現在として、上の判定を1回行う。知らせた時刻（`remindedAt`）や履歴の時刻にも、与えた時刻を使う。
-
-`200` `{ "reminded": 1, "closed": 0 }`（知らせた件数と、終えた件数）。
-
-手元とスモークで、期間が過ぎるのを待たずに確かめるための口。`production` プロファイルでは存在しない（`404`）。
-
-## InquiryView
-
-すべてのエンドポイント（1を除く）が返す、問い合わせ1件の表現。
+状態が変わるたびに、1件ずつ記録する。誰の番にどれだけ時間がかかったかを、後から測るため（測る画面は、まだない。記録は後から作り直せないので、最初から残している）。
 
 ```json
-{
-  "id": "0b9c…(UUID)",
-  "createdAt": "2026-11-22T03:00:00Z",
-  "language": "ja",
-  "phase": "INTAKE",
-  "turn": "ASKER",
-  "awaiting": "INTAKE_ANSWER",
-  "ending": null,
-  "closedBy": null,
-  "declined": null,
-  "urgency": "NORMAL",
-  "type": { "id": "LOOKS_WRONG", "label": "おかしいかもしれない", "by": "ASKER" },
-  "system": { "id": "system-a", "label": "システムA", "by": "ASKER" },
-  "function": null,
-  "utterance": null,
-  "intake": {
-    "entries": [
-      { "questionId": "type", "kind": "TYPE", "text": "何をしたいですか",
-        "answer": { "kind": "OPTION", "optionId": "LOOKS_WRONG", "label": "おかしいかもしれない" } },
-      { "questionId": "system", "kind": "SYSTEM", "text": "どのシステムですか",
-        "answer": { "kind": "OPTION", "optionId": "system-a", "label": "システムA" } }
-    ],
-    "next": { "questionId": "function", "kind": "FUNCTION", "text": "どの機能ですか",
-              "options": [{ "id": "a-1", "label": "機能A-1" }], "allowsText": false, "canSkip": false },
-    "complete": false
-  },
-  "revisionsLeft": 2,
-  "structured": null,
-  "answer": null,
-  "canSendNow": false,
-  "sentImmediately": false,
-  "handedOverAt": null,
-  "handoverReason": null,
-  "unreadReply": false,
-  "noReply": null,
-  "messages": [],
-  "trace": [],
-  "mock": true
-}
+{ "at": "2026-11-22T03:00:00Z", "actor": "OPERATOR", "event": "ASKED_BACK", "phase": "DECIDE", "turn": "ASKER", "awaiting": "ASKER_REPLY", "ending": null }
 ```
 
-- `type`、`system`、`function` は、決まっていなければ `null`。`by` は `ASKER`（本人が選んだ）、`AI`（AI が置いた）、`OPERATOR`（担当者が置き直した）のいずれか。本人が「わからない」と答え、AI も置けなかった場合は `null` のまま。
-- `utterance` は、本人が書いた文章。文章で始めた場合の本文、文章に切り替えたときの本文、補足のいずれか。複数ある場合は、書いた順に空行でつなぐ。何も書いていなければ `null`。
-- `intake.entries` は、答え終えた質問（聞いた順）。`intake.next` は、次に答える質問。入口が終わっていれば `null` で、`complete` が `true`。
-- `intake.entries[].answer.kind` は `OPTION`（選択肢を選んだ。`optionId` と `label`）、`TEXT`（文章で答えた。`text`）、`UNKNOWN`（わからない）、`SKIPPED`（補足を書かずに進んだ）、`INFERRED`（本人が書いた文章から AI が読み取った。選択肢なら `optionId` と `label`、文章で答える質問なら `text`）のいずれか。
-- `intake.next.kind` は `TYPE`、`SYSTEM`、`FUNCTION`、`DETAIL`、`NOTE` のいずれか。`options` が空の質問は文章で答える。`allowsText` が `true` の質問は、選択肢のほかに文章でも答えられる。`canSkip` は `NOTE` だけが `true` になりうる。「わからない」は、`NOTE` 以外のすべての質問で選べる（画面が常に出す）。
-- `phase`、`turn`、`awaiting`、`ending` は「状態」の節のとおり。`declined` は、見送りで終わった件だけが持つ（`{ "reasonKind": "KNOWN_LIMITATION", "reason": "理由の文章" }`）。`handedOverAt` は、担当者に初めて渡した時刻（渡していなければ `null`）。
-- `structured` は、問いを組み立てた後（`awaiting` が `QUESTION_CONFIRMATION` になった時点）から非 null。項目は `summary`（本人に見せる言い直しの文章。必須）、`targetSystem`、`goal`、`whatHappened`、`expectedResult`。`urgency` は `structured` から外し、問い合わせの `urgency` に一本化する。
-- `answer` は、答えの完了後に非 null。項目は `grounded`、`answered`、`askerExplanation`、`steps`、`memo`、`citations`。`steps` は、本人が自分で行える手順（`[{ "action": "求人管理画面で、対象の求人の編集を開く", "check": "編集の画面が開く" }]`。行う順。`check` は結果の確かめ方で、なければ `null`）。手順がなければ空配列。`answered` が `false` のときは、常に空配列。裏での調査の結果（担当者だけに見せるもの）は、本人向けの InquiryView では `null` のまま（「調査の状況と、裏での調査」の節）。
-- `handoverReason` は、直近に担当者へ渡した理由（「担当者に渡す」の節）。
-- `canSendNow` は、いま「答えを待たずに担当者へ送る」（8）を実行できるか。
-- `noReply` は、本人の返事を待っている間（結果の確かめ、聞き返しへの返事）だけ非 null（「返事がないとき」の節）。
-- `closedBy` は、問い合わせを終わらせた人。`ASKER`、`OPERATOR`、`TIME`（返事がないまま期間が過ぎた）のいずれか。終わっていない件は `null`。開き直すと `null` に戻る。
-- `revisionsLeft` は、言い直しを作り直せる残り回数（初期値2）。
-- 廃止した項目: `categoryByAi`、`category`、`questions`、`systemGuessed`、`submittedAnswers`、`incidentGuidance`。
+- `actor` は、その変化を起こした人。`ASKER`、`AI`、`OPERATOR`、`OWNER`（仕様の持ち主）、`TIME`（期間が過ぎたことで起きた）のいずれか。
+- `detail` は、`PLACEMENT_CHANGED` 以外では `null`。
+- `phase`、`turn`、`awaiting`、`ending` は、変化の後の状態。
+- `event` は次のいずれか。
+
+| `event` | 起こす人 | 意味 |
+| --- | --- | --- |
+| `CREATED` | 本人 | 問い合わせができた |
+| `QUESTION_COMPOSED` | AI | 問いを組み立てた（言い直しの確認へ） |
+| `REOPENED_INTAKE` | 本人 | 入口の質問へ戻った |
+| `QUESTION_CONFIRMED` | 本人 | 問いを確かめた |
+| `ANSWERED_BY_AI` | AI | AI が答えた（本人が確かめる） |
+| `HANDED_OVER` | 本人、AI、時間 | 担当者に渡した（答えを待たずに送った、解決していないと答えた、種類の経路で渡った、AI が答えられなかった、業務が止まっている）。調査の時間切れで渡した場合は、起こしたのは時間（`TIME`） |
+| `ASKED_BACK` | 担当者 | 本人に聞き返した |
+| `REPLIED` | 本人 | 聞き返しに答えた |
+| `RESULT_DELIVERED` | 担当者 | 結果を伝えた |
+| `RESOLVED` | 本人 | 解決を伝えた |
+| `DECLINED` | 担当者 | 見送った |
+| `WITHDRAWN` | 本人、時間 | 本人が取り下げた。または、聞き返しに返事がないまま期間が過ぎて、取り下げになった |
+| `REOPENED` | 本人 | 終わった件を、追記で開き直した |
+| `REMINDED` | 時間 | 返事がないことを、本人に知らせた（状態は変わらない） |
+| `ANSWERED` | 時間 | 返事がないまま期間が過ぎて、終わった |
+| `CONSULTED` | 担当者 | 仕様の持ち主に相談した |
+| `DECIDED` | 仕様の持ち主 | 相談に答えて決めた（先例が1つできた） |
+| `CONSULTATION_CANCELED` | 担当者 | 相談を取り下げた |
+| `PHASE_CHANGED` | 担当者 | 区間を変えた。この出来事を起こす操作は、いまはない。古い履歴にだけ現れる |
+| `PLACEMENT_CHANGED` | 担当者 | 置き直した。この出来事だけ `detail` を持つ: `{ "before": { "type": "おかしいかもしれない", "system": "システムA", "function": null }, "after": { … } }`。値は、既定の言語の名前。決まっていなければ `null` |
+
+履歴は、担当者向けの詳細（`history`）にだけ返す。本人向けの InquiryView には含めない。番が変わらない操作（担当者の番の間の本人の追記、既読）は、履歴に入れない。時間が起こした出来事（`REMINDED`）は、番が変わらなくても入れる。
+
+## 言語
+
+画面と API は、複数の言語に対応する。使える言語は設定 `inquiry.languages`（既定は `ja`、`en`）で、先頭が既定の言語。
+
+### 文章の4つの種類
+
+どの言語で出すかは、文章の種類で決まる。
+
+| 種類 | 例 | 言語 |
+| --- | --- | --- |
+| 画面の固定の文言 | ボタン、見出し、状態を表す言葉 | 見る人の言語。画面が持つ |
+| 設定の名前と、API が組み込みで持つ文言 | 種類、緊急度、システム、機能、マスの質問と選択肢、`filedGuidance`、入口の決まった質問 | 見る人の言語。API が返す |
+| 書かれた内容 | 本人の文章、AI が書いた質問・言い直し・事実・説明、担当者の発言、見送りの理由 | 書かれたときの言語のまま。訳さない |
+| 資料の引用 | 根拠の `quote`、資料の題名と場所 | 資料の原文のまま |
+
+### 見る人の言語
+
+リクエストごとに決まる。
+
+- `Accept-Language` ヘッダーに書かれた順に、使える言語と比べる（`en-US` は `en` として比べる）。最初に当てはまった言語を使う。
+- 当てはまる言語がなければ、既定の言語。
+- ヘッダーを付けられない接続（6 と `GET /api/operator/stream`）は、クエリの `lang` で渡す。`lang` があれば、ヘッダーより優先する。
+- その言語の名前が設定にない項目は、項目ごとに、既定の言語の名前で返す。
+
+見る人の言語で返すもの:
+
+- `GET /api/config` の `types`、`urgencies`、`systems`、`filedGuidance`
+- InquiryView と一覧の、種類・緊急度・システム・機能の `label`
+- `intake` の質問文、選択肢、答えの名前。設定から来たものと、入口の決まった質問（下の表）。AI が作った質問は「書かれた内容」なので、作ったときの言語のまま
+- 置き場所の名前から作る `summary`（言い直しも本人の文章もない件。名前の区切りは、`ja` が「・」、`en` が「 / 」）と、名前もない件の `summary`（`（内容なし）`／`(No content)`）。言い直しや本人の文章から作る `summary` は「書かれた内容」なので、書かれたときの言語のまま
+
+| 入口の決まった質問 | `ja` | `en` |
+| --- | --- | --- |
+| 種類 | 何をしたいですか | What can we help you with? |
+| システム | どのシステムですか | Which system is it about? |
+| 機能 | どの機能ですか | Which function is it about? |
+| 補足（任意） | 補足があれば書いてください | Add anything else you would like to tell us |
+| 補足（必須） | 状況を一言で教えてください | Tell us briefly what is happening |
+
+### 本人の言語（`language`）
+
+問い合わせが持つ。InquiryView、本人の一覧（10）、担当者の一覧と詳細に `language`（`"ja"` など）として返す。
+
+- 作成（2）のときの、見る人の言語で決まる。
+- その後、本人が行う状態を変えるリクエスト（3〜5b、7、8、11、12）のたびに、そのリクエストの言語に合わせ直す。本人が途中で画面の言語を切り替えた場合に、次に AI が書くものから新しい言語になる。
+- 取得（GET）と、担当者の操作では変わらない。
+- AI は、本人の言語で書く。対象は、聞き手が作る質問と選択肢、言い直し（文章と `structured` の各項目）、調査の事実と `memo`、説明、調べている間の進捗の文言。
+- 既に書かれたものは、本人の言語が変わっても書き直さない。
+- `structured.targetSystem` に入れるシステムの名前は、本人の言語の名前。
+
+### 言語を切り替えないもの
+
+- エラーの `message`。開発者向けで、画面は `code` から文言を決める。
+- 状態の履歴の `detail`（置き直しの前後の名前）。既定の言語の名前を、置き直した時点で保存する。
+- Slack への通知。既定の言語で書く。
+- `GET /api/config` の `user.name` と `operatorName`（認証を加えるまでの固定値）。
 
 ## 入口の質問
 
@@ -259,64 +297,114 @@ inquiry:
 
 設定の文言（種類、システム、機能、質問、選択肢の名前、`filed-guidance`）は、言語ごとの名前の対応で持つ（`{ ja: …, en: … }`）。API が返す `label` と `text` は、見る人の言語の名前（次の「言語」の節）。
 
-## 言語
+## 本人向けの API
 
-画面と API は、複数の言語に対応する。使える言語は設定 `inquiry.languages`（既定は `ja`、`en`）で、先頭が既定の言語。
+本人の口は `/api/inquiries` 配下に置く。扱えるのは、現在の利用者が作った問い合わせだけ（他人の問い合わせは `NOT_FOUND`）。設定（1）、進捗（6）、一覧（10）を除いて、応答は InquiryView。
 
-### 文章の4つの種類
+担当者だけに見せる情報（確かめられなかった内容、裏での調査の結果、AI の案、相談、決定、先例、訳）は、本人向けの応答に含めない。画面で隠すのではなく、API が返さない。
 
-どの言語で出すかは、文章の種類で決まる。
+### InquiryView
 
-| 種類 | 例 | 言語 |
-| --- | --- | --- |
-| 画面の固定の文言 | ボタン、見出し、状態を表す言葉 | 見る人の言語。画面が持つ |
-| 設定の名前と、API が組み込みで持つ文言 | 種類、緊急度、システム、機能、マスの質問と選択肢、`filedGuidance`、入口の決まった質問 | 見る人の言語。API が返す |
-| 書かれた内容 | 本人の文章、AI が書いた質問・言い直し・事実・説明、担当者の発言、見送りの理由 | 書かれたときの言語のまま。訳さない |
-| 資料の引用 | 根拠の `quote`、資料の題名と場所 | 資料の原文のまま |
+本人向けの口（1 と 10 を除く）が返す、問い合わせ1件の表現。
 
-### 見る人の言語
+```json
+{
+  "id": "0b9c…(UUID)",
+  "createdAt": "2026-11-22T03:00:00Z",
+  "language": "ja",
+  "phase": "INTAKE",
+  "turn": "ASKER",
+  "awaiting": "INTAKE_ANSWER",
+  "ending": null,
+  "closedBy": null,
+  "declined": null,
+  "urgency": "NORMAL",
+  "type": { "id": "LOOKS_WRONG", "label": "おかしいかもしれない", "by": "ASKER" },
+  "system": { "id": "system-a", "label": "システムA", "by": "ASKER" },
+  "function": null,
+  "utterance": null,
+  "intake": {
+    "entries": [
+      { "questionId": "type", "kind": "TYPE", "text": "何をしたいですか",
+        "answer": { "kind": "OPTION", "optionId": "LOOKS_WRONG", "label": "おかしいかもしれない" } },
+      { "questionId": "system", "kind": "SYSTEM", "text": "どのシステムですか",
+        "answer": { "kind": "OPTION", "optionId": "system-a", "label": "システムA" } }
+    ],
+    "next": { "questionId": "function", "kind": "FUNCTION", "text": "どの機能ですか",
+              "options": [{ "id": "a-1", "label": "機能A-1" }], "allowsText": false, "canSkip": false },
+    "complete": false
+  },
+  "revisionsLeft": 2,
+  "structured": null,
+  "answer": null,
+  "canSendNow": false,
+  "sentImmediately": false,
+  "handedOverAt": null,
+  "handoverReason": null,
+  "unreadReply": false,
+  "noReply": null,
+  "messages": [],
+  "trace": [],
+  "mock": true
+}
+```
 
-リクエストごとに決まる。
+- `type`、`system`、`function` は、決まっていなければ `null`。`by` は `ASKER`（本人が選んだ）、`AI`（AI が置いた）、`OPERATOR`（担当者が置き直した）のいずれか。本人が「わからない」と答え、AI も置けなかった場合は `null` のまま。
+- `utterance` は、本人が書いた文章。文章で始めた場合の本文、文章に切り替えたときの本文、補足のいずれか。複数ある場合は、書いた順に空行でつなぐ。何も書いていなければ `null`。
+- `intake.entries` は、答え終えた質問（聞いた順）。`intake.next` は、次に答える質問。入口が終わっていれば `null` で、`complete` が `true`。
+- `intake.entries[].answer.kind` は `OPTION`（選択肢を選んだ。`optionId` と `label`）、`TEXT`（文章で答えた。`text`）、`UNKNOWN`（わからない）、`SKIPPED`（補足を書かずに進んだ）、`INFERRED`（本人が書いた文章から AI が読み取った。選択肢なら `optionId` と `label`、文章で答える質問なら `text`）のいずれか。
+- `intake.next.kind` は `TYPE`、`SYSTEM`、`FUNCTION`、`DETAIL`、`NOTE` のいずれか。`options` が空の質問は文章で答える。`allowsText` が `true` の質問は、選択肢のほかに文章でも答えられる。`canSkip` は `NOTE` だけが `true` になりうる。「わからない」は、`NOTE` 以外のすべての質問で選べる（画面が常に出す）。
+- `phase`、`turn`、`awaiting`、`ending` は「状態」の節のとおり。`declined` は、見送りで終わった件だけが持つ（`{ "reasonKind": "KNOWN_LIMITATION", "reason": "理由の文章" }`）。`handedOverAt` は、担当者に初めて渡した時刻（渡していなければ `null`）。
+- `structured` は、問いを組み立てた後（`awaiting` が `QUESTION_CONFIRMATION` になった時点）から非 null。項目は `summary`（本人に見せる言い直しの文章。必須）、`targetSystem`、`goal`、`whatHappened`、`expectedResult`。緊急度は `structured` に含めない（問い合わせの `urgency` が持つ）。
+- `answer` は、答えの完了後に非 null（下の「答え（answer）」）。項目は `grounded`、`answered`、`askerExplanation`、`steps`、`memo`、`citations`。`steps` は、本人が自分で行える手順（`[{ "action": "求人管理画面で、対象の求人の編集を開く", "check": "編集の画面が開く" }]`。行う順。`check` は結果の確かめ方で、なければ `null`）。手順がなければ空配列。`answered` が `false` のときは、常に空配列。裏での調査の結果（担当者だけに見せるもの）は、本人向けの InquiryView では `null` のまま（「調査の状況と、裏での調査」の節）。
+- `handoverReason` は、直近に担当者へ渡した理由（「担当者に渡す」の節）。
+- `canSendNow` は、いま「答えを待たずに担当者へ送る」（8）を実行できるか。
+- `noReply` は、本人の返事を待っている間（結果の確かめ、聞き返しへの返事）だけ非 null（「返事がないとき」の節）。
+- `closedBy` は、問い合わせを終わらせた人。`ASKER`、`OPERATOR`、`TIME`（返事がないまま期間が過ぎた）のいずれか。終わっていない件は `null`。開き直すと `null` に戻る。
+- `revisionsLeft` は、言い直しを作り直せる残り回数（初期値2）。
 
-- `Accept-Language` ヘッダーに書かれた順に、使える言語と比べる（`en-US` は `en` として比べる）。最初に当てはまった言語を使う。
-- 当てはまる言語がなければ、既定の言語。
-- ヘッダーを付けられない接続（6 と `GET /api/operator/stream`）は、クエリの `lang` で渡す。`lang` があれば、ヘッダーより優先する。
-- その言語の名前が設定にない項目は、項目ごとに、既定の言語の名前で返す。
+### 答え（answer）
 
-見る人の言語で返すもの:
+調査、照合、説明の結果（内部の構成は `skill-architecture.md`）。InquiryView と、担当者向けの詳細の両方が持つ。
 
-- `GET /api/config` の `types`、`urgencies`、`systems`、`filedGuidance`
-- InquiryView と一覧の、種類・緊急度・システム・機能の `label`
-- `intake` の質問文、選択肢、答えの名前。設定から来たものと、入口の決まった質問（下の表）。AI が作った質問は「書かれた内容」なので、作ったときの言語のまま
-- 置き場所の名前から作る `summary`（言い直しも本人の文章もない件。名前の区切りは、`ja` が「・」、`en` が「 / 」）と、名前もない件の `summary`（`（内容なし）`／`(No content)`）。言い直しや本人の文章から作る `summary` は「書かれた内容」なので、書かれたときの言語のまま
+| 項目 | 中身 |
+| --- | --- |
+| `grounded` | 照合を通った根拠を持つ事実が、1つ以上あるか |
+| `answered` | 確かめられた事実が、本人の問いに答えているか（説明のスキルの判定）。`grounded` が `false` なら、常に `false` |
+| `askerExplanation` | 本人向けの説明。確かめられた事実（`memo.findings`）だけから書かれる。`grounded` でなければ `null`。`answered` が `false` のときは、確認できなかったことと、関連して分かったこと |
+| `steps` | 本人が自分で行える手順。`answered` が `false` なら、常に空配列 |
+| `memo` | `findings`（確かめられた事実の文）、`unconfirmed`（根拠を確かめられなかった事実の文）、`notFound`（調べたが見つからなかったこと）、`nextChecks`（次に確認すること） |
+| `citations` | 出典。本人向けは、照合を通ったものだけ。担当者向けは、照合に落ちたものも含め、各出典に `verified` を付ける |
 
-| 入口の決まった質問 | `ja` | `en` |
-| --- | --- | --- |
-| 種類 | 何をしたいですか | What can we help you with? |
-| システム | どのシステムですか | Which system is it about? |
-| 機能 | どの機能ですか | Which function is it about? |
-| 補足（任意） | 補足があれば書いてください | Add anything else you would like to tell us |
-| 補足（必須） | 状況を一言で教えてください | Tell us briefly what is happening |
+- `grounded` と `answered` を分けるのは、根拠はあるが的外れな事実しか集まらなかった場合に、それを答えとして見せないため。
+- **`memo.unconfirmed` は、担当者にだけ返す。** 本人向けの InquiryView では、常に空配列。裏づけのない内容は、本人には真偽を判断できず、読めばそのまま試してしまうおそれがあるため。担当者の画面は「根拠を確かめられなかったこと」として、分かったこと（`findings`）と区別して示す。
+- 本人向けの画面の扱い:
 
-### 本人の言語（`language`）
+  | `grounded` | `answered` | 表示 |
+  | --- | --- | --- |
+  | `true` | `true` | 説明を主に示し、解決したかを尋ねる（「解決しました」を主のボタンにする） |
+  | `true` | `false` | 「ご質問への答えは、手元の資料では確認できませんでした。」と示し、その下に「関連して分かったこと」として説明を出す。ボタンは出さない（答えの完了と同時に、担当者に渡っている） |
+  | `false` | `false` | 「手元の資料からは答えを見つけられませんでした。」ボタンは出さない（同上） |
 
-問い合わせが持つ。InquiryView、本人の一覧（10）、担当者の一覧と詳細に `language`（`"ja"` など）として返す。
+- **説明だけが失敗した場合**（調査と照合は成功）: 調査の結果（技術メモ、出典と照合の結果）は保存する。本人が待っている間は、進捗ストリームに `failed` を流し、`awaiting` は `INVESTIGATION` のままにして、本人向けの `answer` を `null` のままにする（説明がない状態を「答えが見つからなかった」と誤って見せないため）。本人がつなぎ直して調査が成功すれば、保存済みの内容は新しい結果で置き換わる。担当者に渡った後は、担当者向けの詳細の `answer` に保存済みの内容が入り、`grounded` は `false`、`askerExplanation` は `null` になる。
 
-- 作成（2）のときの、見る人の言語で決まる。
-- その後、本人が行う状態を変えるリクエスト（3〜5b、7、8、11、12）のたびに、そのリクエストの言語に合わせ直す。本人が途中で画面の言語を切り替えた場合に、次に AI が書くものから新しい言語になる。
-- 取得（GET）と、担当者の操作では変わらない。
-- AI は、本人の言語で書く。対象は、聞き手が作る質問と選択肢、言い直し（文章と `structured` の各項目）、調査の事実と `memo`、説明、調べている間の進捗の文言。
-- 既に書かれたものは、本人の言語が変わっても書き直さない。
-- `structured.targetSystem` に入れるシステムの名前は、本人の言語の名前。
+### メッセージ（messages）
 
-### 言語を切り替えないもの
+担当者の発言と本人の追記を、1本の時系列として持つ。
 
-- エラーの `message`。開発者向けで、画面は `code` から文言を決める。
-- 状態の履歴の `detail`（置き直しの前後の名前）。既定の言語の名前を、置き直した時点で保存する。
-- Slack への通知。既定の言語で書く。
-- `GET /api/config` の `user.name` と `operatorName`（認証を加えるまでの固定値）。
+```json
+{ "id": "UUID", "from": "OPERATOR", "kind": "ASK", "authorName": "担当者（開発用）", "body": "本文", "createdAt": "2026-11-21T12:00:00Z" }
+```
 
-## エンドポイント
+- `from` は `OPERATOR`（担当者）か `ASKER`（本人）。
+- `kind` は、担当者の発言では `ASK`（聞き返し）、`RESULT`（結果）、`DECLINE`（見送りの連絡）のいずれか。本人の追記では `NOTE`。
+- `authorName` は表示用の名前。認証を加えるまでは、設定の固定値（`inquiry.dev.operator-name`、`inquiry.dev.user-name`）。
+- 古い順に並べる。編集と削除はできない。
+
+### 未読
+
+- **担当者側**（`read`）: 番が担当者に移るたび、また担当者の番の間に本人が追記するたびに、`false` に戻す。
+- **本人側**（`unreadReply`）: 担当者が発言すると `true`、本人がその問い合わせを取得（9）すると `false` になる。返事がないことを知らせたとき、期間が過ぎて終えたときも `true` にする（「返事がないとき」の節）。
 
 ### 1. `GET /api/config`
 
@@ -337,7 +425,11 @@ inquiry:
 }
 ```
 
-`types` は5つを、聞く順（上の用語の順）で返す。`incidentGuidance` は廃止。`types`、`urgencies`、`systems`、`filedGuidance` は、見る人の言語で返す（「言語」の節）。`languages` は、使える言語の一覧（先頭が既定の言語）。
+`types` は5つを、聞く順（「用語」の順）で返す。`types`、`urgencies`、`systems`、`filedGuidance` は、見る人の言語で返す（「言語」の節）。`languages` は、使える言語の一覧（先頭が既定の言語）。
+
+- `skills` は、スキルの識別子から、動いている実装の名前（`mock` または `ollama`）への対応。`mock` は、スキルか一次情報の検索に、1つでもモックがあれば `true`。画面は、モックの案内枠に、どのスキルがモックかを示す。モックのシナリオのタグは、モックで動いているスキルにだけ効く（受付が実際のモデルなら、`[判定エラー]` を書いても失敗しない）。
+- `trace` は、スキルの実行記録を返すかどうか（「スキルの実行記録」の節）。
+- `user` と `operatorName` は、画面に出す名前。認証がないので、設定の固定値（`inquiry.dev.*`）。
 
 ### 2. `POST /api/inquiries`
 
@@ -371,7 +463,7 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 - 次の質問があれば、`intake.next` に入る（`awaiting: INTAKE_ANSWER`）。
 - 最後の質問に答えた場合は、言い直しのスキルが問いを組み立て、`awaiting: QUESTION_CONFIRMATION` にする。
 - 最後の質問に答え、緊急度が `BLOCKED` の場合は、問いを組み立てたうえで担当者に渡す（`sentImmediately: true`）。言い直しが失敗した場合も、組み立てなしで同じく担当者に渡す。
-- 言い直しのスキルが失敗した場合（`BLOCKED` 以外）は、答えを保存したうえで、エラー（`AI_REFUSED` は422、`AI_UNAVAILABLE` は503）を返す。本文に `inquiryId` を含める。`awaiting` は `INTAKE_ANSWER` のまま、`intake.complete` は `true`、`canSendNow` は `true` になる。エラーの本文には状態を含めないので、画面は `inquiryId` で取得（9）し直して、状態を反映する。同じ操作をやり直す方法は、5b（入口の質問へ戻る）ではなく、`POST /api/inquiries/{id}/intake/compose`（本文なし。問いの組み立てだけをやり直す。`intake.complete` が `true` で `awaiting` が `INTAKE_ANSWER` のときだけ有効）。
+- 言い直しのスキルが失敗した場合（`BLOCKED` 以外）は、答えを保存したうえで、エラー（`AI_REFUSED` は422、`AI_UNAVAILABLE` は503）を返す。本文に `inquiryId` を含める。`awaiting` は `INTAKE_ANSWER` のまま、`intake.complete` は `true`、`canSendNow` は `true` になる。エラーの本文には状態を含めないので、画面は `inquiryId` で取得（9）し直して、状態を反映する。やり直すには、5b（入口の質問へ戻る）ではなく、3c（問いの組み立てをやり直す）を使う。
 
 ### 3a. `POST /api/inquiries/{id}/intake/back`
 
@@ -384,6 +476,14 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 リクエスト `{ "text": "1〜4000文字" }`。文章で書く道に切り替える。`awaiting` が `INTAKE_ANSWER` のときだけ有効。
 
 `200` InquiryView。「文章で書く」の決まりで、まだ答えていない置き場所を置く。答えかけの質問（`intake.next`）は、置けなければ改めて聞く。
+
+### 3c. `POST /api/inquiries/{id}/intake/compose`
+
+本文なし。問いの組み立て（言い直し）だけを、やり直す。入口の質問は終わっているのに、言い直しのスキルが失敗して先へ進めない場合に使う。
+
+有効なのは、`awaiting` が `INTAKE_ANSWER` で、`intake.complete` が `true` のとき。それ以外は `INVALID_STATE`。
+
+`200` InquiryView（`awaiting: QUESTION_CONFIRMATION`。緊急度が `BLOCKED` なら、問いを確かめずに担当者に渡る）。もう一度失敗した場合は、3 と同じ形のエラー。
 
 ### 4. `PUT /api/inquiries/{id}/urgency`
 
@@ -433,6 +533,7 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | 調査を待つ状態が、既に終わっている（`awaiting` が `INVESTIGATION` でない） | すぐに `done`（いまの InquiryView）を流す。ページを開き直した場合や、つなぐ前に調査が終わった場合 |
 | `awaiting: INVESTIGATION` で、調査が走っていない（失敗した後） | 調査を始めて、1行目と同じ。これが再試行になる |
 
+- 進捗の文言は、調査のスキルが決める。続けて「根拠を確かめています」が流れ、根拠があれば、さらに「答えをまとめています」が流れる。
 - 完了時: 種類ごとの経路の表のとおり。`LOOKS_WRONG` は担当者に渡す（`handoverReason: ROUTE`）。それ以外の種類は、`answer.grounded` と `answer.answered` がともに `true` なら本人が確かめ（`turn: ASKER`、`awaiting: RESULT_CONFIRMATION`）、そうでなければ担当者に渡す（`DO_FOR_ME` は `ROUTE`、ほかは `NO_ANSWER`）。担当者に渡した場合も、`done` の InquiryView の `answer` には結果が入る（本人は、調べた結果を見たうえで、引き継がれたことを知る）。
 - **時間切れ**: 調査を始めてから `inquiry.rules.answer-timeout`（既定 `60s`）が過ぎても、まだ `awaiting: INVESTIGATION` なら、担当者に渡す（`handoverReason: TIMEOUT`。履歴の出来事は `HANDED_OVER`、起こしたのは `TIME`）。画面がつないでいるかどうかに関係なく、API が行う。つないでいれば、`done` を流してストリームを閉じる（この InquiryView の `answer` は `null`）。調査が走っていれば、打ち切らずに裏で続け、結果は担当者だけに渡す（「調査の状況と、裏での調査」の節）。調査が失敗したまま、本人が再試行も送ることもしなかった場合も、同じ時点で担当者に渡る。**問い合わせが、AI の番のまま残ることはない。**
 - 失敗時の `code`: `AI_REFUSED`／`AI_UNAVAILABLE`。失敗しても `awaiting` は `INVESTIGATION` のままで、つなぎ直しによる再試行と「答えを待たずに担当者へ送る」（8）ができる（時間切れになるまで）。
@@ -463,178 +564,51 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 
 ### 9. `GET /api/inquiries/{id}`
 
+`200` InquiryView。取得すると、その問い合わせの `unreadReply` を `false` にする。
+
+### 10. `GET /api/inquiries`
+
+自分（現在の利用者）が作った問い合わせの一覧（新しい順、最大50件）。
+
+`200` `{ "unreadReplyCount": 1, "items": [{ "id", "createdAt", "language", "summary", "urgency", "phase", "turn", "awaiting", "ending", "handedOverAt", "unreadReply", "messageCount" }] }`。`summary` は、担当者向けの一覧と同じ決まり。`handedOverAt` は、結果を確かめている件の結果が、AI の答えか担当者の結果かを見分けるために使う（担当者に渡したことがあれば、担当者の結果）。
+
+### 本人の操作（担当者に渡した後）
+
+| 操作 | エンドポイント | 実行できるとき | その後 |
+| --- | --- | --- | --- |
+| 結果を確かめる | 7 | `awaiting: RESULT_CONFIRMATION` | 「本人が結果を確かめる」の決まりのとおり |
+| 追記する | 11 | 担当者に渡したことがあり、本人が取り下げていない。または、担当者に渡したことがなく、`RESOLVED` か `ANSWERED` で終わっている | 下の表 |
+| 取り下げる | 12 | 終わっていない | 終わる（`ending: WITHDRAWN`） |
+
+追記（11）の後は、追記したときの状態で決まる。
+
+| 追記したときの状態 | その後 |
+| --- | --- |
+| 担当者の番（`HANDLING`） | 番は変えない。担当者の側を未読に戻す |
+| 聞き返しへの返事を待っている（`ASKER_REPLY`） | 担当者の番にする（`HANDLING`） |
+| 担当者の結果を確かめている（`RESULT_CONFIRMATION`） | 担当者の番にする（「解決していない」と答えたのと同じ） |
+| 終わっている（`RESOLVED`、`ANSWERED`、`DECLINED`、時間で終わった `WITHDRAWN`） | 開き直す。終わり方を消し、区間を終わる前に戻して、担当者の番にする |
+| 担当者に渡したことがなく、`RESOLVED` か `ANSWERED` で終わっている（AI の答えで解決したと伝えたが、やはり足りなかった。または、AI の答えに返事がなかった） | 開き直して、担当者に渡す（「担当者に渡す」の決まりのとおり。区間は種類で決まり、初めて渡すので担当者に通知する）。履歴の出来事は `REOPENED` |
+
+担当者に渡したことのない問い合わせ（上の、`RESOLVED` か `ANSWERED` で終わっている場合を除く）、本人が取り下げた問い合わせ（`ending: WITHDRAWN` で `closedBy: ASKER`）への追記は `INVALID_STATE`。
+
+### 11. `POST /api/inquiries/{id}/messages`
+
+リクエスト `{ "body": "1〜4000文字" }`。本人が追記する。上の「本人の操作」の決まりのとおり。
+
 `200` InquiryView。
 
-## エラー
+### 12. `POST /api/inquiries/{id}/withdraw`
 
-本文は `{ "code": "…", "message": "…" }`。
+本文なし。本人が取り下げる。終わっていない問い合わせで有効（終わっていれば `INVALID_STATE`）。
 
-| HTTP | code | 場合 |
-| --- | --- | --- |
-| 400 | `VALIDATION` | 入力が不正 |
-| 404 | `NOT_FOUND` | 問い合わせが存在しない |
-| 409 | `INVALID_STATE` | その段階では実行できない操作 |
-| 422 | `AI_REFUSED` | モデルが回答を拒否した |
-| 503 | `AI_UNAVAILABLE` | モデルを呼び出せなかった |
+`200` InquiryView（`phase: CLOSED`、`ending: WITHDRAWN`）。担当者に渡したことのある問い合わせなら、担当者のストリームに `updated` を流す。
 
-`AI_REFUSED` と `AI_UNAVAILABLE` では、画面は `canSendNow` を見て、送れる場合は「担当者に送る」へ誘導する。
+## 担当者向けの API
 
-## モックのシナリオ
+担当者の口は `/api/operator` 配下に置く。対象は、担当者に渡したことのある問い合わせだけ（そうでない問い合わせは `NOT_FOUND`）。認証は、まだない（手元での利用に限る。認証は SSO で加える）。
 
-モックの実装は、本人が書いた文章（`utterance`。文章で始めた本文、切り替えた本文、補足）でシナリオを選ぶ。押して答えただけで文章がない場合は、すべて正常系になる。
-
-### 受付（文章から置き場所を置く）
-
-種類は、文章に含まれる語で決まる。優先順位は上から。
-
-| 文章に含まれる語 | 種類 |
-| --- | --- |
-| `変えてほしい`、`要望`、`改善` | `CHANGE_REQUEST` |
-| `依頼`、`してほしい`、`お願いします`、`してください` | `DO_FOR_ME` |
-| `不具合`、`バグ`、`おかしい` | `LOOKS_WRONG` |
-| `使い方`、`やり方`、`手順`、`どうやって` | `HOW_TO` |
-| 上記以外 | `HOW_IT_WORKS` |
-
-英語の文章のために、次の語も同じ優先順位で見る（大文字と小文字を区別しない）: `CHANGE_REQUEST` は `feature request`、`improve`。`DO_FOR_ME` は `please`、`could you`。`LOOKS_WRONG` は `bug`、`wrong`、`broken`。`HOW_TO` は `how to`、`how do i`。
-
-システムは、文章に設定のシステムの名前（どの言語の `label` でも。英字は大文字と小文字を区別しない）が含まれていれば、そのシステム。機能は、システムが決まっていて、文章にそのシステムの機能の名前が含まれていれば、その機能。含まれていなければ置かない（質問として聞く）。緊急度は、文章からは決めない。
-
-### タグ
-
-振る舞いは、文章に書いた角括弧のタグで切り替える。タグのない場合は正常系（詳しい質問は、設定に質問がなければ聞き手の1問。出典2件の根拠あり回答）。
-
-| タグ | 失敗・変化するスキル | 振る舞い |
-| --- | --- | --- |
-| `[判定エラー]` | 受付 | 受付が `AI_UNAVAILABLE` で失敗する。置き場所は置かれず、種類から順に質問として聞く（エラーは返さない） |
-| `[質問なし]` | 聞き手 | 詳しい質問を出さない |
-| `[質問エラー]` | 聞き手 | 聞き手が `AI_UNAVAILABLE` で失敗する。詳しい質問なしで先へ進む（エラーは返さない） |
-| `[言い直しエラー]` | 言い直し | 問いの組み立てが `AI_UNAVAILABLE` で失敗する（3 の失敗の扱いになる） |
-| `[根拠なし]` | 調査 | 事実を1件も返さない。根拠なし（`grounded: false`）になる |
-| `[幽霊出典]` | 調査 | すべての事実の根拠が実在しない。照合で全部落ち、根拠なしになる。事実は `memo.unconfirmed` に残る |
-| `[一部幽霊]` | 調査 | 事実2件のうち1件は実在する根拠、1件は実在しない根拠を持つ。根拠ありになり、説明は確かめられた1件だけから書かれ、もう1件は `memo.unconfirmed` に入る |
-| `[遅延]` | 調査 | 進捗の各段階で待つ（既定2秒、設定 `inquiry.mock.slow-step-delay` で変更）。進捗は3段階なので、既定では6秒かかる。時間切れと裏での調査を確かめるときは、`inquiry.rules.answer-timeout` をこれより短くする |
-| `[エラー]` | 調査 | 進捗を流した後に `AI_UNAVAILABLE` |
-| `[拒否]` | 調査 | 進捗を流した後に `AI_REFUSED` |
-| `[説明エラー]` | 説明 | 調査と照合は成功し、説明が `AI_UNAVAILABLE` で失敗する。調査の結果は保存される |
-| `[的外れ]` | 説明 | 調査は通常の事実を返し、説明が「問いに答えていない」と判定する。根拠あり（`grounded: true`）で `answered: false` になる |
-| `[手順なし]` | 説明 | 手順（`answer.steps`）を返さない（タグがなければ、種類が `HOW_TO` か `DO_FOR_ME` のときに手順を2つ返す） |
-| `[相談]` | 助言 | 判断の案の `needsConsultation` を `true` にし、理由を添える |
-| `[手順]` | 助言 | 種類にかかわらず、手順の案を返す（タグがなければ、手順の案を返すのは種類が `DO_FOR_ME` と `CHANGE_REQUEST` のときだけ） |
-| `[根拠なしの案]` | 助言 | 判断の案の `basedOn` に、存在しない番号だけを入れて返す。コードが案を捨て、`judgment` は `null` になる |
-| `[案エラー]` | 助言 | 助言が `AI_UNAVAILABLE` で失敗する。`advice.status` は `FAILED` |
-| `[下書きエラー]` | 下書き | 下書きが `AI_UNAVAILABLE` で失敗する |
-| `[訳エラー]` | 訳 | 訳が `AI_UNAVAILABLE` で失敗する（タグは、本人が書いた文章から読む） |
-
-### 説明が出す手順
-
-モックの説明は、種類が `HOW_TO` か `DO_FOR_ME` のとき、説明の文章に加えて、手順を2つ返す（`[手順なし]` を付けた場合と、`[的外れ]` の場合は返さない）。
-
-| 言語 | 1つ目 | 2つ目 |
-| --- | --- | --- |
-| `ja` | `action`「求人管理画面で、対象の求人の編集を開く」、`check` は `null` | `action`「掲載期限を変えて、保存する」、`check`「応募者向けの一覧に、求人が表示される」 |
-| `en` | `action` "Open the edit screen for the job posting in the job admin screen"、`check` は `null` | `action` "Change the posting deadline and save"、`check` "The job posting appears in the list for applicants" |
-
-### 助言と下書き
-
-- **助言（先例があるとき）**: 同じ置き場所の先例が渡されたら、判断の案の文章を「同じ置き場所の先例を当てはめられそうです。先例の決定: （1件目の先例の決定）」にし、1件目の先例に基づかせる（事実があれば、1件目の事実にも基づかせる）。`needsConsultation` は `false`（`[相談]` を付けた場合は `true`）。
-- **下書き（決定があるとき）**: `RESULT` の文章は、`note` がなければ、その問い合わせについての決定の内容を使う（決定がなければ、これまでどおり判断の案、事実の順）。
-- **助言**: タグがなければ、判断の案を1つ返す（1件目の事実に基づく。`needsConsultation` は `false`。文章は「資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。」）。種類が `DO_FOR_ME` か `CHANGE_REQUEST` のときは、手順の案も返す（手順2つと、元に戻す方法。最後の事実に基づく）。
-- **下書き**: 種類（`kind`）と本人の言語で、決まった文章を返す。`note` があれば、文章の中にそのまま入れる。
-  - `ASK`、`ja`: 「確認させてください。（note、なければ「起きている場面を、もう少し詳しく教えていただけますか。」）」
-  - `RESULT`、`ja`: 「お待たせしました。確認した結果をお伝えします。（note、なければ判断の案の文章。それもなければ1件目の事実の文）」
-  - `en` は、同じ組み立ての英語（"Let me check one thing. …"、"Thank you for waiting. Here is what we found. …"）。
-
-### 訳
-
-モックの訳は、訳さない。原文の前に、訳の見本であることを示す印を付けて返す（訳す先が `ja` なら「【訳の見本】」、`en` なら "[Sample translation] "）。骨組みでは、訳がどこに出るかを確かめられれば足りる。
-
-### 聞き手（設定に質問があり、文章が書かれている場合）
-
-モックの聞き手は、設定の質問のうち、選択肢の名前（どの言語の `label` でも。英字は大文字と小文字を区別しない）が文章にそのまま含まれているものを、その選択肢で読み取る。複数の選択肢が含まれていれば、設定の順で先のもの。文章で答える質問は、読み取らない。`[質問エラー]` では `AI_UNAVAILABLE` で失敗し、設定の質問をすべて聞く。
-
-### 聞き手（設定に質問がない場合）
-
-モックの聞き手は、質問を1問返す。id は `q1`、文言は「どの場面での話ですか」、選択肢は「画面を開いたとき」「保存したとき」「一覧を見たとき」（選択肢の id は `o1`〜`o3`）。本人の言語が `en` なら、文言は「In what situation does this happen?」、選択肢は「When opening a screen」「When saving」「When viewing a list」。
-
-### 言い直し（問いの組み立て）
-
-モックの言い直し（`summary`）は、置き場所と答えから、次の形で作る。
-
-1. 置き場所の前置き: システムと機能が決まっていれば「（システム）の（機能）について、」。システムだけなら「（システム）について、」。どちらも決まっていなければ前置きなし
-2. 種類ごとの文
-3. 文章があれば、タグを取り除いた文章を続ける: 「書かれた内容: （文章）」
-4. 詳しい質問のうち、「わからない」以外の答えを続ける: 「（質問文: 答え）」
-5. 作り直し（5a）で伝えられた一言を続ける: 「補足: （一言）」
-
-| 種類 | 種類ごとの文 |
-| --- | --- |
-| `HOW_TO` | 使い方を知りたい。 |
-| `HOW_IT_WORKS` | いまの仕組みがどうなっているかを知りたい。 |
-| `LOOKS_WRONG` | 動きがおかしいかもしれない。意図した動きかどうかを確認したい。 |
-| `DO_FOR_ME` | 作業をしてほしい。 |
-| `CHANGE_REQUEST` | 変えてほしい点がある。 |
-| 決まっていない | 相談したいことがある。 |
-
-本人の言語が `en` のときは、同じ組み立てを英語で行う。
-
-1. 置き場所の前置き: 「About （機能） in （システム）: 」。システムだけなら「About （システム）: 」
-2. 種類ごとの文（下の表）
-3. 「What was written: （文章）」
-4. 「(（質問文）: （答え）)」
-5. 「Note: （一言）」
-
-| 種類 | 種類ごとの文（`en`） |
-| --- | --- |
-| `HOW_TO` | I want to know how to use it. |
-| `HOW_IT_WORKS` | I want to know how it currently works. |
-| `LOOKS_WRONG` | Something may be behaving incorrectly. I want to check whether this is the intended behavior. |
-| `DO_FOR_ME` | I would like a task to be done. |
-| `CHANGE_REQUEST` | I would like something to be changed. |
-| 決まっていない | I have something to ask about. |
-
-前置きと答えに入れる名前（システム、機能、質問文、選択肢）は、本人の言語の名前。
-
-モックの言い直しは、本人が書いた文章を `goal` にそのまま入れる（文章がなければ、種類ごとの文）。調査と説明のモックは、タグを `goal` から読む（`goal` は書き直しや作り直しで変わらないため、タグの振る舞いは最後まで保たれる）。
-
-モックの説明は、渡された事実の文をつないで作る（「（事実1）。（事実2）。」の形。`LOOKS_WRONG` では先頭に「現在の実装では、」を付け、末尾に「この動作が意図した仕様かどうかは、担当者が確認します。」を足す）。渡されなかった事実の内容が説明に現れないことを、テストで確かめられる形にする。
-
-本人の言語が `en` のとき、モックの調査は事実、`memo`、進捗の文言を英語で返し、モックの説明は英語でつなぐ（「（事実1）. （事実2）.」。`LOOKS_WRONG` では先頭に「In the current implementation: 」を付け、末尾に「Whether this behavior is intended will be confirmed by the support team.」を足す）。正常系の2つの事実は「A job posting is treated as expired from the exact time of its posting deadline」と「Expired job postings are not shown in the list for applicants」。ほかの文面（根拠のない事実、`memo`、進捗）は、日本語の文面と同じ意味の英語にする。根拠の引用は、どちらの言語でも資料の原文のまま。
-
-モックの一次情報は `backend/src/main/resources/mock-knowledge/` の固定ファイル（サンプルのコード、FAQ、用語対応表）。正常系の出典はこのファイルの実在する行を指し、出典の照合は実際に動く。
-
-## 既定の設定
-
-既定の設定（`application.yaml`）は、骨組みであることが分かる仮の名前にする。実際の一覧は、環境ごとの設定で差し替える。
-
-| 項目 | 既定 |
-| --- | --- |
-| 言語 | `ja`、`en`（既定は `ja`） |
-| 種類（`en`） | How to use something（Steps for an operation）、How something works（Why it behaves the way it does）、Something looks wrong（It does not behave as expected）、Do something for me（Fix data or change a setting）、Change something（Add or improve a feature）。括弧の中は説明文（`hint`） |
-| 緊急度（`en`） | Normal、Urgent、Work is blocked |
-| `consultants` | 全体の相談先。「仕様の持ち主（開発用）」の1人 |
-| `filed-guidance` | `ja` は「担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。」。`en` は「The support team will review this and reply on this page. When a reply arrives, a mark appears in “My inquiries”.」 |
-| システム | `system-a`（システムA。機能は `a-1`（機能A-1）、`a-2`（機能A-2））、`system-b`（システムB。機能は `b-1`（機能B-1））、`system-c`（システムC。機能の設定なし） |
-| マスの設定 | 1件。`system-a` の `LOOKS_WRONG` に、質問「いつから起きていますか」（選択肢は、今日から、今週から、もっと前から） |
-
-確定したシステムの名前（本人の言語の `label`）を、`structured.targetSystem` に入れる。
-
-API のテストは、業務らしい名前の一覧をテスト用の設定（`backend/src/test/resources/config/application.yaml`）で与えて行う。名前から置き場所を置く動きを、意味のある名前で確かめるため。システムは `job-admin`（求人管理画面。機能は `posting`（求人の掲載）、`applicants`（応募者の一覧））、`billing`（請求管理。機能は `invoice`（請求書））、`reports`（レポート。機能の設定なし）。マスの設定は、`job-admin` の `LOOKS_WRONG` に質問「いつから起きていますか」（選択肢つき）と、`billing` の `invoice` の `DO_FOR_ME` に、文章で答える質問「対象の取引先はどこですか」。
-
-## オペレータへの通知
-
-問い合わせを担当者に初めて渡した時点で、オペレータに2つの方法で知らせる。担当者に渡らずに終わった件（本人が AI の答えで解決した、取り下げた）では通知しない。
-
-- **ツール内の通知**: オペレータ画面の一覧に未読として現れ、開いている画面には即時に届く。
-- **Slack への投稿**: 対象システムに対応するチャンネルへ投稿する。投稿先は設定で決める。
-  - `inquiry.systems[].slack-webhook-url`: 対象システムごとの Incoming Webhook の URL
-  - `inquiry.slack.default-webhook-url`: 対象システムが未定、または個別の設定がない場合の投稿先
-  - `inquiry.public-base-url`: 投稿に載せるオペレータ画面へのリンクの基点
-  - 投稿に載せるリンクは `{public-base-url}/operator/{id}`。画面はこの URL を直接開くと、オペレータ画面でその問い合わせを開いた状態になる（下記「オペレータ画面の URL」）。
-  - どちらの URL も未設定なら投稿せず、その旨をログに出す（ローカルとモックの既定）。
-  - 投稿の内容: 種類、システムと機能、緊急度（通常以外のとき）、言い直しの文章（なければ本人が書いた文章の先頭）、答えを待たずに送られたかどうか、オペレータ画面の該当問い合わせへのリンク。調査内容の全文とコードの抜粋は載せない。
-  - Slack への投稿が失敗しても、担当者への送付は取り消さない。失敗はログと記録に残す。
-
-オペレータ向けの API は `/api/operator` 配下に置く。認証は後のフェーズ（SSO）で加え、それまではローカルでの利用に限る。
+担当者に渡した問い合わせは、担当者と本人の間で、番を受け渡しながら進む。番を渡すには、相手へのメッセージが要る。
 
 ### `GET /api/operator/inquiries`
 
@@ -645,8 +619,6 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 ### `GET /api/operator/inquiries/{id}`
 
 `200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`handoverReason`、`investigation`（「調査の状況と、裏での調査」の節）、`advice`（「AI の案」の節）、`defaultConsultants`・`consultations`・`decisions`・`precedents`（「仕様の持ち主への相談」の節）、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
-
-`followUps` は廃止し、`intake` に置き換える。入力を終える前に担当者へ送られることがなくなったため、「未回答」の状態は要らなくなった。
 
 `slackStatus` は Slack への投稿の状態で、次の4つのいずれか。真偽値ひとつでは「投稿先が未設定」と「投稿に失敗」を区別できず、未設定の環境ですべての問い合わせが失敗に見えるため、状態を分ける。
 
@@ -659,72 +631,27 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 `SKIPPED` かどうかは、その問い合わせの対象システムに対する投稿先（個別の設定、なければ既定）が、読み出しの時点で設定されているかで決める。
 
-### オペレータ画面の URL
+### 担当者の操作
 
-| パス | 画面 |
-| --- | --- |
-| `/operator` | ボード。問い合わせは未選択 |
-| `/operator/{id}` | ボードと、その問い合わせの詳細のパネルを開いた状態 |
+特に書いていなければ、`200` で、詳細（`GET /api/operator/inquiries/{id}`）と同じ全内容を返す。
 
-先例の一覧の画面は `/precedents`（担当者と仕様の持ち主の両方が見る）。
+| 操作 | エンドポイント | リクエスト | 実行できるとき | その後 |
+| --- | --- | --- | --- | --- |
+| 本人に聞き返す | `POST /api/operator/inquiries/{id}/replies` | `{ "kind": "ASK", "body": "1〜4000文字" }` | 担当者の番 | メッセージを足し、本人の番にする（`awaiting: ASKER_REPLY`）。区間は変えない |
+| 結果を伝える | 同上 | `{ "kind": "RESULT", "body": "1〜4000文字" }` | 担当者の番 | メッセージを足し、本人の番にする（`awaiting: RESULT_CONFIRMATION`）。区間は変えない |
+| 見送る | `POST /api/operator/inquiries/{id}/decline` | `{ "reasonKind": "KNOWN_LIMITATION", "reason": "1〜2000文字" }` | 担当者の番 | 理由をメッセージ（`kind: DECLINE`）として足し、終わる（`ending: DECLINED`）。`declined` に理由を持つ |
+| 置き直す | `PUT /api/operator/inquiries/{id}/placement` | `{ "type": "DO_FOR_ME", "systemId": "system-a", "functionId": "a-1" }`（どれも `null` にできる） | 終わっていない | 置き場所を変える。置いた人（`by`）は `OPERATOR` になる。種類が変わった場合は、区間を新しい種類の「担当者に渡す」の決まりに合わせる。番は変えない |
+| 返信の下書きを作る | `POST /api/operator/inquiries/{id}/draft` | `{ "kind": "ASK" または "RESULT", "note": "伝えたいこと（任意。1〜2000文字）" }` | 担当者の番 | AI が、本人に送る文章の下書きを作って返す。**状態は変えず、何も送らない。** 応答は、ほかの操作と違い `{ "body": "下書きの文章", "language": "ja" }`。下書きは、本人の言語（`language`）で書かれる。担当者が確かめ、直してから、「本人に聞き返す」か「結果を伝える」で送る。失敗したときは `AI_UNAVAILABLE`／`AI_REFUSED` |
+| 訳を見る | `POST /api/operator/inquiries/{id}/translation` | 本文なし（訳す先は、見る人の言語） | 本人の言語（`language`）が、見る人の言語と違う | 本人の言語で書かれた文章の訳を返す（下の「訳」）。**状態は変えない。** 応答は、ほかの操作と違う形。本人の言語と見る人の言語が同じなら `INVALID_STATE`。失敗したときは `AI_UNAVAILABLE`／`AI_REFUSED` |
+| 既読にする | `POST /api/operator/inquiries/{id}/read` | 本文なし | いつでも | `read: true` |
 
-仕様の持ち主の画面は `/owner`（決定を待っている相談の一覧）と `/owner/{id}`（その問い合わせの材料と、決定の入力）。`{id}` が存在しない、または相談したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。
+- `reasonKind` は `NOT_REPRODUCIBLE`（再現しない）、`KNOWN_LIMITATION`（既知の制限）、`OUT_OF_SCOPE`（対象外）、`DUPLICATE`（重複）、`OTHER`（その他）のいずれか。
+- 実行できないときは `INVALID_STATE`。入力の誤り（空の本文、範囲外の値、システムにない機能、存在しない id）は `VALIDATION`。
+- 担当者は、見送る場合を除いて、問い合わせを終わらせられない。結果を伝えた後、終わらせるのは本人（7）。
 
-一覧で問い合わせを選ぶと URL が `/operator/{id}` に変わり、ブラウザの「戻る」で前の選択に戻れる。`{id}` が存在しない、または担当者に渡したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。`/operator`、`/owner`、`/precedents` のどれでも始まらないパスは本人向けの画面。
+### 担当者のストリーム
 
-### `POST /api/operator/inquiries/{id}/read`
-
-既読にする。`200` 上と同じ全内容（`read: true`）。
-
-### `GET /api/operator/stream`
-
-`text/event-stream`。流す event は「オペレータのストリーム」の節のとおり（`filed` と `updated`）。接続を保つため、一定間隔でコメント行を送る。
-
-## スキルの構成に伴う取り決め
-
-AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との契約に関わる点だけをここに書く。
-
-- **`answer.memo.unconfirmed`**: 調査が挙げたが、根拠の実在を確かめられなかった事実の文の一覧。該当がなければ空配列。**担当者にだけ返す。** 中身が入るのはオペレータの詳細（`GET /api/operator/inquiries/{id}`）の `answer.memo.unconfirmed` だけで、本人向けの InquiryView（2〜9 と進捗ストリームの `done`）では常に空配列にする。裏づけのない内容は、本人には真偽を判断できず、読めばそのまま試してしまうおそれがあるため。画面で隠すのではなく、API が本人向けの応答に含めない。オペレータ画面は「根拠を確かめられなかったこと」として、分かったこと（`findings`）と区別して示す。本人向けの説明（`askerExplanation`）は `findings` の内容だけから書かれ、`unconfirmed` の内容を含まない。
-- **0次回答の進捗**: 調査の進捗に続けて「根拠を確かめています」が流れ、根拠ありの場合はさらに「答えをまとめています」が流れる。
-- **説明の失敗**: 調査と照合が成功し、説明だけが失敗した場合、進捗ストリームは `failed`（`AI_UNAVAILABLE` または `AI_REFUSED`）を流し、`awaiting` は `INVESTIGATION` のまま。調査の結果（技術メモ、出典と照合結果、利用量）は保存する。ただし本人向けの InquiryView の `answer` は `ANSWERING` の間は `null` のままにする（説明がない状態を「答えが見つからなかった」と誤って見せないため）。画面は従来どおり再試行と「今すぐ担当者に送る」を出す。送った場合、オペレータの詳細（`GET /api/operator/inquiries/{id}`）の `answer` に保存済みの調査の内容が入り、`grounded` は `false`、`askerExplanation` は `null` になる。再試行で調査が成功すれば、保存済みの内容は新しい結果で置き換える。
-- **利用量の記録**: `usages[].step` はスキルの識別子（`reception`、`interviewer`、`restater`、`investigator`、`explainer`、`advisor`、`drafter`、`translator`）。押して答えただけの入口では、受付は呼ばれない（記録にも現れない）。
-- **問いに答えられたか（`answer.answered`）**: 確かめられた事実があること（`grounded`）と、その事実が本人の問いに答えていること（`answered`）を区別する。根拠はあるが的外れな事実しか集まらなかった場合に、それを答えとして見せないため。
-  - `answered` は真偽値。`grounded` が `false` のときは常に `false`。`grounded` が `true` のときは、説明のスキルの判定（問いに答えているか）をそのまま入れる。
-  - `grounded: true`、`answered: false` の場合も、`askerExplanation`（確認できなかったことと、関連して分かったこと）、`citations`、`memo` は従来どおり返す。
-  - 画面の扱い（本人向け）:
-
-    | `grounded` | `answered` | 表示 |
-    | --- | --- | --- |
-    | `true` | `true` | 従来どおり。説明を主に示し、「解決しました」を主のボタンにする |
-    | `true` | `false` | 「ご質問への答えは、手元の資料では確認できませんでした。」と示し、その下に「関連して分かったこと」として説明を出す。ボタンは出さない（答えの完了と同時に、担当者に渡っている） |
-    | `false` | `false` | 「手元の資料からは答えを見つけられませんでした。」ボタンは出さない（同上） |
-
-  - 答えられなかった件は、種類にかかわらず担当者に渡る（「種類ごとの経路」の節）。解決したかを選ぶボタンが出るのは、上の表の1行目だけ。
-  - オペレータの詳細の `answer` にも `answered` を含める。
-  - モックの説明は `answered: true` を返す。タグ `[的外れ]` を付けた場合だけ `false` を返す（調査は通常の事実を返し、説明のスキルが「問いに答えていない」と判定した場合を再現する）。
-- **スキルごとの実装**: `GET /api/config` に `skills` を加える。スキルの識別子から、動いている実装の名前（`mock` または `ollama`）への対応。例: `{ "reception": "ollama", "interviewer": "ollama", "restater": "ollama", "investigator": "mock", "explainer": "ollama" }`。`mock` は、スキルか一次情報の検索に1つでもモックがあれば `true`。画面はモックの案内枠に、どのスキルがモックかを示す。モックのシナリオのタグは、モックで動いているスキルにだけ効く（たとえば受付が実際のモデルなら、`[判定エラー]` を書いても失敗しない）。
-
-## 担当者に渡した後
-
-担当者に渡した問い合わせは、担当者と本人の間で番を受け渡しながら進む。番を渡すには、相手へのメッセージが要る。
-
-### メッセージ（messages）
-
-担当者の発言と本人の追記を、1本の時系列として持つ。
-
-```json
-{ "id": "UUID", "from": "OPERATOR", "kind": "ASK", "authorName": "担当者（開発用）", "body": "本文", "createdAt": "2026-11-21T12:00:00Z" }
-```
-
-- `from` は `OPERATOR`（担当者）か `ASKER`（本人）。
-- `kind` は、担当者の発言では `ASK`（聞き返し）、`RESULT`（結果）、`DECLINE`（見送りの連絡）のいずれか。本人の追記では `NOTE`。
-- `authorName` は表示用の名前。認証を加えるまでは、設定の固定値（`inquiry.dev.operator-name`、`inquiry.dev.user-name`）。
-- 古い順に並べる。編集と削除はできない。
-
-### 未読
-
-- **担当者側**（`read`）: 番が担当者に移るたび、また担当者の番の間に本人が追記するたびに、`false` に戻す。
-- **本人側**（`unreadReply`）: 担当者が発言すると `true`、本人がその問い合わせを取得（9）すると `false` になる。返事がないことを知らせたとき、期間が過ぎて終えたときも `true` にする（「返事がないとき」の節）。
+`GET /api/operator/stream`。`text/event-stream`。担当者に初めて渡したときに event `filed`、その後に状態やメッセージが変わるたびに event `updated` を流す。data は、一覧の1件と同じ形。接続を保つため、一定間隔でコメント行を送る。
 
 ### 調査の状況と、裏での調査
 
@@ -747,7 +674,7 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 
 | 終わった時点 | 扱い |
 | --- | --- |
-| 本人が待っている（`awaiting: INVESTIGATION`） | 従来どおり。`audience: ASKER`。種類ごとの経路で、本人が確かめるか、担当者に渡す |
+| 本人が待っている（`awaiting: INVESTIGATION`） | `audience: ASKER`。種類ごとの経路で、本人が確かめるか、担当者に渡す |
 | それ以外（担当者に渡した後） | `audience: OPERATOR`。結果を保存し、状態は変えない。本人向けの InquiryView の `answer` は `null` のまま。担当者の側を未読に戻し、担当者のストリームに `updated` を流す（問い合わせが終わっている場合は、保存だけ） |
 
 - 裏での調査の結果を本人に見せないのは、本人から見た窓口を担当者に一本化するため。担当者が確かめていない答えが、担当者の返事と食い違って届くことを防ぐ。伝えるかどうかは、担当者が決める。
@@ -763,7 +690,7 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 
 - 同じ問い合わせの調査は、同時に1つだけ走らせる。
 - 調査は、裏で行う場合も、本人の閲覧権限（`AccessScope`）で行う。結果が本人に伝わりうるため。
-- 裏での調査が失敗したら `status: FAILED` にして、担当者のストリームに `updated` を流す（未読には戻さない）。本人には何も見せない。説明だけが失敗した場合は、従来どおり調査の結果を保存し、`status` は `DONE` にする（`answer.grounded` は `false`、`askerExplanation` は `null`）。
+- 裏での調査が失敗したら `status: FAILED` にして、担当者のストリームに `updated` を流す（未読には戻さない）。本人には何も見せない。説明だけが失敗した場合は、調査の結果を保存し、`status` は `DONE` にする（`answer.grounded` は `false`、`askerExplanation` は `null`）。
 - 裏での調査は、API のプロセスの中で走る。API を止めると失われるので、起動時に、`RUNNING` のまま残っている件を `FAILED` にする。担当者に渡した件の調査は、やり直さない（担当者は、材料なしで進める）。
 - 調査の開始と終了は、状態の履歴に入れない（番が変わらないため）。時刻は `investigation` が持つ。
 - 本人や担当者の操作が、裏での調査の結果を保存する瞬間と重なると、操作が `INVALID_STATE`（他の操作と競合しました）になることがある。取得し直してやり直せば通る。
@@ -776,7 +703,7 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 
 ### AI の案（advice）
 
-担当者に渡った件には、AI が、確かめられた事実から、判断の案と、作業の手順の案を添える（スキルの構成と、案を確かめる決まりは `skill-architecture.md` の「担当者を支える2つのスキル」が正）。担当者向けの詳細が `advice` として返す。本人向けの InquiryView には含めない。
+担当者に渡った件には、AI が、確かめられた事実と先例から、判断の案と、作業の手順の案を添える（スキルの構成と、案を確かめる決まりは `skill-architecture.md` の「担当者向けの3つのスキル」が正）。担当者向けの詳細が `advice` として返す。本人向けの InquiryView には含めない。
 
 ```json
 "advice": {
@@ -809,26 +736,46 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 - 担当者の操作が、案を保存する瞬間と重なると、操作が `INVALID_STATE`（他の操作と競合しました）になることがある。やり直せば通る（裏での調査の結果の保存と同じ）。
 - API を止めると、作っている途中の案は失われる。起動時に、`RUNNING` のまま残っている件を `FAILED` にする。
 
-### 担当者の操作
+### 訳
 
-すべて、担当者に渡したことのある問い合わせが対象。そうでない問い合わせは `NOT_FOUND`。`200` で、詳細（`GET /api/operator/inquiries/{id}`）と同じ全内容を返す。
+本人の言語と、担当者が見ている言語が違う場合、担当者は訳を頼める（LG-4。スキルの構成は `skill-architecture.md` の「担当者向けの3つのスキル」）。
 
-| 操作 | エンドポイント | リクエスト | 実行できるとき | その後 |
-| --- | --- | --- | --- | --- |
-| 本人に聞き返す | `POST /api/operator/inquiries/{id}/replies` | `{ "kind": "ASK", "body": "1〜4000文字" }` | 担当者の番 | メッセージを足し、本人の番にする（`awaiting: ASKER_REPLY`）。区間は変えない |
-| 結果を伝える | 同上 | `{ "kind": "RESULT", "body": "1〜4000文字" }` | 担当者の番 | メッセージを足し、本人の番にする（`awaiting: RESULT_CONFIRMATION`）。区間は変えない |
-| 見送る | `POST /api/operator/inquiries/{id}/decline` | `{ "reasonKind": "KNOWN_LIMITATION", "reason": "1〜2000文字" }` | 担当者の番 | 理由をメッセージ（`kind: DECLINE`）として足し、終わる（`ending: DECLINED`）。`declined` に理由を持つ |
-| 置き直す | `PUT /api/operator/inquiries/{id}/placement` | `{ "type": "DO_FOR_ME", "systemId": "system-a", "functionId": "a-1" }`（どれも `null` にできる） | 終わっていない | 置き場所を変える。置いた人（`by`）は `OPERATOR` になる。種類が変わった場合は、区間を新しい種類の「担当者に渡す」の決まりに合わせる。番は変えない |
-| 返信の下書きを作る | `POST /api/operator/inquiries/{id}/draft` | `{ "kind": "ASK" または "RESULT", "note": "伝えたいこと（任意。1〜2000文字）" }` | 担当者の番 | AI が、本人に送る文章の下書きを作って返す。**状態は変えず、何も送らない。** 応答は、ほかの操作と違い `{ "body": "下書きの文章", "language": "ja" }`。下書きは、本人の言語（`language`）で書かれる。担当者が確かめ、直してから、「本人に聞き返す」か「結果を伝える」で送る。失敗したときは `AI_UNAVAILABLE`／`AI_REFUSED` |
-| 訳を見る | `POST /api/operator/inquiries/{id}/translation` | 本文なし（訳す先は、見る人の言語） | 本人の言語（`language`）が、見る人の言語と違う | 本人の言語で書かれた文章の訳を返す（下の「訳」）。**状態は変えない。** 応答は、ほかの操作と違う形。本人の言語と見る人の言語が同じなら `INVALID_STATE`。失敗したときは `AI_UNAVAILABLE`／`AI_REFUSED` |
-| 既読にする | `POST /api/operator/inquiries/{id}/read` | 本文なし | いつでも | `read: true` |
+`POST /api/operator/inquiries/{id}/translation` の応答:
 
-- `reasonKind` は `NOT_REPRODUCIBLE`（再現しない）、`KNOWN_LIMITATION`（既知の制限）、`OUT_OF_SCOPE`（対象外）、`DUPLICATE`（重複）、`OTHER`（その他）のいずれか。
-- 実行できないときは `INVALID_STATE`。入力の誤り（空の本文、範囲外の値、システムにない機能、存在しない id）は `VALIDATION`。
-- 担当者は、見送る場合を除いて、問い合わせを終わらせられない。結果を伝えた後、終わらせるのは本人（7）。
-- 以前の `PUT …/status`（未対応、対応中、完了の切り替え）は廃止した。
+```json
+{
+  "from": "en",
+  "to": "ja",
+  "items": [
+    { "key": "utterance", "original": "The job posting disappeared.", "translated": "求人の掲載が消えました。" },
+    { "key": "structured.summary", "original": "…", "translated": "…" },
+    { "key": "answer.askerExplanation", "original": "…", "translated": "…" },
+    { "key": "message:3f2a…", "original": "…", "translated": "…" }
+  ]
+}
+```
 
-### 仕様の持ち主への相談
+- 訳すのは、本人の言語で書かれた文章のうち、次のもの（あるものだけ）: 本人が書いた文章（`utterance`）、言い直し（`structured.summary`）、本人向けの説明（`answer.askerExplanation`）、本人の発言（`messages` のうち `from` が `ASKER` のもの。`key` は `message:` に続けてメッセージの `id`）。
+- 訳さないもの: 根拠の引用、設定の名前、担当者の発言、AI の案、入口の質問への答え（選択肢の名前は、見る人の言語で返している）。
+- 訳は保存しない。頼まれるたびに、その時点の文章を訳す。
+- 訳は、担当者向けの応答にだけ含める。本人向けの InquiryView には含めない。
+- 訳は原文に添えるもので、原文を置き換えない。担当者向けの詳細（`GET /api/operator/inquiries/{id}`）は、原文だけを返す。
+
+### 担当者への通知
+
+問い合わせを担当者に初めて渡した時点で、担当者に、2つの方法で知らせる。担当者に渡らずに終わった件（本人が AI の答えで解決した、取り下げた）では通知しない。
+
+- **ツール内の通知**: 担当者の画面の一覧に未読として現れ、開いている画面には即時に届く。
+- **Slack への投稿**: 対象システムに対応するチャンネルへ投稿する。投稿先は設定で決める。
+  - `inquiry.systems[].slack-webhook-url`: 対象システムごとの Incoming Webhook の URL
+  - `inquiry.slack.default-webhook-url`: 対象システムが未定、または個別の設定がない場合の投稿先
+  - `inquiry.public-base-url`: 投稿に載せる担当者の画面へのリンクの基点
+  - 投稿に載せるリンクは `{public-base-url}/operator/{id}`。画面はこの URL を直接開くと、担当者の画面でその問い合わせを開いた状態になる（「画面の URL」の節）。
+  - どちらの URL も未設定なら投稿せず、その旨をログに出す（ローカルとモックの既定）。
+  - 投稿の内容: 種類、システムと機能、緊急度（通常以外のとき）、言い直しの文章（なければ本人が書いた文章の先頭）、答えを待たずに送られたかどうか、担当者の画面の、その問い合わせへのリンク。調査内容の全文とコードの抜粋は載せない。
+  - Slack への投稿が失敗しても、担当者への送付は取り消さない。失敗はログと記録に残す。
+
+## 仕様の持ち主への相談
 
 担当者が自分で決めてよいのは、既にある仕様や先例を当てはめる判断まで。新しい決定が要る件は、仕様の持ち主に相談する（`framework.md` の「段」）。相談している間は、仕様の持ち主の番になる（`turn: OWNER`、`awaiting: CONSULTATION`）。区間は変えない。持ち主が決めると、決定が先例として1つ残り、担当者の番に戻る。本人に伝えるのは担当者（本人から見た窓口を、担当者に一本化する）。
 
@@ -929,119 +876,12 @@ inquiry:
 | 本人の追記（11） | 番は変えない（持ち主の番のまま）。担当者の側を未読に戻す |
 | 本人の取り下げ（12） | 終わる。`OPEN` の相談は `CANCELED` にする |
 | 担当者が聞き返す、結果を伝える、見送る | 担当者の番ではないので `INVALID_STATE`。先に、相談を取り下げる |
-| 担当者が置き直す、訳を見る | これまでどおり（終わっていなければ、できる） |
+| 担当者が置き直す、訳を見る | できる（終わっていなければ） |
 | 返事がないときの決まり | 対象外（本人の返事を待っているのではないため） |
 
-### 訳
+## 画面の URL
 
-本人の言語と、担当者が見ている言語が違う場合、担当者は訳を頼める（LG-4。スキルの構成は `skill-architecture.md` の「訳のスキル」）。
-
-`POST /api/operator/inquiries/{id}/translation` の応答:
-
-```json
-{
-  "from": "en",
-  "to": "ja",
-  "items": [
-    { "key": "utterance", "original": "The job posting disappeared.", "translated": "求人の掲載が消えました。" },
-    { "key": "structured.summary", "original": "…", "translated": "…" },
-    { "key": "answer.askerExplanation", "original": "…", "translated": "…" },
-    { "key": "message:3f2a…", "original": "…", "translated": "…" }
-  ]
-}
-```
-
-- 訳すのは、本人の言語で書かれた文章のうち、次のもの（あるものだけ）: 本人が書いた文章（`utterance`）、言い直し（`structured.summary`）、本人向けの説明（`answer.askerExplanation`）、本人の発言（`messages` のうち `from` が `ASKER` のもの。`key` は `message:` に続けてメッセージの `id`）。
-- 訳さないもの: 根拠の引用、設定の名前、担当者の発言、AI の案、入口の質問への答え（選択肢の名前は、見る人の言語で返している）。
-- 訳は保存しない。頼まれるたびに、その時点の文章を訳す。
-- 訳は、担当者向けの応答にだけ含める。本人向けの InquiryView には含めない。
-- 訳は原文に添えるもので、原文を置き換えない。担当者向けの詳細（`GET /api/operator/inquiries/{id}`）は、これまでどおり原文だけを返す。
-
-### 本人の操作（担当者に渡した後）
-
-| 操作 | エンドポイント | 実行できるとき | その後 |
-| --- | --- | --- | --- |
-| 結果を確かめる | 7 | `awaiting: RESULT_CONFIRMATION` | 「本人が結果を確かめる」の決まりのとおり |
-| 追記する | 11 | 担当者に渡したことがあり、本人が取り下げていない。または、担当者に渡したことがなく、`RESOLVED` か `ANSWERED` で終わっている | 下の表 |
-| 取り下げる | 12 | 終わっていない | 終わる（`ending: WITHDRAWN`） |
-
-追記（11）の後は、追記したときの状態で決まる。
-
-| 追記したときの状態 | その後 |
-| --- | --- |
-| 担当者の番（`HANDLING`） | 番は変えない。担当者の側を未読に戻す |
-| 聞き返しへの返事を待っている（`ASKER_REPLY`） | 担当者の番にする（`HANDLING`） |
-| 担当者の結果を確かめている（`RESULT_CONFIRMATION`） | 担当者の番にする（「解決していない」と答えたのと同じ） |
-| 終わっている（`RESOLVED`、`ANSWERED`、`DECLINED`、時間で終わった `WITHDRAWN`） | 開き直す。終わり方を消し、区間を終わる前に戻して、担当者の番にする |
-| 担当者に渡したことがなく、`RESOLVED` か `ANSWERED` で終わっている（AI の答えで解決したと伝えたが、やはり足りなかった。または、AI の答えに返事がなかった） | 開き直して、担当者に渡す（「担当者に渡す」の決まりのとおり。区間は種類で決まり、初めて渡すので担当者に通知する）。履歴の出来事は `REOPENED` |
-
-担当者に渡したことのない問い合わせ（上の、`RESOLVED` か `ANSWERED` で終わっている場合を除く）、本人が取り下げた問い合わせ（`ending: WITHDRAWN` で `closedBy: ASKER`）への追記は `INVALID_STATE`。
-
-### 10. `GET /api/inquiries`
-
-自分（現在の利用者）が作った問い合わせの一覧（新しい順、最大50件）。
-
-`200` `{ "unreadReplyCount": 1, "items": [{ "id", "createdAt", "language", "summary", "urgency", "phase", "turn", "awaiting", "ending", "handedOverAt", "unreadReply", "messageCount" }] }`。`summary` は、担当者向けの一覧と同じ決まり。`handedOverAt` は、結果を確かめている件の結果が、AI の答えか担当者の結果かを見分けるために使う（担当者に渡したことがあれば、担当者の結果）。
-
-### 11. `POST /api/inquiries/{id}/messages`
-
-リクエスト `{ "body": "1〜4000文字" }`。本人が追記する。上の「本人の操作」の決まりのとおり。
-
-`200` InquiryView。
-
-### 12. `POST /api/inquiries/{id}/withdraw`
-
-本文なし。本人が取り下げる。終わっていない問い合わせで有効（終わっていれば `INVALID_STATE`）。
-
-`200` InquiryView（`phase: CLOSED`、`ending: WITHDRAWN`）。担当者に渡したことのある問い合わせなら、担当者のストリームに `updated` を流す。
-
-### 9（補足）. `GET /api/inquiries/{id}`
-
-他人の問い合わせは `NOT_FOUND`。取得すると、その問い合わせの `unreadReply` を `false` にする。
-
-### 状態の履歴（history）
-
-状態が変わるたびに、1件ずつ記録する。誰の番にどれだけ時間がかかったかを後から測るため（測るのは後の段階。記録は、後から作り直せないので最初から残す）。
-
-```json
-{ "at": "2026-11-22T03:00:00Z", "actor": "OPERATOR", "event": "ASKED_BACK", "phase": "DECIDE", "turn": "ASKER", "awaiting": "ASKER_REPLY", "ending": null }
-```
-
-- `actor` は、その変化を起こした人。`ASKER`、`AI`、`OPERATOR`、`OWNER`（仕様の持ち主）、`TIME`（期間が過ぎたことで起きた）のいずれか。
-- `detail` は、`PLACEMENT_CHANGED` 以外では `null`。
-- `phase`、`turn`、`awaiting`、`ending` は、変化の後の状態。
-- `event` は次のいずれか。
-
-| `event` | 起こす人 | 意味 |
-| --- | --- | --- |
-| `CREATED` | 本人 | 問い合わせができた |
-| `QUESTION_COMPOSED` | AI | 問いを組み立てた（言い直しの確認へ） |
-| `REOPENED_INTAKE` | 本人 | 入口の質問へ戻った |
-| `QUESTION_CONFIRMED` | 本人 | 問いを確かめた |
-| `ANSWERED_BY_AI` | AI | AI が答えた（本人が確かめる） |
-| `HANDED_OVER` | 本人、AI、時間 | 担当者に渡した（答えを待たずに送った、解決していないと答えた、種類の経路で渡った、AI が答えられなかった、業務が止まっている）。調査の時間切れで渡した場合は、起こしたのは時間（`TIME`） |
-| `ASKED_BACK` | 担当者 | 本人に聞き返した |
-| `REPLIED` | 本人 | 聞き返しに答えた |
-| `RESULT_DELIVERED` | 担当者 | 結果を伝えた |
-| `RESOLVED` | 本人 | 解決を伝えた |
-| `DECLINED` | 担当者 | 見送った |
-| `WITHDRAWN` | 本人、時間 | 本人が取り下げた。または、聞き返しに返事がないまま期間が過ぎて、取り下げになった |
-| `REOPENED` | 本人 | 終わった件を、追記で開き直した |
-| `REMINDED` | 時間 | 返事がないことを、本人に知らせた（状態は変わらない） |
-| `ANSWERED` | 時間 | 返事がないまま期間が過ぎて、終わった |
-| `CONSULTED` | 担当者 | 仕様の持ち主に相談した |
-| `DECIDED` | 仕様の持ち主 | 相談に答えて決めた（先例が1つできた） |
-| `CONSULTATION_CANCELED` | 担当者 | 相談を取り下げた |
-| `PHASE_CHANGED` | 担当者 | 区間を変えた（区間を手で変える操作は、なくした。以前の履歴にだけ残る） |
-| `PLACEMENT_CHANGED` | 担当者 | 置き直した。この出来事だけ `detail` を持つ: `{ "before": { "type": "おかしいかもしれない", "system": "システムA", "function": null }, "after": { … } }`。値は、既定の言語の名前。決まっていなければ `null` |
-
-履歴は、担当者向けの詳細（`history`）にだけ返す。本人向けの InquiryView には含めない。番が変わらない操作（担当者の番の間の本人の追記、既読）は、履歴に入れない。時間が起こした出来事（`REMINDED`）は、番が変わらなくても入れる。
-
-### オペレータのストリーム
-
-`GET /api/operator/stream` は、担当者に初めて渡したときに event `filed`、その後に状態やメッセージが変わるたびに event `updated` を流す。data は、一覧の1件と同じ形。
-
-### 本人向けの画面の URL
+### 本人向け
 
 | パス | 画面 |
 | --- | --- |
@@ -1062,9 +902,22 @@ inquiry:
 | `HANDLING`、`ASKER_REPLY` | 経過の要約、いまの状況、やり取り、追記の入力欄 |
 | 終わっている（`null`） | 経過の要約、終わりの文言、担当者に渡したことがあればやり取り |
 
+### 担当者、仕様の持ち主、先例
+
+| パス | 画面 |
+| --- | --- |
+| `/operator` | ボード。問い合わせは未選択 |
+| `/operator/{id}` | ボードと、その問い合わせの詳細のパネルを開いた状態 |
+
+先例の一覧の画面は `/precedents`（担当者と仕様の持ち主の両方が見る）。
+
+仕様の持ち主の画面は `/owner`（決定を待っている相談の一覧）と `/owner/{id}`（その問い合わせの材料と、決定の入力）。`{id}` が存在しない、または相談したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。
+
+一覧で問い合わせを選ぶと URL が `/operator/{id}` に変わり、ブラウザの「戻る」で前の選択に戻れる。`{id}` が存在しない、または担当者に渡したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。`/operator`、`/owner`、`/precedents` のどれでも始まらないパスは本人向けの画面。
+
 ## スキルの実行記録（trace）
 
-問い合わせの流れのどこで、どのスキルが、どの実装で動いたかを見せるための、開発者向けの情報。設定 `inquiry.trace.enabled`（既定 `true`）で有効にする。本番では `false` にする（内部の言葉とモデルの名前を、本人に見せないため）。`GET /api/config` に `trace`（真偽値）を加える。
+問い合わせの流れのどこで、どのスキルが、どの実装で動いたかを見せるための、開発者向けの情報。設定 `inquiry.trace.enabled`（既定 `true`）で有効にする。本番では `false` にする（内部の言葉とモデルの名前を、本人に見せないため）。有効かどうかは、`GET /api/config` の `trace` が返す。
 
 `trace` は、スキルの呼び出しを実行した順に並べた配列。
 
@@ -1074,12 +927,189 @@ inquiry:
 ```
 
 - `provider` は、その呼び出しがモックなら `mock`、そうでなければ設定上の実装名（`ollama`）。
-- `durationMillis` は、呼び出しにかかった時間。この項目を加える前の記録では `null`。
+- `durationMillis` は、呼び出しにかかった時間。古い記録では `null`。
 - 照合（根拠の実在の確認）は通常のコードで、スキルではないため、記録には現れない。画面は、調査と説明の間に「照合（コード）」を固定で描く。
 - 助言の案を確かめる処理（基づく事実のない案を捨てる）も通常のコードで、記録には現れない。画面は、助言の後に「案の確認（コード）」を固定で描く。
 - 助言、下書き、訳の呼び出しは、担当者向けの詳細の `trace` にだけ含める。本人向けの InquiryView の `trace` には含めない（担当者だけに見せる案があることを、本人のページに出さない）。
+- スキルの識別子は、`reception`、`interviewer`、`restater`、`investigator`、`explainer`、`advisor`、`drafter`、`translator`。押して答えただけの入口では、受付は呼ばれない（記録にも現れない）。
 
-## 利用者の表示と仮の文言
+## エラー
 
-- `GET /api/config` に `user`（`{ "id": "local-user", "name": "開発用ユーザー" }`）と `operatorName` を加える。認証を加えるまでは設定の固定値。
-- `filedGuidance` の既定を「担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。」にする（往復ができたため、連絡方法が決まった）。
+本文は `{ "code": "…", "message": "…" }`。
+
+| HTTP | code | 場合 |
+| --- | --- | --- |
+| 400 | `VALIDATION` | 入力が不正 |
+| 404 | `NOT_FOUND` | 問い合わせが存在しない |
+| 409 | `INVALID_STATE` | いまの状態では実行できない操作。ほかの操作（人の操作、裏での調査や案の保存）と重なった場合を含む（取得し直して、やり直せば通る） |
+| 422 | `AI_REFUSED` | モデルが回答を拒否した |
+| 503 | `AI_UNAVAILABLE` | モデルを呼び出せなかった |
+
+`AI_REFUSED` と `AI_UNAVAILABLE` では、画面は `canSendNow` を見て、送れる場合は「担当者に送る」へ誘導する。
+
+## 設定
+
+既定の設定（`application.yaml`）は、骨組みであることが分かる仮の名前にする。実際の一覧は、環境ごとの設定で差し替える。
+
+| 項目 | 既定 |
+| --- | --- |
+| 言語 | `ja`、`en`（既定は `ja`） |
+| 種類（`en`） | How to use something（Steps for an operation）、How something works（Why it behaves the way it does）、Something looks wrong（It does not behave as expected）、Do something for me（Fix data or change a setting）、Change something（Add or improve a feature）。括弧の中は説明文（`hint`） |
+| 緊急度（`en`） | Normal、Urgent、Work is blocked |
+| `consultants` | 全体の相談先。「仕様の持ち主（開発用）」の1人 |
+| `filed-guidance` | `ja` は「担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。」。`en` は「The support team will review this and reply on this page. When a reply arrives, a mark appears in “My inquiries”.」 |
+| システム | `system-a`（システムA。機能は `a-1`（機能A-1）、`a-2`（機能A-2））、`system-b`（システムB。機能は `b-1`（機能B-1））、`system-c`（システムC。機能の設定なし） |
+| マスの設定 | 1件。`system-a` の `LOOKS_WRONG` に、質問「いつから起きていますか」（選択肢は、今日から、今週から、もっと前から） |
+
+確定したシステムの名前（本人の言語の `label`）を、`structured.targetSystem` に入れる。
+
+API のテストは、業務らしい名前の一覧をテスト用の設定（`backend/src/test/resources/config/application.yaml`）で与えて行う。名前から置き場所を置く動きを、意味のある名前で確かめるため。システムは `job-admin`（求人管理画面。機能は `posting`（求人の掲載）、`applicants`（応募者の一覧））、`billing`（請求管理。機能は `invoice`（請求書））、`reports`（レポート。機能の設定なし）。マスの設定は、`job-admin` の `LOOKS_WRONG` に質問「いつから起きていますか」（選択肢つき）と、`billing` の `invoice` の `DO_FOR_ME` に、文章で答える質問「対象の取引先はどこですか」。
+
+決まりごとの設定は、それぞれの節にある。
+
+| 設定 | 節 |
+| --- | --- |
+| `inquiry.languages` | 言語 |
+| `inquiry.systems`、`inquiry.cells` | 入口の質問 |
+| `inquiry.rules.zone`、`inquiry.rules.no-reply.*`、`inquiry.rules.sweep-*` | 返事がないとき |
+| `inquiry.rules.answer-timeout` | 調査の状況と、裏での調査 |
+| `inquiry.consultants` | 仕様の持ち主への相談 |
+| `inquiry.systems[].slack-webhook-url`、`inquiry.slack.default-webhook-url`、`inquiry.public-base-url` | 担当者への通知 |
+| `inquiry.trace.enabled` | スキルの実行記録 |
+| `inquiry.skills.<スキル>.provider`、`inquiry.mock.slow-step-delay` | `skill-architecture.md`、モックのシナリオ |
+| `inquiry.dev.user-name`、`inquiry.dev.operator-name` | 画面に出す名前（認証がない間の固定値） |
+
+## 開発用
+
+手元とスモークで確かめるための口。`production` プロファイルでは存在しない（`404`）。
+
+### 決まりの判定を、時刻を指定して行う
+
+`POST /api/dev/rules/run`。リクエスト `{ "now": "2026-12-01T00:00:00Z" }`（`now` は省略でき、省略すると現在時刻）。与えた時刻を現在として、上の判定を1回行う。知らせた時刻（`remindedAt`）や履歴の時刻にも、与えた時刻を使う。
+
+`200` `{ "reminded": 1, "closed": 0 }`（知らせた件数と、終えた件数）。
+
+手元とスモークで、期間が過ぎるのを待たずに確かめるための口。`production` プロファイルでは存在しない（`404`）。
+
+## モックのシナリオ
+
+モックの実装は、本人が書いた文章（`utterance`。文章で始めた本文、切り替えた本文、補足）でシナリオを選ぶ。押して答えただけで文章がない場合は、すべて正常系になる。
+
+### 受付（文章から置き場所を置く）
+
+種類は、文章に含まれる語で決まる。優先順位は上から。
+
+| 文章に含まれる語 | 種類 |
+| --- | --- |
+| `変えてほしい`、`要望`、`改善` | `CHANGE_REQUEST` |
+| `依頼`、`してほしい`、`お願いします`、`してください` | `DO_FOR_ME` |
+| `不具合`、`バグ`、`おかしい` | `LOOKS_WRONG` |
+| `使い方`、`やり方`、`手順`、`どうやって` | `HOW_TO` |
+| 上記以外 | `HOW_IT_WORKS` |
+
+英語の文章のために、次の語も同じ優先順位で見る（大文字と小文字を区別しない）: `CHANGE_REQUEST` は `feature request`、`improve`。`DO_FOR_ME` は `please`、`could you`。`LOOKS_WRONG` は `bug`、`wrong`、`broken`。`HOW_TO` は `how to`、`how do i`。
+
+システムは、文章に設定のシステムの名前（どの言語の `label` でも。英字は大文字と小文字を区別しない）が含まれていれば、そのシステム。機能は、システムが決まっていて、文章にそのシステムの機能の名前が含まれていれば、その機能。含まれていなければ置かない（質問として聞く）。緊急度は、文章からは決めない。
+
+### タグ
+
+振る舞いは、文章に書いた角括弧のタグで切り替える。タグのない場合は正常系（詳しい質問は、設定に質問がなければ聞き手の1問。出典2件の根拠あり回答）。
+
+| タグ | 失敗・変化するスキル | 振る舞い |
+| --- | --- | --- |
+| `[判定エラー]` | 受付 | 受付が `AI_UNAVAILABLE` で失敗する。置き場所は置かれず、種類から順に質問として聞く（エラーは返さない） |
+| `[質問なし]` | 聞き手 | 詳しい質問を出さない |
+| `[質問エラー]` | 聞き手 | 聞き手が `AI_UNAVAILABLE` で失敗する。詳しい質問なしで先へ進む（エラーは返さない） |
+| `[言い直しエラー]` | 言い直し | 問いの組み立てが `AI_UNAVAILABLE` で失敗する（3 の失敗の扱いになる） |
+| `[根拠なし]` | 調査 | 事実を1件も返さない。根拠なし（`grounded: false`）になる |
+| `[幽霊出典]` | 調査 | すべての事実の根拠が実在しない。照合で全部落ち、根拠なしになる。事実は `memo.unconfirmed` に残る |
+| `[一部幽霊]` | 調査 | 事実2件のうち1件は実在する根拠、1件は実在しない根拠を持つ。根拠ありになり、説明は確かめられた1件だけから書かれ、もう1件は `memo.unconfirmed` に入る |
+| `[遅延]` | 調査 | 進捗の各段階で待つ（既定2秒、設定 `inquiry.mock.slow-step-delay` で変更）。進捗は3段階なので、既定では6秒かかる。時間切れと裏での調査を確かめるときは、`inquiry.rules.answer-timeout` をこれより短くする |
+| `[エラー]` | 調査 | 進捗を流した後に `AI_UNAVAILABLE` |
+| `[拒否]` | 調査 | 進捗を流した後に `AI_REFUSED` |
+| `[説明エラー]` | 説明 | 調査と照合は成功し、説明が `AI_UNAVAILABLE` で失敗する。調査の結果は保存される |
+| `[的外れ]` | 説明 | 調査は通常の事実を返し、説明が「問いに答えていない」と判定する。根拠あり（`grounded: true`）で `answered: false` になる |
+| `[手順なし]` | 説明 | 手順（`answer.steps`）を返さない（タグがなければ、種類が `HOW_TO` か `DO_FOR_ME` のときに手順を2つ返す） |
+| `[相談]` | 助言 | 判断の案の `needsConsultation` を `true` にし、理由を添える |
+| `[手順]` | 助言 | 種類にかかわらず、手順の案を返す（タグがなければ、手順の案を返すのは種類が `DO_FOR_ME` と `CHANGE_REQUEST` のときだけ） |
+| `[根拠なしの案]` | 助言 | 判断の案の `basedOn` に、存在しない番号だけを入れて返す。コードが案を捨て、`judgment` は `null` になる |
+| `[案エラー]` | 助言 | 助言が `AI_UNAVAILABLE` で失敗する。`advice.status` は `FAILED` |
+| `[下書きエラー]` | 下書き | 下書きが `AI_UNAVAILABLE` で失敗する |
+| `[訳エラー]` | 訳 | 訳が `AI_UNAVAILABLE` で失敗する（タグは、本人が書いた文章から読む） |
+
+### 聞き手（設定に質問があり、文章が書かれている場合）
+
+モックの聞き手は、設定の質問のうち、選択肢の名前（どの言語の `label` でも。英字は大文字と小文字を区別しない）が文章にそのまま含まれているものを、その選択肢で読み取る。複数の選択肢が含まれていれば、設定の順で先のもの。文章で答える質問は、読み取らない。`[質問エラー]` では `AI_UNAVAILABLE` で失敗し、設定の質問をすべて聞く。
+
+### 聞き手（設定に質問がない場合）
+
+モックの聞き手は、質問を1問返す。id は `q1`、文言は「どの場面での話ですか」、選択肢は「画面を開いたとき」「保存したとき」「一覧を見たとき」（選択肢の id は `o1`〜`o3`）。本人の言語が `en` なら、文言は「In what situation does this happen?」、選択肢は「When opening a screen」「When saving」「When viewing a list」。
+
+### 言い直し（問いの組み立て）
+
+モックの言い直し（`summary`）は、置き場所と答えから、次の形で作る。
+
+1. 置き場所の前置き: システムと機能が決まっていれば「（システム）の（機能）について、」。システムだけなら「（システム）について、」。どちらも決まっていなければ前置きなし
+2. 種類ごとの文
+3. 文章があれば、タグを取り除いた文章を続ける: 「書かれた内容: （文章）」
+4. 詳しい質問のうち、「わからない」以外の答えを続ける: 「（質問文: 答え）」
+5. 作り直し（5a）で伝えられた一言を続ける: 「補足: （一言）」
+
+| 種類 | 種類ごとの文 |
+| --- | --- |
+| `HOW_TO` | 使い方を知りたい。 |
+| `HOW_IT_WORKS` | いまの仕組みがどうなっているかを知りたい。 |
+| `LOOKS_WRONG` | 動きがおかしいかもしれない。意図した動きかどうかを確認したい。 |
+| `DO_FOR_ME` | 作業をしてほしい。 |
+| `CHANGE_REQUEST` | 変えてほしい点がある。 |
+| 決まっていない | 相談したいことがある。 |
+
+本人の言語が `en` のときは、同じ組み立てを英語で行う。
+
+1. 置き場所の前置き: 「About （機能） in （システム）: 」。システムだけなら「About （システム）: 」
+2. 種類ごとの文（下の表）
+3. 「What was written: （文章）」
+4. 「(（質問文）: （答え）)」
+5. 「Note: （一言）」
+
+| 種類 | 種類ごとの文（`en`） |
+| --- | --- |
+| `HOW_TO` | I want to know how to use it. |
+| `HOW_IT_WORKS` | I want to know how it currently works. |
+| `LOOKS_WRONG` | Something may be behaving incorrectly. I want to check whether this is the intended behavior. |
+| `DO_FOR_ME` | I would like a task to be done. |
+| `CHANGE_REQUEST` | I would like something to be changed. |
+| 決まっていない | I have something to ask about. |
+
+前置きと答えに入れる名前（システム、機能、質問文、選択肢）は、本人の言語の名前。
+
+モックの言い直しは、本人が書いた文章を `goal` にそのまま入れる（文章がなければ、種類ごとの文）。調査と説明のモックは、タグを `goal` から読む（`goal` は書き直しや作り直しで変わらないため、タグの振る舞いは最後まで保たれる）。
+
+モックの説明は、渡された事実の文をつないで作る（「（事実1）。（事実2）。」の形。`LOOKS_WRONG` では先頭に「現在の実装では、」を付け、末尾に「この動作が意図した仕様かどうかは、担当者が確認します。」を足す）。渡されなかった事実の内容が説明に現れないことを、テストで確かめられる形にする。
+
+本人の言語が `en` のとき、モックの調査は事実、`memo`、進捗の文言を英語で返し、モックの説明は英語でつなぐ（「（事実1）. （事実2）.」。`LOOKS_WRONG` では先頭に「In the current implementation: 」を付け、末尾に「Whether this behavior is intended will be confirmed by the support team.」を足す）。正常系の2つの事実は「A job posting is treated as expired from the exact time of its posting deadline」と「Expired job postings are not shown in the list for applicants」。ほかの文面（根拠のない事実、`memo`、進捗）は、日本語の文面と同じ意味の英語にする。根拠の引用は、どちらの言語でも資料の原文のまま。
+
+モックの一次情報は `backend/src/main/resources/mock-knowledge/` の固定ファイル（サンプルのコード、FAQ、用語対応表）。正常系の出典はこのファイルの実在する行を指し、出典の照合は実際に動く。
+
+### 説明が出す手順
+
+モックの説明は、種類が `HOW_TO` か `DO_FOR_ME` のとき、説明の文章に加えて、手順を2つ返す（`[手順なし]` を付けた場合と、`[的外れ]` の場合は返さない）。
+
+| 言語 | 1つ目 | 2つ目 |
+| --- | --- | --- |
+| `ja` | `action`「求人管理画面で、対象の求人の編集を開く」、`check` は `null` | `action`「掲載期限を変えて、保存する」、`check`「応募者向けの一覧に、求人が表示される」 |
+| `en` | `action` "Open the edit screen for the job posting in the job admin screen"、`check` は `null` | `action` "Change the posting deadline and save"、`check` "The job posting appears in the list for applicants" |
+
+### 助言と下書き
+
+- **助言（先例があるとき）**: 同じ置き場所の先例が渡されたら、判断の案の文章を「同じ置き場所の先例を当てはめられそうです。先例の決定: （1件目の先例の決定）」にし、1件目の先例に基づかせる（事実があれば、1件目の事実にも基づかせる）。`needsConsultation` は `false`（`[相談]` を付けた場合は `true`）。
+- **下書き（決定があるとき）**: `RESULT` の文章は、`note` がなければ、その問い合わせについての決定の内容を使う（決定がなければ、判断の案。それもなければ、1件目の事実の文）。
+- **助言**: タグがなければ、判断の案を1つ返す（1件目の事実に基づく。`needsConsultation` は `false`。文章は「資料の記述どおりの動きと考えられます。不具合ではなく、仕様の説明で足りそうです。」）。種類が `DO_FOR_ME` か `CHANGE_REQUEST` のときは、手順の案も返す（手順2つと、元に戻す方法。最後の事実に基づく）。
+- **下書き**: 種類（`kind`）と本人の言語で、決まった文章を返す。`note` があれば、文章の中にそのまま入れる。
+  - `ASK`、`ja`: 「確認させてください。（note、なければ「起きている場面を、もう少し詳しく教えていただけますか。」）」
+  - `RESULT`、`ja`: 「お待たせしました。確認した結果をお伝えします。（note、なければ判断の案の文章。それもなければ1件目の事実の文）」
+  - `en` は、同じ組み立ての英語（"Let me check one thing. …"、"Thank you for waiting. Here is what we found. …"）。
+
+### 訳（モック）
+
+モックの訳は、訳さない。原文の前に、訳の見本であることを示す印を付けて返す（訳す先が `ja` なら「【訳の見本】」、`en` なら "[Sample translation] "）。骨組みでは、訳がどこに出るかを確かめられれば足りる。
