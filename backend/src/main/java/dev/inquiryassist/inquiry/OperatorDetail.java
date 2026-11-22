@@ -3,6 +3,12 @@ package dev.inquiryassist.inquiry;
 import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.TechnicalMemo;
 import dev.inquiryassist.core.Urgency;
+import dev.inquiryassist.core.lifecycle.Awaiting;
+import dev.inquiryassist.core.lifecycle.Declined;
+import dev.inquiryassist.core.lifecycle.Ending;
+import dev.inquiryassist.core.lifecycle.HistoryEntry;
+import dev.inquiryassist.core.lifecycle.Phase;
+import dev.inquiryassist.core.lifecycle.Turn;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -11,7 +17,7 @@ import java.util.UUID;
  * オペレータ向けの問い合わせの全内容。
  *
  * @param id 識別子
- * @param filedAt 担当者に送られた時刻
+ * @param filedAt 担当者に初めて渡した時刻
  * @param askerId 投稿者
  * @param askerName 投稿者の表示用の名前。認証を加えるまでは設定の固定値
  * @param utterance 本人が書いた文章（最初の文章、切り替えたときの文章、補足を、書いた順に空行でつないだもの）
@@ -26,8 +32,13 @@ import java.util.UUID;
  * @param sentImmediately 答えを待たずに担当者へ送られたか
  * @param read 既読か
  * @param slackStatus Slack への投稿の状態
- * @param handlingStatus 対応状況
- * @param messages 担当者の返信と本人の追記（古い順）
+ * @param phase 区間
+ * @param turn 誰の番か。終わった件は null
+ * @param awaiting 待っていること。終わった件は null
+ * @param ending 終わり方。終わっていない件は null
+ * @param declined 見送りの内容。見送りで終わった件だけ非 null
+ * @param messages 担当者の発言と本人の追記（古い順）
+ * @param history 状態の履歴（起きた順）
  * @param trace スキルの実行記録。無効にしている場合は null
  */
 public record OperatorDetail(
@@ -47,8 +58,13 @@ public record OperatorDetail(
         boolean sentImmediately,
         boolean read,
         SlackStatus slackStatus,
-        HandlingStatus handlingStatus,
+        Phase phase,
+        Turn turn,
+        Awaiting awaiting,
+        Ending ending,
+        Declined declined,
         List<MessageView> messages,
+        List<HistoryEntry> history,
         List<TraceEntry> trace) {
 
     /**

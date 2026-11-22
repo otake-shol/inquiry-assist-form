@@ -131,7 +131,8 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
         view: action.view,
         busy: false,
         error: null,
-        progress: action.view.step === "ANSWERING" ? state.progress : [],
+        progress:
+          action.view.awaiting === "INVESTIGATION" ? state.progress : [],
       };
     case "viewRefreshed":
       // 失敗のあとに、保存された最新の状態を取り直したもの。エラーの表示は残す。

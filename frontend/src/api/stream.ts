@@ -65,7 +65,7 @@ export const subscribeAnswerStream: SubscribeAnswerStream = (id, handlers) => {
 export interface OperatorStreamHandlers {
   /** 担当者に送られた問い合わせが届いた */
   onFiled: (item: OperatorItem) => void;
-  /** 本人の追記、対応状況の変更、担当者の返信などで、問い合わせが更新された */
+  /** 本人の追記や結果の確かめ、担当者の発言や区間の変更などで、問い合わせの状態が変わった */
   onUpdated: (item: OperatorItem) => void;
   /** 切断から再接続できた（一覧を取り直す合図） */
   onReconnected: () => void;

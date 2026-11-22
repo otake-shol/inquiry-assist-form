@@ -44,7 +44,7 @@ class CustomizedSettingsTest extends ApiSupport {
 
         mvc.perform(post("/api/operator/inquiries/" + id + "/replies")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"body\":\"返信\"}"))
+                        .content("{\"kind\":\"ASK\",\"body\":\"返信\"}"))
                 .andExpect(status().isOk());
         mvc.perform(post("/api/inquiries/" + id + "/messages")
                         .contentType(MediaType.APPLICATION_JSON)

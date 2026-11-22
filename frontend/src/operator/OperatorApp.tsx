@@ -14,7 +14,6 @@ import {
 } from "../api/stream.ts";
 import type {
   AppConfig,
-  HandlingStatus,
   OperatorDetail,
   OperatorItem,
   SystemOption,
@@ -23,24 +22,29 @@ import { BoardColumn } from "../components/BoardColumn.tsx";
 import { DevLink } from "../components/Navigation.tsx";
 import { NEW_INQUIRY_PATH } from "../path.ts";
 import { USER_TEXT } from "../text/inquiries.ts";
-import { DetailView } from "./DetailView.tsx";
+import { DetailView, type FocusRequest } from "./DetailView.tsx";
 import {
-  HANDLING_LABELS,
+  OPERATOR_COLUMN_LABELS,
   OP_TEXT,
   formatFiledAt,
-  movedText,
   opTypeLabel,
   opUrgencyLabel,
 } from "./labels.ts";
 import {
   OPERATOR_COLUMNS,
   arrangeOperatorBoard,
+  canDropOnColumn,
+  cardNoteOf,
+  cardPhaseOf,
+  dropIntentOf,
   initialOperatorState,
+  movedMessageOf,
   operatorColumnOf,
   operatorReducer,
   tabTitleOf,
   unreadCountOf,
   visibleItems,
+  type OperatorColumn,
 } from "./state.ts";
 
 /** オペレータ画面の props。 */
@@ -68,7 +72,9 @@ interface OperatorCardProps {
 }
 
 /**
- * ボードのカード1枚。押すと詳細のパネルを開き、ドラッグすると別の列へ移せる。
+ * ボードのカード1枚。押すと詳細のパネルを開く。ドラッグして別の列に落とすと、状態は変えずに
+ * パネルを開き、対応する入力欄を開く。カードには区間、待っていること（本人の番の列）、
+ * 終わり方（終わりの列）を添える。
  * 中身は押せる部分（ボタン）だけにし、ドラッグはその外側の `li` で受ける。
  * 未読は太字と印で示し、読み上げにも「未読」を含める。
  * @param props 1件と、操作の受け口
@@ -82,7 +88,9 @@ function OperatorCard({
   onDragStart,
   onDragEnd,
 }: OperatorCardProps) {
-  const messageCount = item.messageCount ?? 0;
+  const messageCount = item.messageCount;
+  const phase = cardPhaseOf(item);
+  const note = cardNoteOf(item);
   return (
     <li
       className={`board-card-item ${dragging ? "dragging" : ""}`}
@@ -122,8 +130,14 @@ function OperatorCard({
           {item.sentImmediately && (
             <span className="op-badge strong">{OP_TEXT.sentImmediately}</span>
           )}
+          {phase !== null && (
+            <span className="op-badge quiet">
+              {OP_TEXT.phaseLabel} {phase}
+            </span>
+          )}
         </span>
         <span className="op-summary">{item.summary}</span>
+        {note !== null && <span className="board-note op-wait">{note}</span>}
         <span className="op-row-top op-card-foot">
           <time className="op-time" dateTime={item.filedAt}>
             {formatFiledAt(item.filedAt)}
@@ -138,9 +152,10 @@ function OperatorCard({
 }
 
 /**
- * オペレータ画面。担当者へ送られた問い合わせを、対応状況ごとの列（未対応・対応中・完了）に
- * カードとして並べるボード。カードをドラッグすると対応状況が変わり、押すと右に詳細のパネルが開く。
- * 新しい問い合わせは通知ストリームで届き、「未対応」の列に足される。
+ * オペレータ画面。担当者に渡したことのある問い合わせを、誰の番かで分けた列（担当者の番・本人の番・終わり）に
+ * カードとして並べるボード。カードを押すと右に詳細のパネルが開く。ドラッグして「本人の番」「終わり」に
+ * 落とすと、状態は変えずにパネルを開き、「本人に送る」「見送る」の入力欄にフォーカスを移す。
+ * 新しい問い合わせは通知ストリームで届き、「担当者の番」の列に足される。
  * @param props 購読関数の差し替え口と、URL との受け渡し
  */
 export function OperatorApp({
@@ -157,10 +172,11 @@ export function OperatorApp({
   const [failedId, setFailedId] = useState<string | null>(null);
   // ドラッグ中の問い合わせの id と、いま重なっている列
   const [dragId, setDragId] = useState<string | null>(null);
-  const [overColumn, setOverColumn] = useState<HandlingStatus | null>(null);
-  // ドラッグでの対応状況の変更に失敗したか
-  const [moveFailed, setMoveFailed] = useState(false);
-  // 読み上げ環境に伝える、対応状況が変わったことの文
+  const [overColumn, setOverColumn] = useState<OperatorColumn | null>(null);
+  // ドラッグで落とされたときの、パネルの入力欄へのフォーカスの要求
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
+  const focusCounter = useRef(0);
+  // 読み上げ環境に伝える、列が変わったことと、入力欄を開いたことの文
   const [announcement, setAnnouncement] = useState("");
   const boardRef = useRef<HTMLElement>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -310,7 +326,7 @@ export function OperatorApp({
   }, [selectedId, onNavigate]);
 
   /**
-   * 詳細に対する操作（状況の切り替え、返信）を実行し、返ってきた全内容で詳細を置き換える。
+   * 詳細に対する操作を実行し、返ってきた全内容で詳細を置き換える。
    * @param id 操作する問い合わせの id
    * @param operation 実行する API 呼び出し
    * @returns 成功したか
@@ -336,52 +352,27 @@ export function OperatorApp({
   );
 
   /**
-   * カードを別の列へ移す（ドラッグ）。画面にはすぐ反映し、API が失敗したら元の列に戻して伝える。
-   * 同じ列への移動では API を呼ばない。
-   * @param id 問い合わせの id
-   * @param status 移し先の対応状況
+   * 詳細に対する操作（区間の切り替え、置き直し、本人に送る、見送る）を実行する。
+   * 返ってきた全内容で詳細を置き換える。
+   * @param id 操作する問い合わせの id
+   * @param operation 実行する API 呼び出し
    */
-  const moveItem = useCallback(async (id: string, status: HandlingStatus) => {
-    const item = itemsRef.current.find((i) => i.id === id);
-    if (item === undefined) return;
-    const before = operatorColumnOf(item);
-    if (before === status) return;
-    setMoveFailed(false);
-    dispatch({ type: "statusMoved", id, status });
-    try {
-      const updated = await api.setHandlingStatus(id, status);
-      if (selectedRef.current === id) {
-        dispatch({ type: "detailLoaded", detail: updated });
-      }
-      setAnnouncement(movedText(item.summary, status));
-    } catch {
-      dispatch({ type: "statusMoved", id, status: before });
-      setMoveFailed(true);
-    }
-  }, []);
+  const operate = (
+    id: string,
+    operation: () => Promise<OperatorDetail>,
+  ): Promise<boolean> => act(id, operation);
 
-  /**
-   * 詳細のパネルでの対応状況の切り替え。成功したらカードも列を移り、読み上げにも伝える。
-   * @param current 開いている詳細
-   * @param status 切り替え先
-   */
-  const switchStatus = async (
-    current: OperatorDetail,
-    status: HandlingStatus,
-  ) => {
-    setMoveFailed(false);
-    const ok = await act(current.id, () =>
-      api.setHandlingStatus(current.id, status),
-    );
-    if (ok) {
-      const summary =
-        itemsRef.current.find((i) => i.id === current.id)?.summary ??
-        current.utterance ??
-        "";
-      setAnnouncement(movedText(summary, status));
-    }
-    return ok;
-  };
+  /** フォーカスを移し終えたので、要求を消す。 */
+  const handleFocusHandled = useCallback(() => setFocusRequest(null), []);
+
+  // 列が変わった件を、読み上げ環境にも伝える（ストリームの更新も、自分の操作も同じ）。
+  // 一覧が変わった描画のうちに、前の一覧と比べる
+  const [previousItems, setPreviousItems] = useState(items);
+  if (items !== previousItems) {
+    setPreviousItems(items);
+    const message = movedMessageOf(previousItems, items);
+    if (message !== "") setAnnouncement(message);
+  }
 
   const visible = useMemo(
     () => visibleItems(items, onlyUnread, selectedId),
@@ -392,17 +383,23 @@ export function OperatorApp({
     const dragged = items.find((item) => item.id === dragId);
     return dragged === undefined ? null : operatorColumnOf(dragged);
   }, [items, dragId]);
+  /** 掴んでいるカードを、この列に落とせるか */
+  const canDropOn = (column: OperatorColumn) =>
+    draggedColumn !== null && canDropOnColumn(draggedColumn, column);
   const urgencies = config?.urgencies ?? [];
+  const types = config?.types ?? [];
+  const systems = config?.systems ?? [];
   const showDevLink = config !== null && (config.mock || config.trace === true);
   const showColumns = state.loaded && !state.failed;
 
   /**
-   * 列がドラッグを受けるための受け口を作る。
-   * @param column 列の対応状況
+   * 列がドラッグを受けるための受け口を作る。落とせるのは「担当者の番」から「本人の番」「終わり」へだけで、
+   * 落としても状態は変えない。パネルを開き、対応する入力欄（「本人に送る」「見送る」）にフォーカスを移す。
+   * @param column 列
    */
-  const dropPropsOf = (column: HandlingStatus) => ({
+  const dropPropsOf = (column: OperatorColumn) => ({
     onDragOver: (event: DragEvent<HTMLElement>) => {
-      if (dragId === null) return;
+      if (dragId === null || !canDropOn(column)) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
       if (overColumn !== column) setOverColumn(column);
@@ -413,12 +410,19 @@ export function OperatorApp({
       }
     },
     onDrop: (event: DragEvent<HTMLElement>) => {
-      if (dragId === null) return;
+      if (dragId === null || !canDropOn(column)) return;
       event.preventDefault();
       const id = dragId;
       setDragId(null);
       setOverColumn(null);
-      void moveItem(id, column);
+      const intent = dropIntentOf(column);
+      if (intent === null) return;
+      focusCounter.current += 1;
+      setFocusRequest({ id, target: intent, token: focusCounter.current });
+      onNavigate(id);
+      setAnnouncement(
+        intent === "send" ? OP_TEXT.dropSend : OP_TEXT.dropDecline,
+      );
     },
   });
 
@@ -478,11 +482,6 @@ export function OperatorApp({
               {OP_TEXT.loadFailed}
             </p>
           )}
-          {moveFailed && (
-            <p className="op-notfound" role="alert">
-              {OP_TEXT.moveFailed}
-            </p>
-          )}
           {!state.loaded && <p className="op-muted">{OP_TEXT.loading}</p>}
           {showColumns && (
             <div className="board-columns op-columns">
@@ -490,10 +489,10 @@ export function OperatorApp({
                 <BoardColumn
                   key={column}
                   columnId={column}
-                  title={HANDLING_LABELS[column]}
+                  title={OPERATOR_COLUMN_LABELS[column]}
                   count={board[column].length}
                   dropState={
-                    dragId === null || column === draggedColumn
+                    dragId === null || !canDropOn(column)
                       ? undefined
                       : column === overColumn
                         ? "over"
@@ -509,10 +508,7 @@ export function OperatorApp({
                       selected={item.id === selectedId}
                       dragging={item.id === dragId}
                       onOpen={() => onNavigate(item.id)}
-                      onDragStart={() => {
-                        setMoveFailed(false);
-                        setDragId(item.id);
-                      }}
+                      onDragStart={() => setDragId(item.id)}
                       onDragEnd={() => {
                         setDragId(null);
                         setOverColumn(null);
@@ -546,14 +542,31 @@ export function OperatorApp({
             )}
             {detail !== null && (
               <DetailView
+                key={detail.id}
                 detail={detail}
                 urgencies={urgencies}
+                types={types}
+                systems={systems}
                 trace={config?.trace === true}
                 busy={acting}
                 failed={failedId === detail.id}
-                onStatus={(status) => switchStatus(detail, status)}
-                onReply={(body) =>
-                  act(detail.id, () => api.postReply(detail.id, body))
+                focusRequest={focusRequest}
+                onFocusHandled={handleFocusHandled}
+                onPhase={(phase) =>
+                  operate(detail.id, () => api.setPhase(detail.id, phase))
+                }
+                onPlacement={(placement) =>
+                  operate(detail.id, () =>
+                    api.setPlacement(detail.id, placement),
+                  )
+                }
+                onReply={(kind, body) =>
+                  operate(detail.id, () => api.postReply(detail.id, kind, body))
+                }
+                onDecline={(kind, reason) =>
+                  operate(detail.id, () =>
+                    api.declineInquiry(detail.id, kind, reason),
+                  )
                 }
               />
             )}

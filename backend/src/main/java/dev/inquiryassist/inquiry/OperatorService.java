@@ -1,7 +1,16 @@
 package dev.inquiryassist.inquiry;
 
+import dev.inquiryassist.core.InquiryType;
+import dev.inquiryassist.core.Placement;
 import dev.inquiryassist.core.Urgency;
+import dev.inquiryassist.core.intake.IntakeCatalog;
 import dev.inquiryassist.core.intake.QuestionKind;
+import dev.inquiryassist.core.lifecycle.Declined;
+import dev.inquiryassist.core.lifecycle.DeclineReason;
+import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
+import dev.inquiryassist.core.lifecycle.Phase;
+import dev.inquiryassist.core.lifecycle.ReplyKind;
+import dev.inquiryassist.core.lifecycle.Transition;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,18 +22,20 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 
 /**
- * オペレータ向けの一覧・詳細・既読化・対応状況の変更・返信と、通知結果の記録。
- * 担当者に送られた（{@code FILED}）問い合わせだけを扱う。
+ * オペレータ向けの一覧・詳細・既読化と、担当者の操作（聞き返す・結果を伝える、見送る、区間を変える、置き直す）、
+ * 通知結果の記録。担当者に渡したことのある問い合わせだけを扱う。状態の遷移の規則は、{@link InquiryStateMachine} が決める。
  */
 @Service
 public class OperatorService {
 
     private static final Logger log = LoggerFactory.getLogger(OperatorService.class);
+    private static final int MAX_REASON_LENGTH = 2000;
 
     private final InquiryRepository repository;
     private final InquiryProperties properties;
     private final SkillImplementations implementations;
     private final InquiryPresenter presenter;
+    private final IntakeCatalog catalog;
     private final ApplicationEventPublisher events;
 
     /**
@@ -32,6 +43,7 @@ public class OperatorService {
      * @param properties 投稿先と担当者の表示名の設定
      * @param implementations スキルごとの実装（実行記録の実装名に使う）
      * @param presenter 一覧と詳細の項目を作る
+     * @param catalog 置き直しの入力を確かめる、システムと機能の一覧
      * @param events 更新の確定後にイベントを発行する
      */
     OperatorService(
@@ -39,28 +51,30 @@ public class OperatorService {
             InquiryProperties properties,
             SkillImplementations implementations,
             InquiryPresenter presenter,
+            IntakeCatalog catalog,
             ApplicationEventPublisher events) {
         this.repository = repository;
         this.properties = properties;
         this.implementations = implementations;
         this.presenter = presenter;
+        this.catalog = catalog;
         this.events = events;
     }
 
     /**
-     * 担当者に送られた問い合わせを新しい順に返す。ただし、業務が止まっている（{@code BLOCKED}）件を先頭に寄せる。
+     * 担当者に渡したことのある問い合わせを、初めて渡した新しい順に返す。ただし、業務が止まっている（{@code BLOCKED}）件を先頭に寄せる。
      *
      * @param unreadOnly true なら未読だけに絞る
      * @return 一覧と、未読数（絞り込みにかかわらず全体）
      */
     public OperatorList list(boolean unreadOnly) {
         // 寄せ方は安定。BLOCKED の中、それ以外の中は、送られた新しい順のまま
-        List<OperatorItem> items = new ArrayList<>(repository.findByOutcomeOrderByFiledAtDesc(InquiryOutcome.FILED).stream()
+        List<OperatorItem> items = new ArrayList<>(repository.findByHandedOverAtIsNotNullOrderByHandedOverAtDesc().stream()
                 .filter(e -> !unreadOnly || e.readAt == null)
                 .map(presenter::toItem)
                 .toList());
         items.sort(java.util.Comparator.comparing(item -> item.urgency() != Urgency.BLOCKED));
-        return new OperatorList(repository.countByOutcomeAndReadAtIsNull(InquiryOutcome.FILED), List.copyOf(items));
+        return new OperatorList(repository.countByHandedOverAtIsNotNullAndReadAtIsNull(), List.copyOf(items));
     }
 
     /**
@@ -68,10 +82,10 @@ public class OperatorService {
      *
      * @param id 問い合わせの識別子
      * @return 全内容
-     * @throws InquiryNotFoundException 存在しない、または担当者に送られていない場合
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
      */
     public OperatorDetail get(UUID id) {
-        return toDetail(loadFiled(id));
+        return toDetail(loadHandedOver(id));
     }
 
     /**
@@ -79,47 +93,135 @@ public class OperatorService {
      *
      * @param id 問い合わせの識別子
      * @return 既読後の全内容
-     * @throws InquiryNotFoundException 存在しない、または担当者に送られていない場合
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
      */
     public OperatorDetail markRead(UUID id) {
-        loadFiled(id);
+        loadHandedOver(id);
         repository.markRead(id, Instant.now());
-        return toDetail(loadFiled(id));
+        return toDetail(loadHandedOver(id));
     }
 
     /**
-     * 対応状況を変える。
+     * 担当者が本人に返す。聞き返しなら本人の返事を待ち、結果を伝えるなら本人が確かめる。区間は変えない。
+     * 本人側は未読の発言ありになる。
      *
      * @param id 問い合わせの識別子
-     * @param status 変更後の対応状況
-     * @return 変更後の全内容
-     * @throws InquiryNotFoundException 存在しない、または担当者に送られていない場合
-     */
-    public OperatorDetail changeStatus(UUID id, HandlingStatus status) {
-        InquiryEntity inquiry = loadFiled(id);
-        inquiry.handlingStatus = status;
-        return toDetail(saveAndPublish(inquiry));
-    }
-
-    /**
-     * 担当者が返信する。未対応（{@code OPEN}）なら対応中になり、本人側は未読の返信ありになる。
-     * 対応中と完了は変えない。
-     *
-     * @param id 問い合わせの識別子
+     * @param kind 発言の種類
      * @param body 本文。前後の空白を除いて1〜4000文字
      * @return 返信後の全内容
      * @throws IllegalArgumentException 本文が空、または長すぎる場合
-     * @throws InquiryNotFoundException 存在しない、または担当者に送られていない場合
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
+     * @throws InvalidStateException 担当者の番でない場合
      */
-    public OperatorDetail reply(UUID id, String body) {
+    public OperatorDetail reply(UUID id, ReplyKind kind, String body) {
         String trimmed = MessageBodies.validated(body);
-        InquiryEntity inquiry = loadFiled(id);
-        inquiry.addMessage(MessageAuthor.OPERATOR, properties.dev().operatorName(), trimmed, Instant.now());
+        InquiryEntity inquiry = loadHandedOver(id);
+        Transition transition = InquiryStateMachine.operatorReplied(inquiry.state(), kind);
+        inquiry.addMessage(
+                MessageAuthor.OPERATOR,
+                kind == ReplyKind.ASK ? MessageKind.ASK : MessageKind.RESULT,
+                properties.dev().operatorName(),
+                trimmed,
+                Instant.now());
         inquiry.askerUnreadReply = true;
-        if (inquiry.handlingStatus == HandlingStatus.OPEN) {
-            inquiry.handlingStatus = HandlingStatus.IN_PROGRESS;
-        }
+        inquiry.apply(transition, Instant.now());
         return toDetail(saveAndPublish(inquiry));
+    }
+
+    /**
+     * 担当者が見送る。理由をメッセージ（{@code DECLINE}）として足し、終わる。
+     *
+     * @param id 問い合わせの識別子
+     * @param reasonKind 理由の種類
+     * @param reason 理由の文章。前後の空白を除いて1〜2000文字
+     * @return 見送り後の全内容
+     * @throws IllegalArgumentException 理由が空、または長すぎる場合
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
+     * @throws InvalidStateException 担当者の番でない場合
+     */
+    public OperatorDetail decline(UUID id, DeclineReason reasonKind, String reason) {
+        String trimmed = reason == null ? "" : reason.strip();
+        if (trimmed.isEmpty() || trimmed.length() > MAX_REASON_LENGTH) {
+            throw new IllegalArgumentException("reason は前後の空白を除いて1〜" + MAX_REASON_LENGTH + "文字");
+        }
+        InquiryEntity inquiry = loadHandedOver(id);
+        Transition transition = InquiryStateMachine.declined(inquiry.state());
+        inquiry.addMessage(
+                MessageAuthor.OPERATOR, MessageKind.DECLINE, properties.dev().operatorName(), trimmed, Instant.now());
+        inquiry.askerUnreadReply = true;
+        inquiry.declined = new Declined(reasonKind, trimmed);
+        inquiry.apply(transition, Instant.now());
+        return toDetail(saveAndPublish(inquiry));
+    }
+
+    /**
+     * 担当者が区間を変える。番は変えない。
+     *
+     * @param id 問い合わせの識別子
+     * @param phase 変更後の区間（{@code KNOW}、{@code DECIDE}、{@code ACT}）
+     * @return 変更後の全内容
+     * @throws IllegalArgumentException 区間が範囲外の場合
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
+     * @throws InvalidStateException 担当者の番でない場合
+     */
+    public OperatorDetail changePhase(UUID id, Phase phase) {
+        InquiryEntity inquiry = loadHandedOver(id);
+        inquiry.apply(InquiryStateMachine.phaseChanged(inquiry.state(), phase), Instant.now());
+        return toDetail(saveAndPublish(inquiry));
+    }
+
+    /**
+     * 担当者が置き直す。置いた人は担当者になる。種類が変わったら、区間を新しい種類の決まりに合わせる。番は変えない。
+     * 入口で本人が選んだ答えは、そのまま残す。変える前と後は、状態の履歴に残す。
+     *
+     * @param id 問い合わせの識別子
+     * @param type 種類。決まっていなければ null
+     * @param systemId システムの識別子。決まっていなければ null
+     * @param functionId 機能の識別子。決まっていなければ null
+     * @return 変更後の全内容
+     * @throws IllegalArgumentException システムが一覧にない、機能がそのシステムにない、またはシステムなしの機能の場合
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
+     * @throws InvalidStateException 終わっている場合
+     */
+    public OperatorDetail replacePlacement(UUID id, InquiryType type, String systemId, String functionId) {
+        validatePlacement(systemId, functionId);
+        InquiryEntity inquiry = loadHandedOver(id);
+        Placement before = inquiry.placement();
+        Placement after = new Placement(type, systemId, functionId);
+        Transition transition = InquiryStateMachine.placementChanged(inquiry.state(), inquiry.context(null), before, after);
+        inquiry.placementOverride = after;
+        // 履歴には、設定が変わっても読めるよう、そのときの名前で残す
+        inquiry.apply(
+                transition,
+                Instant.now(),
+                java.util.Map.of("before", namesOf(before), "after", namesOf(after)));
+        return toDetail(saveAndPublish(inquiry));
+    }
+
+    /** 置き場所を、既定の言語の名前にする。決まっていない項目は null。 */
+    private java.util.Map<String, String> namesOf(Placement placement) {
+        java.util.Map<String, String> names = new java.util.LinkedHashMap<>();
+        names.put("type", placement.type() == null ? null : catalog.typeLabel(placement.type()));
+        names.put("system", placement.systemId() == null ? null : catalog.systemLabel(placement.systemId()));
+        names.put(
+                "function",
+                placement.functionId() == null ? null : catalog.functionLabel(placement.systemId(), placement.functionId()));
+        return names;
+    }
+
+    private void validatePlacement(String systemId, String functionId) {
+        if (systemId == null && functionId != null) {
+            throw new IllegalArgumentException("機能はシステムが決まっているときだけ指定できます");
+        }
+        if (systemId != null) {
+            IntakeCatalog.SystemInfo system = catalog.system(systemId);
+            if (system == null) {
+                throw new IllegalArgumentException("一覧にないシステムです: " + systemId);
+            }
+            if (functionId != null && system.functions().stream().noneMatch(f -> f.id().equals(functionId))) {
+                throw new IllegalArgumentException("そのシステムにない機能です: " + functionId);
+            }
+        }
     }
 
     /**
@@ -153,10 +255,10 @@ public class OperatorService {
         return saved;
     }
 
-    private InquiryEntity loadFiled(UUID id) {
+    private InquiryEntity loadHandedOver(UUID id) {
         return repository
                 .findById(id)
-                .filter(e -> e.outcome == InquiryOutcome.FILED)
+                .filter(e -> e.handedOverAt != null)
                 .orElseThrow(() -> new InquiryNotFoundException(id));
     }
 
@@ -182,7 +284,7 @@ public class OperatorService {
                                 .toList());
         return new OperatorDetail(
                 e.id,
-                e.filedAt,
+                e.handedOverAt,
                 e.askerId,
                 properties.dev().userName(),
                 e.utterance(),
@@ -197,8 +299,13 @@ public class OperatorService {
                 e.sentImmediately,
                 e.readAt != null,
                 slackStatus(e),
-                e.handlingStatus,
+                e.phase,
+                e.turn,
+                e.awaiting,
+                e.ending,
+                e.declined,
                 MessageBodies.viewsOf(e),
+                List.copyOf(e.history),
                 TraceViews.of(e, properties, implementations));
     }
 

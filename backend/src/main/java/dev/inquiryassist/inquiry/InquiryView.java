@@ -4,6 +4,11 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import dev.inquiryassist.core.Citation;
 import dev.inquiryassist.core.TechnicalMemo;
 import dev.inquiryassist.core.Urgency;
+import dev.inquiryassist.core.lifecycle.Awaiting;
+import dev.inquiryassist.core.lifecycle.Declined;
+import dev.inquiryassist.core.lifecycle.Ending;
+import dev.inquiryassist.core.lifecycle.Phase;
+import dev.inquiryassist.core.lifecycle.Turn;
 import dev.inquiryassist.core.intake.AnswerKind;
 import dev.inquiryassist.core.intake.Choice;
 import dev.inquiryassist.core.intake.PlacedBy;
@@ -17,8 +22,11 @@ import java.util.UUID;
  *
  * @param id 識別子
  * @param createdAt 作成日時
- * @param step 段階
- * @param outcome 結果
+ * @param phase 区間
+ * @param turn 誰の番か。終わった件は null
+ * @param awaiting 待っていること。終わった件は null
+ * @param ending 終わり方。終わっていない件は null
+ * @param declined 見送りの内容。見送りで終わった件だけ非 null
  * @param urgency 緊急度
  * @param type 種類。決まっていなければ null
  * @param system システム。決まっていなければ null
@@ -30,16 +38,20 @@ import java.util.UUID;
  * @param answer 0次回答。完了後に非 null
  * @param canSendNow いま「答えを待たずに担当者へ送る」を実行できるか
  * @param sentImmediately 答えを待たずに担当者へ送られたか
- * @param handlingStatus 対応状況。担当者に送られていなければ null
- * @param messages 担当者の返信と本人の追記（古い順）。なければ空
+ * @param handedOverAt 担当者に初めて渡した時刻。渡していなければ null
+ * @param unreadReply 本人がまだ読んでいない担当者の発言があるか
+ * @param messages 担当者の発言と本人の追記（古い順）。なければ空
  * @param trace スキルの実行記録。無効にしている場合は null
  * @param mock モック実装による記録か
  */
 public record InquiryView(
         UUID id,
         Instant createdAt,
-        InquiryStep step,
-        InquiryOutcome outcome,
+        Phase phase,
+        Turn turn,
+        Awaiting awaiting,
+        Ending ending,
+        Declined declined,
         Urgency urgency,
         PlacedView type,
         PlacedView system,
@@ -51,7 +63,8 @@ public record InquiryView(
         AnswerView answer,
         boolean canSendNow,
         boolean sentImmediately,
-        HandlingStatus handlingStatus,
+        Instant handedOverAt,
+        boolean unreadReply,
         List<MessageView> messages,
         List<TraceEntry> trace,
         boolean mock) {

@@ -165,7 +165,7 @@ abstract class ApiSupport {
     String toStructured(String text, String systemId) throws Exception {
         String id = idOf(create(text));
         String last = finishIntake(id, systemId);
-        org.assertj.core.api.Assertions.assertThat((String) JsonPath.read(last, "$.step")).isEqualTo("STRUCTURED");
+        org.assertj.core.api.Assertions.assertThat((String) JsonPath.read(last, "$.awaiting")).isEqualTo("QUESTION_CONFIRMATION");
         return id;
     }
 

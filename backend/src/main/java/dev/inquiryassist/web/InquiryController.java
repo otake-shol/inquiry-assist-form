@@ -4,6 +4,7 @@ import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiUnavailableException;
 import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.intake.IntakeReply;
+import dev.inquiryassist.core.lifecycle.IllegalTransitionException;
 import dev.inquiryassist.inquiry.InquiryList;
 import dev.inquiryassist.inquiry.InquiryService;
 import dev.inquiryassist.inquiry.InquiryView;
@@ -61,8 +62,8 @@ public class InquiryController {
     /** 本人の追記。長さの検証は、前後の空白を除いてから行うためサービスで行う。 */
     public record MessageRequest(@NotNull String body) {}
 
-    /** 解決の判定。 */
-    public record ResolutionRequest(@NotNull Boolean resolved) {}
+    /** 結果の確かめ。{@code note} は、解決していない場合の任意の追記。長さの検証は、前後の空白を除いてからサービスで行う。 */
+    public record ResolutionRequest(@NotNull Boolean resolved, String note) {}
 
     private final InquiryService service;
 
@@ -214,7 +215,7 @@ public class InquiryController {
     }
 
     /**
-     * 解決を判定する。
+     * 本人が結果を確かめる。
      *
      * @param id 問い合わせの識別子
      * @param request 解決したか
@@ -222,7 +223,7 @@ public class InquiryController {
      */
     @PostMapping("/api/inquiries/{id}/resolution")
     public InquiryView resolution(@PathVariable UUID id, @Valid @RequestBody ResolutionRequest request) {
-        return service.resolve(id, request.resolved());
+        return service.resolve(id, request.resolved(), request.note());
     }
 
     /**
@@ -234,6 +235,17 @@ public class InquiryController {
     @PostMapping("/api/inquiries/{id}/send-now")
     public InquiryView sendNow(@PathVariable UUID id) {
         return service.sendNow(id);
+    }
+
+    /**
+     * 本人が取り下げる。
+     *
+     * @param id 問い合わせの識別子
+     * @return 更新後の問い合わせ
+     */
+    @PostMapping("/api/inquiries/{id}/withdraw")
+    public InquiryView withdraw(@PathVariable UUID id) {
+        return service.withdraw(id);
     }
 
     /**
@@ -278,7 +290,7 @@ public class InquiryController {
         } catch (AiUnavailableException e) {
             log.warn("0次回答の生成で AI を呼び出せませんでした id={}", id, e);
             send(emitter, "failed", new ErrorBody("AI_UNAVAILABLE", e.getMessage()));
-        } catch (InvalidStateException e) {
+        } catch (InvalidStateException | IllegalTransitionException e) {
             send(emitter, "failed", new ErrorBody("INVALID_STATE", e.getMessage()));
         } catch (RuntimeException e) {
             // 契約外の失敗。画面を「担当者に送る」へ誘導できるよう AI_UNAVAILABLE として流す

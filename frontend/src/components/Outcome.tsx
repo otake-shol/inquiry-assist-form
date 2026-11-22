@@ -1,5 +1,6 @@
-import type { InquiryView, ZeroAnswer } from "../api/types.ts";
-import { SOURCE_TYPE_LABELS, TEXT, closingText } from "../text/labels.ts";
+import type { Declined, Ending, ZeroAnswer } from "../api/types.ts";
+import { USER_TEXT, endingText } from "../text/inquiries.ts";
+import { SOURCE_TYPE_LABELS, TEXT } from "../text/labels.ts";
 
 /**
  * 調べている間の進捗。済んだ行にはチェック、最新の行には動きのある印をつける。
@@ -60,7 +61,7 @@ function MemoList({ title, items }: { title: string; items: string[] }) {
 /** 調べた結果の props。 */
 interface ResultProps {
   answer: ZeroAnswer;
-  /** 本人の解決判定を待っているか（待っていれば操作ボタンを出す） */
+  /** 本人が AI の答えを確かめる番か（そうなら、進められそうかの問いと操作ボタンを出す） */
   awaitingResolution: boolean;
   busy: boolean;
   /** 「やってほしい」か（解決の判定を「自分でできました」「担当者に頼む」で聞く） */
@@ -122,6 +123,9 @@ export function Result({
         <MemoList title={TEXT.memoNextChecks} items={answer.memo.nextChecks} />
       </details>
       {awaitingResolution && (
+        <p className="progress-question">{USER_TEXT.progressQuestion}</p>
+      )}
+      {awaitingResolution && (
         <div className="actions">
           {answered ? (
             <>
@@ -181,29 +185,33 @@ export function FiledNotice({ text }: { text: "lookWrong" | "doForMe" }) {
 
 /** 終わりの props。 */
 interface ClosingProps {
-  view: InquiryView;
-  filedGuidance: string | null;
+  ending: Ending;
+  /** 見送りの理由（見送りで終わった件だけ） */
+  declined: Declined | null;
   onRestart: () => void;
   /** 「新しい問い合わせを書く」をここに出すか。やり取りが続く場合は、やり取りの下に出すので false */
   showRestart?: boolean;
 }
 
 /**
- * 結果ごとの終わりの文言と、送った後の案内。
- * @param props 終了した問い合わせと「新しい問い合わせ」の受け口
+ * 終わり方ごとの終わりの文言（解決済み、回答済み、見送り、取り下げ）。見送りは担当者が書いた理由を続ける。
+ * 担当者に渡しただけでは出さない（問い合わせは終わっていないため）。
+ * @param props 終わり方と「新しい問い合わせ」の受け口
  */
 export function Closing({
-  view,
-  filedGuidance,
+  ending,
+  declined,
   onRestart,
   showRestart = true,
 }: ClosingProps) {
-  const text = closingText(view, filedGuidance);
+  const text = endingText(ending, declined);
   return (
     <div className="system closing">
       <div tabIndex={-1} data-autofocus className="focus-target">
         <p className="lead">{text.lead}</p>
-        {text.guidance !== null && <p>{text.guidance}</p>}
+        {text.reason !== null && (
+          <p className="decline-reason">{text.reason}</p>
+        )}
       </div>
       {showRestart && (
         <div className="actions">

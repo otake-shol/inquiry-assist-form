@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASKER_REPLY_STATE,
+  HANDED_OVER_AT,
+  HANDLING_STATE,
+  INVESTIGATION_STATE,
+  RESULT_STATE,
   TYPE_OPTIONS,
   TYPE_QUESTION,
+  closedState,
   groundedAnswer,
   makeFiledView,
   makeQuestion,
@@ -10,10 +16,13 @@ import {
   makeView,
 } from "../test/fakes.ts";
 import {
+  canAppend,
+  canWithdraw,
   composeStalled,
   firstQuestionOf,
   pageSections,
   readTextParam,
+  resultFromOperator,
   sectionKey,
   showSendNowFooter,
 } from "./page.ts";
@@ -29,14 +38,20 @@ const systemEntry = {
   answer: { kind: "UNKNOWN" },
 } as const;
 
-describe("pageSections", () => {
+const LOOKS_WRONG = {
+  id: "LOOKS_WRONG",
+  label: "おかしいかもしれない",
+  by: "ASKER",
+} as const;
+
+describe("pageSections: 入口から AI の答えまで", () => {
   it("問い合わせが無ければ、作成前の1問目だけ", () => {
     expect(pageSections(null)).toEqual([
       { kind: "question", questionId: "type" },
     ]);
   });
 
-  it("入口の質問の間は、本人の文章、答え終えた質問（押せる）、次の質問の順に並べる", () => {
+  it("入口の質問に答えている間は、本人の文章、答え終えた質問（押せる）、次の質問の順に並べる", () => {
     const view = makeView({
       utterance: "掲載期限のことです",
       intake: {
@@ -61,7 +76,7 @@ describe("pageSections", () => {
     expect(kinds(pageSections(stalled))).toEqual(["entry"]);
   });
 
-  it("言い直しは確定前と確定後で別の部分になり、確定後は答えた行が押せなくなる", () => {
+  it("言い直しの確認と確定後で別の部分になり、確定後は答えた行が押せなくなる", () => {
     const open = pageSections(makeStructuredView());
     expect(open.at(-1)).toMatchObject({
       kind: "restatement",
@@ -70,45 +85,104 @@ describe("pageSections", () => {
     expect(open.filter((s) => s.kind === "entry")).toEqual([
       { kind: "entry", index: 0, interactive: false },
     ]);
-    const confirmed = pageSections(makeStructuredView({ step: "ANSWERING" }));
+    const confirmed = pageSections(makeStructuredView(INVESTIGATION_STATE));
     expect(kinds(confirmed).slice(-2)).toEqual(["restatement", "researching"]);
     expect(confirmed.at(-2)).toMatchObject({ confirmed: true });
   });
 
-  it("結果の後は、送った件だけ案内を結果の上に出し、終了で終わりを足す", () => {
+  it("AI の答えを確かめる間は、結果を並べるが、終わりの文言ややり取りは並べない", () => {
     const answered = makeStructuredView({
-      step: "ANSWERED",
+      ...RESULT_STATE,
       answer: groundedAnswer,
     });
     expect(kinds(pageSections(answered)).slice(-2)).toEqual([
       "restatement",
       "result",
     ]);
+    expect(kinds(pageSections(answered))).not.toContain("closing");
+    expect(kinds(pageSections(answered))).not.toContain("followup");
+  });
 
+  it("調べている間は、answer があっても結果を並べず、調べている表示を保つ", () => {
+    const view = makeStructuredView({
+      ...INVESTIGATION_STATE,
+      answer: groundedAnswer,
+    });
+    const list = kinds(pageSections(view));
+    expect(list).toContain("researching");
+    expect(list).not.toContain("result");
+  });
+});
+
+describe("pageSections: 担当者に渡した後", () => {
+  it("担当者に渡しても終わりの文言は出さず、「いまの状況」とやり取りを並べる", () => {
+    const list = kinds(pageSections(makeFiledView()));
+    expect(list).not.toContain("closing");
+    expect(list.at(-1)).toBe("followup");
+  });
+
+  it("担当者の番、聞き返されている、担当者の結果が届いている、のどれでもやり取りを並べる", () => {
+    for (const state of [HANDLING_STATE, ASKER_REPLY_STATE, RESULT_STATE]) {
+      const view = makeFiledView({ ...state, answer: groundedAnswer });
+      const list = kinds(pageSections(view));
+      expect(list).toContain("followup");
+      expect(list).not.toContain("closing");
+    }
+  });
+
+  it("終わりの文言を出すのは、終わり方があるときだけ。担当者に渡したことがあれば、その後にやり取りも並べる", () => {
+    for (const ending of [
+      "RESOLVED",
+      "ANSWERED",
+      "DECLINED",
+      "WITHDRAWN",
+    ] as const) {
+      const view = makeFiledView({ ...closedState(ending) });
+      expect(kinds(pageSections(view)).slice(-2)).toEqual([
+        "closing",
+        "followup",
+      ]);
+    }
+  });
+
+  it("担当者に渡していない終わり方（AI の答えで解決、取り下げ）には、やり取りを並べない", () => {
+    const solved = makeStructuredView({
+      ...closedState("RESOLVED"),
+      answer: groundedAnswer,
+    });
+    expect(kinds(pageSections(solved)).slice(-2)).toEqual([
+      "result",
+      "closing",
+    ]);
+    const withdrawn = makeView({ ...closedState("WITHDRAWN") });
+    expect(kinds(pageSections(withdrawn))).toEqual(["closing"]);
+  });
+
+  it("おかしいかもしれない件は、調べた結果を添えて渡したことを結果の上に出す", () => {
     const wrong = makeStructuredView({
-      step: "CLOSED",
-      outcome: "FILED",
-      type: { id: "LOOKS_WRONG", label: "おかしいかもしれない", by: "ASKER" },
+      ...HANDLING_STATE,
+      handedOverAt: HANDED_OVER_AT,
+      type: LOOKS_WRONG,
       answer: groundedAnswer,
     });
     expect(pageSections(wrong).slice(-3)).toEqual([
       { kind: "filedNotice", text: "lookWrong" },
       { kind: "result" },
-      { kind: "closing" },
+      { kind: "followup" },
     ]);
 
     const spec = makeStructuredView({
-      step: "CLOSED",
-      outcome: "FILED",
+      ...HANDLING_STATE,
+      handedOverAt: HANDED_OVER_AT,
       answer: groundedAnswer,
     });
     expect(kinds(pageSections(spec))).not.toContain("filedNotice");
   });
 
-  it("「やってほしい」は、自分でできる手順が見つからず自動で送った場合だけ案内を出す", () => {
+  it("「やってほしい」は、自分でできる手順が見つからず自動で渡した場合だけ案内を出す", () => {
     const doForMe = {
-      step: "CLOSED",
-      outcome: "FILED",
+      ...HANDLING_STATE,
+      handedOverAt: HANDED_OVER_AT,
       type: { id: "DO_FOR_ME", label: "やってほしい", by: "ASKER" },
     } as const;
     const notFound = makeStructuredView({
@@ -119,29 +193,27 @@ describe("pageSections", () => {
       kind: "filedNotice",
       text: "doForMe",
     });
-    // 本人が「担当者に頼む」を選んだ場合（根拠があり、問いに答えている）は、終わりの文言が伝える
+    // 本人が「担当者に頼む」を選んだ場合（根拠があり、問いに答えている）は、案内を重ねない
     const asked = makeStructuredView({ ...doForMe, answer: groundedAnswer });
     expect(kinds(pageSections(asked))).not.toContain("filedNotice");
   });
 
-  it("答えを待たずに送った問い合わせでは、おかしいかもしれない件でも送った旨の案内を重ねない", () => {
+  it("答えを待たずに渡した問い合わせでは、おかしいかもしれない件でも案内を重ねない", () => {
     const view = makeStructuredView({
-      step: "CLOSED",
-      outcome: "FILED",
-      type: { id: "LOOKS_WRONG", label: "おかしいかもしれない", by: "ASKER" },
+      ...HANDLING_STATE,
+      handedOverAt: HANDED_OVER_AT,
+      type: LOOKS_WRONG,
       sentImmediately: true,
       answer: groundedAnswer,
     });
     expect(kinds(pageSections(view))).not.toContain("filedNotice");
   });
 
-  it("種類が決まらないまま終わった問い合わせ（type が null）でも組み立てられる", () => {
-    const view = makeView({
-      step: "CLOSED",
-      outcome: "FILED",
+  it("種類が決まらないまま渡した問い合わせ（type が null）でも組み立てられる", () => {
+    const view = makeFiledView({
       intake: { entries: [], next: null, complete: true },
     });
-    expect(kinds(pageSections(view))).toEqual(["closing"]);
+    expect(kinds(pageSections(view))).toEqual(["followup"]);
   });
 });
 
@@ -185,27 +257,27 @@ describe("firstQuestionOf", () => {
 });
 
 describe("showSendNowFooter", () => {
-  it("API の canSendNow が真で、入口の質問の間でないときだけ出す", () => {
+  it("API の canSendNow が真で、入口の質問に答えている間でないときだけ出す", () => {
     expect(showSendNowFooter(null)).toBe(false);
-    expect(showSendNowFooter(makeStructuredView({ step: "ANSWERING" }))).toBe(
+    expect(showSendNowFooter(makeStructuredView(INVESTIGATION_STATE))).toBe(
       false,
     );
     expect(
       showSendNowFooter(
-        makeStructuredView({ step: "ANSWERING", canSendNow: true }),
+        makeStructuredView({ ...INVESTIGATION_STATE, canSendNow: true }),
       ),
     ).toBe(true);
     expect(
       showSendNowFooter(
-        makeStructuredView({ step: "ANSWERED", canSendNow: true }),
+        makeStructuredView({ ...RESULT_STATE, canSendNow: true }),
       ),
     ).toBe(true);
     // 入口の質問の間は、canSendNow が真でもエラーの表示の中に出す
     expect(showSendNowFooter(makeView({ canSendNow: true }))).toBe(false);
-    // 言い直しの確認の画面では、作り直しを使い切ったときに部品の中へ出すので、下部には重ねない
+    // 言い直しを確かめている画面にも出さない（作り直しを使い切った場合は、言い直しの部品の中に出す）
     expect(
       showSendNowFooter(
-        makeStructuredView({ canSendNow: true, revisionsLeft: 0 }),
+        makeStructuredView({ revisionsLeft: 0, canSendNow: true }),
       ),
     ).toBe(false);
     expect(showSendNowFooter(makeFiledView())).toBe(false);
@@ -213,7 +285,7 @@ describe("showSendNowFooter", () => {
 });
 
 describe("composeStalled", () => {
-  it("入口を終えたのに INTAKE のまま止まっているときだけ真になる", () => {
+  it("入口を終えたのに入口の質問のまま止まっているときだけ真になる", () => {
     expect(composeStalled(null)).toBe(false);
     expect(composeStalled(makeView())).toBe(false);
     expect(
@@ -228,51 +300,51 @@ describe("composeStalled", () => {
   });
 });
 
+describe("resultFromOperator", () => {
+  it("担当者に渡したことがあれば、結果は担当者が伝えたもの。なければ AI の答え", () => {
+    expect(resultFromOperator(makeStructuredView(RESULT_STATE))).toBe(false);
+    expect(
+      resultFromOperator(
+        makeStructuredView({ ...RESULT_STATE, handedOverAt: HANDED_OVER_AT }),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("canAppend と canWithdraw", () => {
+  it("追記できるのは、担当者に渡したことがあり、取り下げていない件。終わっていても開き直せる", () => {
+    expect(canAppend(makeFiledView())).toBe(true);
+    expect(canAppend(makeFiledView(ASKER_REPLY_STATE))).toBe(true);
+    for (const ending of ["RESOLVED", "ANSWERED", "DECLINED"] as const) {
+      expect(canAppend(makeFiledView(closedState(ending)))).toBe(true);
+    }
+    expect(canAppend(makeFiledView(closedState("WITHDRAWN")))).toBe(false);
+    // 担当者に渡したことがなければ追記できない
+    expect(canAppend(makeStructuredView(RESULT_STATE))).toBe(false);
+    expect(canAppend(makeView(closedState("RESOLVED")))).toBe(false);
+  });
+
+  it("取り下げられるのは、終わっていない件だけ", () => {
+    expect(canWithdraw(null)).toBe(false);
+    expect(canWithdraw(makeView())).toBe(true);
+    expect(canWithdraw(makeStructuredView())).toBe(true);
+    expect(canWithdraw(makeFiledView())).toBe(true);
+    for (const ending of [
+      "RESOLVED",
+      "ANSWERED",
+      "DECLINED",
+      "WITHDRAWN",
+    ] as const) {
+      expect(canWithdraw(makeFiledView(closedState(ending)))).toBe(false);
+    }
+  });
+});
+
 describe("readTextParam", () => {
   it("?text= を取り出し、無ければ空、長すぎれば4000文字で切る", () => {
     expect(readTextParam("?text=%E6%8E%B2%E8%BC%89")).toBe("掲載");
     expect(readTextParam("")).toBe("");
     expect(readTextParam("?other=1")).toBe("");
     expect(readTextParam(`?text=${"a".repeat(5000)}`)).toHaveLength(4000);
-  });
-});
-
-describe("pageSections の説明失敗", () => {
-  it("ANSWERING の間は answer があっても結果を並べず、調べている表示を保つ", () => {
-    const view = makeStructuredView({
-      step: "ANSWERING",
-      answer: groundedAnswer,
-    });
-    const list = kinds(pageSections(view));
-    expect(list).toContain("researching");
-    expect(list).not.toContain("result");
-  });
-});
-
-describe("pageSections のやり取り", () => {
-  it("担当者に送って終わった問い合わせは、終わりの後に「いまの状況」とやり取りを並べる", () => {
-    const list = kinds(pageSections(makeFiledView()));
-    expect(list.slice(-2)).toEqual(["closing", "followup"]);
-  });
-
-  it("担当者に送っていない終わり方と、対応状況が無い古い応答には並べない", () => {
-    expect(
-      kinds(
-        pageSections(makeView({ step: "CLOSED", outcome: "SELF_RESOLVED" })),
-      ),
-    ).not.toContain("followup");
-    expect(
-      kinds(
-        pageSections(
-          makeFiledView({ handlingStatus: undefined, messages: undefined }),
-        ),
-      ),
-    ).not.toContain("followup");
-  });
-
-  it("まだ終わっていない問い合わせには並べない", () => {
-    expect(
-      kinds(pageSections(makeFiledView({ step: "ANSWERED" }))),
-    ).not.toContain("followup");
   });
 });

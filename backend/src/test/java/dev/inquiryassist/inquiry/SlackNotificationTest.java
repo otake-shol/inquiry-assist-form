@@ -189,7 +189,7 @@ class SlackNotificationTest extends ApiSupport {
         String id = toAnswering("期限の仕様", "job-admin");
         stream(id);
 
-        resolve(id, false).andExpect(jsonPath("$.outcome").value("FILED"));
+        resolve(id, false).andExpect(jsonPath("$.awaiting").value("HANDLING"));
 
         String text = JsonPath.read(awaitPost("/job-admin"), "$.text");
         assertThat(text)
@@ -246,9 +246,8 @@ class SlackNotificationTest extends ApiSupport {
 
         awaitPost("/error");
         awaitRecorded(id);
-        var row = jdbc.queryForMap("select outcome, step, slack_notified, slack_error from inquiries where id = ?::uuid", id);
-        assertThat(row.get("outcome")).isEqualTo("FILED");
-        assertThat(row.get("step")).isEqualTo("CLOSED");
+        var row = jdbc.queryForMap("select awaiting, slack_notified, slack_error from inquiries where id = ?::uuid", id);
+        assertThat(row.get("awaiting")).isEqualTo("HANDLING");
         assertThat(row.get("slack_notified")).isEqualTo(false);
         assertThat((String) row.get("slack_error")).contains("500").doesNotContain("127.0.0.1");
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/operator/inquiries/" + id))
@@ -261,13 +260,13 @@ class SlackNotificationTest extends ApiSupport {
         String id = toAnswering("期限の仕様", "slow");
         long start = System.nanoTime();
 
-        sendNow(id).andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("FILED"));
+        sendNow(id).andExpect(status().isOk()).andExpect(jsonPath("$.awaiting").value("HANDLING"));
 
         // 投稿の完了を待たずに応答が返る（タイムアウトは2秒）
         assertThat(java.time.Duration.ofNanos(System.nanoTime() - start)).isLessThan(java.time.Duration.ofMillis(900));
         awaitRecorded(id);
-        var row = jdbc.queryForMap("select outcome, slack_notified, slack_error from inquiries where id = ?::uuid", id);
-        assertThat(row.get("outcome")).isEqualTo("FILED");
+        var row = jdbc.queryForMap("select awaiting, slack_notified, slack_error from inquiries where id = ?::uuid", id);
+        assertThat(row.get("awaiting")).isEqualTo("HANDLING");
         assertThat(row.get("slack_notified")).isEqualTo(false);
         assertThat((String) row.get("slack_error")).contains("Timeout");
         assertThat(notifier.notices()).anySatisfy(n -> assertThat(n.inquiryId().toString()).isEqualTo(id));

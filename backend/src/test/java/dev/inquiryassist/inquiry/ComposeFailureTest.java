@@ -47,7 +47,7 @@ class ComposeFailureTest extends ApiSupport {
 
         assertThat(body).contains(id);
         String view = view(id);
-        assertThat((String) JsonPath.read(view, "$.step")).isEqualTo("INTAKE");
+        assertThat((String) JsonPath.read(view, "$.awaiting")).isEqualTo("INTAKE_ANSWER");
         assertThat((Boolean) JsonPath.read(view, "$.intake.complete")).isTrue();
         assertThat((Boolean) JsonPath.read(view, "$.canSendNow")).isTrue();
         assertThat((List<String>) JsonPath.read(view, "$.intake.entries[*].questionId"))
@@ -59,7 +59,7 @@ class ComposeFailureTest extends ApiSupport {
         doCallRealMethod().when(restater).restate(any(), any(), any(), any(), any(), any());
         compose(id)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.canSendNow").value(false))
                 .andExpect(jsonPath("$.structured.summary").isNotEmpty());
         assertThat(usageSteps(id)).containsExactly("interviewer", "restater", "restater", "restater");
@@ -76,7 +76,7 @@ class ComposeFailureTest extends ApiSupport {
         skip(normal, "note").andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("AI_UNAVAILABLE"));
         write(blocked, "note", "止まっています")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(true));
     }
 
@@ -88,12 +88,12 @@ class ComposeFailureTest extends ApiSupport {
 
         urgency(id, "HURRY")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("INTAKE"))
+                .andExpect(jsonPath("$.awaiting").value("INTAKE_ANSWER"))
                 .andExpect(jsonPath("$.intake.complete").value(true))
                 .andExpect(jsonPath("$.canSendNow").value(true));
         urgency(id, "BLOCKED")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(true))
                 .andExpect(jsonPath("$.structured").value(org.hamcrest.Matchers.nullValue()));
     }

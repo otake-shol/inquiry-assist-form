@@ -1,12 +1,13 @@
 import type {
   AppConfig,
+  DeclineReasonKind,
   ErrorBody,
-  HandlingStatus,
   InquiryList,
   InquiryView,
   IntakeAnswerRequest,
   OperatorDetail,
   OperatorList,
+  Phase,
   Urgency,
 } from "./types.ts";
 
@@ -192,10 +193,20 @@ export function reopenQuestions(id: string): Promise<InquiryView> {
   return request<InquiryView>("POST", `/api/inquiries/${id}/reopen`);
 }
 
-/** `POST /api/inquiries/{id}/resolution`。解決したかどうかを送る。 */
-export function resolve(id: string, resolved: boolean): Promise<InquiryView> {
+/**
+ * `POST /api/inquiries/{id}/resolution`。結果（AI の答え、または担当者が伝えた結果）を確かめる。
+ * @param id 問い合わせ ID
+ * @param resolved 解決したか
+ * @param note 解決していない点（任意。「まだ解決していません」のときだけ付ける）
+ */
+export function resolve(
+  id: string,
+  resolved: boolean,
+  note?: string,
+): Promise<InquiryView> {
   return request<InquiryView>("POST", `/api/inquiries/${id}/resolution`, {
     resolved,
+    ...(note === undefined ? {} : { note }),
   });
 }
 
@@ -232,6 +243,14 @@ export function postMessage(id: string, body: string): Promise<InquiryView> {
   });
 }
 
+/**
+ * `POST /api/inquiries/{id}/withdraw`。問い合わせを取り下げる（終わっていない件だけ）。
+ * @param id 問い合わせ ID
+ */
+export function withdraw(id: string): Promise<InquiryView> {
+  return request<InquiryView>("POST", `/api/inquiries/${id}/withdraw`);
+}
+
 /** `GET /api/operator/inquiries`。担当者に送られた問い合わせの一覧（全件）。 */
 export function getOperatorList(): Promise<OperatorList> {
   return request<OperatorList>("GET", "/api/operator/inquiries");
@@ -247,31 +266,75 @@ export function markRead(id: string): Promise<OperatorDetail> {
   return request<OperatorDetail>("POST", `/api/operator/inquiries/${id}/read`);
 }
 
+/** 担当者が本人に送る発言の種類。聞き返し（`ASK`）か、結果を伝える（`RESULT`）。 */
+export type ReplyKind = "ASK" | "RESULT";
+
 /**
- * `PUT /api/operator/inquiries/{id}/status`。対応状況を切り替える。
+ * `POST /api/operator/inquiries/{id}/replies`。担当者が本人に聞き返す、または結果を伝える。
  * @param id 問い合わせ ID
- * @param status 新しい対応状況
+ * @param kind 発言の種類
+ * @param body 本文（1〜4000文字）
  */
-export function setHandlingStatus(
+export function postReply(
   id: string,
-  status: HandlingStatus,
+  kind: ReplyKind,
+  body: string,
 ): Promise<OperatorDetail> {
   return request<OperatorDetail>(
-    "PUT",
-    `/api/operator/inquiries/${id}/status`,
-    { status },
+    "POST",
+    `/api/operator/inquiries/${id}/replies`,
+    { kind, body },
   );
 }
 
 /**
- * `POST /api/operator/inquiries/{id}/replies`。担当者が本人に返信する。
+ * `POST /api/operator/inquiries/{id}/decline`。見送りとして終える。
  * @param id 問い合わせ ID
- * @param body 返信の本文（1〜4000文字）
+ * @param reasonKind 理由の種類
+ * @param reason 理由の文章（1〜2000文字）
  */
-export function postReply(id: string, body: string): Promise<OperatorDetail> {
+export function declineInquiry(
+  id: string,
+  reasonKind: DeclineReasonKind,
+  reason: string,
+): Promise<OperatorDetail> {
   return request<OperatorDetail>(
     "POST",
-    `/api/operator/inquiries/${id}/replies`,
-    { body },
+    `/api/operator/inquiries/${id}/decline`,
+    { reasonKind, reason },
+  );
+}
+
+/**
+ * `PUT /api/operator/inquiries/{id}/phase`。区間を変える（分かる、決まる、行われる）。
+ * @param id 問い合わせ ID
+ * @param phase 新しい区間
+ */
+export function setPhase(id: string, phase: Phase): Promise<OperatorDetail> {
+  return request<OperatorDetail>("PUT", `/api/operator/inquiries/${id}/phase`, {
+    phase,
+  });
+}
+
+/** 置き直しの内容。どれも決めない（null）にできる。 */
+export interface PlacementInput {
+  type: string | null;
+  systemId: string | null;
+  functionId: string | null;
+}
+
+/**
+ * `PUT /api/operator/inquiries/{id}/placement`。種類、システム、機能を置き直す。
+ * @param id 問い合わせ ID
+ * @param placement 置き直す内容
+ */
+export function setPlacement(
+  id: string,
+  placement: PlacementInput,
+): Promise<OperatorDetail> {
+  return request<OperatorDetail>(
+    "PUT",
+    `/api/operator/inquiries/${id}/placement`,
+    placement,
   );
 }

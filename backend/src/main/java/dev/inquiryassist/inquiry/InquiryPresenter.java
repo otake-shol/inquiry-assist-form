@@ -11,7 +11,10 @@ import dev.inquiryassist.core.intake.IntakeEntry;
 import dev.inquiryassist.core.intake.IntakeNext;
 import dev.inquiryassist.core.intake.IntakePlanner;
 import dev.inquiryassist.core.intake.IntakeQuestion;
+import dev.inquiryassist.core.intake.PlacedBy;
 import dev.inquiryassist.core.intake.QuestionKind;
+import dev.inquiryassist.core.lifecycle.Awaiting;
+import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
 import dev.inquiryassist.inquiry.InquiryEntity.StoredCitation;
 import java.util.ArrayList;
 import java.util.List;
@@ -58,7 +61,7 @@ class InquiryPresenter {
      * @return 本人向けの表現。{@code memo.unconfirmed} は常に空
      */
     InquiryView toView(InquiryEntity e) {
-        IntakeNext next = e.step == InquiryStep.INTAKE ? planner.next(e.snapshot()) : null;
+        IntakeNext next = e.awaiting == Awaiting.INTAKE_ANSWER ? planner.next(e.snapshot()) : null;
         InquiryView.AnswerView answer = e.answerGrounded == null
                 ? null
                 : new InquiryView.AnswerView(
@@ -80,8 +83,11 @@ class InquiryPresenter {
         return new InquiryView(
                 e.id,
                 e.createdAt,
-                e.step,
-                e.outcome,
+                e.phase,
+                e.turn,
+                e.awaiting,
+                e.ending,
+                e.declined,
                 e.urgency,
                 placed(e, QuestionKind.TYPE),
                 placed(e, QuestionKind.SYSTEM),
@@ -91,9 +97,10 @@ class InquiryPresenter {
                 e.revisionsLeft,
                 structuredView(e),
                 answer,
-                e.canSendNow(next),
+                InquiryStateMachine.canSendNow(e.state(), e.context(next)),
                 e.sentImmediately,
-                e.handlingStatus,
+                e.handedOverAt,
+                e.askerUnreadReply,
                 MessageBodies.viewsOf(e),
                 TraceViews.of(e, properties, implementations),
                 e.mock);
@@ -108,7 +115,7 @@ class InquiryPresenter {
     OperatorItem toItem(InquiryEntity e) {
         return new OperatorItem(
                 e.id,
-                e.filedAt,
+                e.handedOverAt,
                 ref(placed(e, QuestionKind.TYPE)),
                 ref(placed(e, QuestionKind.SYSTEM)),
                 ref(placed(e, QuestionKind.FUNCTION)),
@@ -116,7 +123,10 @@ class InquiryPresenter {
                 summaryOf(e),
                 e.sentImmediately,
                 e.readAt != null,
-                e.handlingStatus,
+                e.phase,
+                e.turn,
+                e.awaiting,
+                e.ending,
                 e.messages.size());
     }
 
@@ -154,19 +164,32 @@ class InquiryPresenter {
      * @return 決まっていなければ null
      */
     InquiryView.PlacedView placed(InquiryEntity e, QuestionKind kind) {
+        Placement placement = e.placement();
+        if (e.placementOverride != null) {
+            // 担当者が置き直した置き場所。入口で本人が選んだ答えは、入口の答え（intake）にそのまま残る
+            String id = switch (kind) {
+                case TYPE -> placement.type() == null ? null : placement.type().name();
+                case SYSTEM -> placement.systemId();
+                case FUNCTION -> placement.functionId();
+                default -> throw new IllegalArgumentException("置き場所の質問ではない: " + kind);
+            };
+            return id == null ? null : new InquiryView.PlacedView(id, labelOf(kind, id, placement), PlacedBy.OPERATOR);
+        }
         IntakeEntry entry = IntakeEntries.find(e.intake, kind);
         if (entry == null || !entry.answer().decides()) {
             return null;
         }
         String id = entry.answer().optionId();
-        Placement placement = e.placement();
-        String label = switch (kind) {
+        return new InquiryView.PlacedView(id, labelOf(kind, id, placement), IntakeEntries.placedBy(e.intake, kind));
+    }
+
+    private String labelOf(QuestionKind kind, String id, Placement placement) {
+        return switch (kind) {
             case TYPE -> catalog.typeLabel(InquiryType.valueOf(id));
             case SYSTEM -> catalog.systemLabel(id);
             case FUNCTION -> catalog.functionLabel(placement.systemId(), id);
             default -> throw new IllegalArgumentException("置き場所の質問ではない: " + kind);
         };
-        return new InquiryView.PlacedView(id, label, IntakeEntries.placedBy(e.intake, kind));
     }
 
     /**
@@ -204,7 +227,7 @@ class InquiryPresenter {
     }
 
     private InquiryView.IntakeView intakeView(InquiryEntity e, IntakeNext next) {
-        if (e.step != InquiryStep.INTAKE) {
+        if (e.awaiting != Awaiting.INTAKE_ANSWER) {
             return new InquiryView.IntakeView(entries(e), null, true);
         }
         InquiryView.QuestionView question = null;

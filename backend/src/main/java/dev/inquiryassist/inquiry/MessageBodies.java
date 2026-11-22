@@ -32,7 +32,7 @@ final class MessageBodies {
      */
     static List<MessageView> viewsOf(InquiryEntity entity) {
         return entity.messages.stream()
-                .map(m -> new MessageView(m.id(), m.from(), m.authorName(), m.body(), m.createdAt()))
+                .map(m -> new MessageView(m.id(), m.from(), m.kind(), m.authorName(), m.body(), m.createdAt()))
                 .toList();
     }
 }

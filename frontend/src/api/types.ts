@@ -7,19 +7,59 @@
 export type InquiryTypeId =
   "HOW_TO" | "HOW_IT_WORKS" | "LOOKS_WRONG" | "DO_FOR_ME" | "CHANGE_REQUEST";
 
-/** 問い合わせ1件の進行位置。 */
-export type InquiryStep =
-  "INTAKE" | "STRUCTURED" | "ANSWERING" | "ANSWERED" | "CLOSED";
+/**
+ * 区間。いま埋めようとしている不足の種類（受付、分かる、決まる、行われる、終わり）。
+ * 担当者の画面では「分かる」「決まる」「行われる」と呼ぶ。
+ */
+export type Phase = "INTAKE" | "KNOW" | "DECIDE" | "ACT" | "CLOSED";
 
-/** 問い合わせの結果。 */
-export type InquiryOutcome =
-  "IN_PROGRESS" | "SELF_RESOLVED" | "FILED" | "ABANDONED";
+/** 誰の番か。次に動く人。終わった件は null。 */
+export type Turn = "ASKER" | "AI" | "OPERATOR";
+
+/**
+ * 待っていること。画面は、これを見て描くものを決める。終わった件は null。
+ * 入口の質問に答えている、問いを確かめている、AI が調べている、結果を確かめている、
+ * 担当者が受けている、聞き返しへの返事を待っている。
+ */
+export type Awaiting =
+  | "INTAKE_ANSWER"
+  | "QUESTION_CONFIRMATION"
+  | "INVESTIGATION"
+  | "RESULT_CONFIRMATION"
+  | "HANDLING"
+  | "ASKER_REPLY";
+
+/** 終わり方。解決済み、回答済み、見送り、取り下げ。終わっていない件は null。 */
+export type Ending = "RESOLVED" | "ANSWERED" | "DECLINED" | "WITHDRAWN";
+
+/** 見送りの理由の種類。 */
+export type DeclineReasonKind =
+  | "NOT_REPRODUCIBLE"
+  | "KNOWN_LIMITATION"
+  | "OUT_OF_SCOPE"
+  | "DUPLICATE"
+  | "OTHER";
+
+/** 見送りで終わった件が持つ、見送りの理由。 */
+export interface Declined {
+  reasonKind: DeclineReasonKind;
+  /** 担当者が書いた理由 */
+  reason: string;
+}
+
+/** 状態の4項目。本人向けの表現にも、担当者向けの一覧と詳細にも入る。 */
+export interface StateFields {
+  phase: Phase;
+  turn: Turn | null;
+  awaiting: Awaiting | null;
+  ending: Ending | null;
+}
 
 /** 緊急度。通常、急ぎ、業務が止まっている。種類とは別に持つ。 */
 export type Urgency = "NORMAL" | "HURRY" | "BLOCKED";
 
-/** 置き場所（種類、システム、機能）を決めた人。本人が選んだか、AI が文章から置いたか。 */
-export type PlacedBy = "ASKER" | "AI";
+/** 置き場所（種類、システム、機能）を決めた人。本人が選んだか、AI が文章から置いたか、担当者が置き直したか。 */
+export type PlacedBy = "ASKER" | "AI" | "OPERATOR";
 
 /** 決まった置き場所の1つ。`label` は API が返す表示名。 */
 export interface Placement<Id extends string = string> {
@@ -142,16 +182,20 @@ export interface ZeroAnswer {
   citations: Citation[];
 }
 
-/** 担当者に送られた問い合わせの対応状況。 */
-export type HandlingStatus = "OPEN" | "IN_PROGRESS" | "DONE";
-
-/** やり取りの書き手。担当者の返信か、本人の追記。 */
+/** やり取りの書き手。担当者の発言か、本人の追記。 */
 export type MessageAuthor = "OPERATOR" | "ASKER";
+
+/**
+ * やり取りの種類。担当者の発言は、聞き返し（`ASK`）、結果（`RESULT`）、見送りの連絡（`DECLINE`）。
+ * 本人の追記は `NOTE`。
+ */
+export type MessageKind = "ASK" | "RESULT" | "DECLINE" | "NOTE";
 
 /** やり取りの1通。 */
 export interface InquiryMessage {
   id: string;
   from: MessageAuthor;
+  kind: MessageKind;
   /** 表示用の名前 */
   authorName: string;
   body: string;
@@ -174,10 +218,10 @@ export interface TraceEntry {
 }
 
 /** 問い合わせ1件の表現。 */
-export interface InquiryView {
+export interface InquiryView extends StateFields {
   id: string;
-  step: InquiryStep;
-  outcome: InquiryOutcome;
+  /** 見送りで終わった件だけが持つ */
+  declined: Declined | null;
   urgency: Urgency;
   /** 種類。決まっていなければ null */
   type: Placement<InquiryTypeId> | null;
@@ -196,10 +240,12 @@ export interface InquiryView {
   canSendNow: boolean;
   sentImmediately: boolean;
   mock: boolean;
+  /** 担当者に初めて渡した時刻。渡していなければ null */
+  handedOverAt: string | null;
+  /** 担当者の新しい発言が、まだ読まれていないか */
+  unreadReply: boolean;
   /** 作成日時 */
   createdAt?: string;
-  /** 対応状況。担当者に送られていなければ null */
-  handlingStatus?: HandlingStatus | null;
   /** やり取り（古い順） */
   messages?: InquiryMessage[];
   /** スキルの実行記録。無効なら null */
@@ -245,7 +291,7 @@ export interface ErrorBody {
 }
 
 /** オペレータ向けの一覧の1件。`filed` イベントの data も同じ形。 */
-export interface OperatorItem {
+export interface OperatorItem extends StateFields {
   id: string;
   filedAt: string;
   type: SystemOption | null;
@@ -255,10 +301,8 @@ export interface OperatorItem {
   summary: string;
   sentImmediately: boolean;
   read: boolean;
-  /** 対応状況。無い古い応答では欠ける */
-  handlingStatus?: HandlingStatus | null;
-  /** やり取りの数。無い古い応答では欠ける */
-  messageCount?: number;
+  /** やり取りの数 */
+  messageCount: number;
 }
 
 /** `GET /api/operator/inquiries` の応答。 */
@@ -268,13 +312,13 @@ export interface OperatorList {
 }
 
 /** 本人向けの一覧の1件。 */
-export interface InquiryListItem {
+export interface InquiryListItem extends StateFields {
   id: string;
+  urgency: Urgency;
+  /** 担当者に初めて渡した時刻。渡していなければ null。結果の出どころ（AI か担当者）を見分けるのに使う */
+  handedOverAt: string | null;
   createdAt: string;
   summary: string;
-  step: InquiryStep;
-  outcome: InquiryOutcome;
-  handlingStatus: HandlingStatus | null;
   unreadReply: boolean;
   messageCount: number;
 }
@@ -304,8 +348,10 @@ export interface OperatorAnswer {
 export type SlackStatus = "POSTED" | "SKIPPED" | "PENDING" | "FAILED";
 
 /** 問い合わせの全内容（オペレータ向け）。 */
-export interface OperatorDetail {
+export interface OperatorDetail extends StateFields {
   id: string;
+  /** 見送りで終わった件だけが持つ */
+  declined: Declined | null;
   filedAt: string;
   askerId: string;
   /** 投稿者の表示用の名前（古い応答では欠ける） */
@@ -325,10 +371,36 @@ export interface OperatorDetail {
   read: boolean;
   /** Slack への投稿の状態 */
   slackStatus: SlackStatus;
-  /** 対応状況。無い古い応答では欠ける */
-  handlingStatus?: HandlingStatus | null;
-  /** やり取り（古い順）。無い古い応答では欠け、なしとして扱う */
+  /** やり取り（古い順） */
   messages?: InquiryMessage[];
-  /** スキルの実行記録。無効なら null。無い古い応答では欠ける */
+  /** 状態の履歴（古い順） */
+  history: HistoryEntry[];
+  /** スキルの実行記録。無効なら null。無い応答では欠ける */
   trace?: TraceEntry[] | null;
+}
+
+/** 状態の履歴で、変化を起こした人。 */
+export type HistoryActor = "ASKER" | "AI" | "OPERATOR";
+
+/** 置き場所の名前（既定の言語）。決まっていなければ null。 */
+export interface PlacementNames {
+  type: string | null;
+  system: string | null;
+  function: string | null;
+}
+
+/** 置き直しの、変える前と後。 */
+export interface PlacementChange {
+  before: PlacementNames;
+  after: PlacementNames;
+}
+
+/** 状態の履歴の1件。状態は、変化の後のもの。 */
+export interface HistoryEntry extends StateFields {
+  at: string;
+  actor: HistoryActor;
+  /** 何が起きたか（`CREATED`、`ASKED_BACK` など。画面での呼び名は operator/labels.ts） */
+  event: string;
+  /** 置き直し（`PLACEMENT_CHANGED`）だけが持つ、変える前と後の置き場所。それ以外は null */
+  detail?: PlacementChange | null;
 }

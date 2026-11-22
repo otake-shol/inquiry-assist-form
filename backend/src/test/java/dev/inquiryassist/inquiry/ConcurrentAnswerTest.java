@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.inquiryassist.TestcontainersConfiguration;
+import dev.inquiryassist.core.lifecycle.Awaiting;
+import dev.inquiryassist.core.lifecycle.IllegalTransitionException;
+import dev.inquiryassist.core.lifecycle.Turn;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -33,9 +36,9 @@ class ConcurrentAnswerTest {
 
         assertThatThrownBy(() -> service.generateAnswer(id, m -> {})).isInstanceOf(InvalidStateException.class);
 
-        assertThat(first.get(10, TimeUnit.SECONDS).step()).isEqualTo(InquiryStep.ANSWERED);
-        // 完了後は段階が変わっているため、再度の生成も拒否される
-        assertThatThrownBy(() -> service.generateAnswer(id, m -> {})).isInstanceOf(InvalidStateException.class);
+        assertThat(first.get(10, TimeUnit.SECONDS).awaiting()).isEqualTo(Awaiting.RESULT_CONFIRMATION);
+        // 完了後は待っていることが変わっているため、再度の生成も拒否される
+        assertThatThrownBy(() -> service.generateAnswer(id, m -> {})).isInstanceOf(IllegalTransitionException.class);
     }
 
     @Test
@@ -51,7 +54,8 @@ class ConcurrentAnswerTest {
 
         InquiryView sent = service.sendNow(id);
 
-        assertThat(sent.outcome()).isEqualTo(InquiryOutcome.FILED);
+        assertThat(sent.awaiting()).isEqualTo(Awaiting.HANDLING);
+        assertThat(sent.turn()).isEqualTo(Turn.OPERATOR);
         assertThatThrownBy(() -> generating.get(10, TimeUnit.SECONDS))
                 .hasCauseInstanceOf(InvalidStateException.class);
         assertThat(service.get(id).sentImmediately()).isTrue();

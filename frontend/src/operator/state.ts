@@ -1,17 +1,30 @@
 import type {
-  HandlingStatus,
   OperatorDetail,
   OperatorItem,
+  StateFields,
 } from "../api/types.ts";
-import { sortUnreadFirstNewest, timeOf } from "../flow/board.ts";
-import { OP_TEXT } from "./labels.ts";
+import { sortUrgentUnreadNewest, timeOf } from "../flow/board.ts";
+import {
+  AWAITING_LABELS,
+  ENDING_LABELS,
+  OPERATOR_COLUMN_LABELS,
+  OP_TEXT,
+  PHASE_LABELS,
+  movedText,
+} from "./labels.ts";
 
-/** 担当者のボードの列（対応状況）。左から並べる順。 */
-export const OPERATOR_COLUMNS: HandlingStatus[] = [
-  "OPEN",
-  "IN_PROGRESS",
-  "DONE",
+/** 担当者のボードの列。誰の番かで分ける。左から並べる順。 */
+export type OperatorColumn = "OPERATOR" | "ASKER" | "CLOSED";
+
+/** 担当者のボードの列の並び（左から）。 */
+export const OPERATOR_COLUMNS: OperatorColumn[] = [
+  "OPERATOR",
+  "ASKER",
+  "CLOSED",
 ];
+
+/** カードを落としたときに始める操作。「本人に送る」の入力欄か、「見送る」の入力欄を開く。 */
+export type DropIntent = "send" | "decline";
 
 /** オペレータ画面の状態。 */
 export interface OperatorState {
@@ -36,7 +49,6 @@ export type OperatorAction =
   | { type: "listLoaded"; items: OperatorItem[] }
   | { type: "filed"; item: OperatorItem }
   | { type: "updated"; item: OperatorItem }
-  | { type: "statusMoved"; id: string; status: HandlingStatus }
   | { type: "selected"; id: string }
   | { type: "detailLoaded"; detail: OperatorDetail }
   | { type: "detailFailed" }
@@ -93,37 +105,119 @@ export function visibleItems(
 }
 
 /**
- * 問い合わせが入る担当者のボードの列。対応状況が無い古い応答は「未対応」として扱う。
+ * 問い合わせが入る担当者のボードの列（docs/ux-principles.md の「列」の表）。
+ * 終わっていれば「終わり」、番が担当者なら「担当者の番」、それ以外（本人の番）は「本人の番」。
  * @param item 一覧の1件
  */
 export function operatorColumnOf(
-  item: Pick<OperatorItem, "handlingStatus">,
-): HandlingStatus {
-  return item.handlingStatus ?? "OPEN";
+  item: Pick<StateFields, "phase" | "turn">,
+): OperatorColumn {
+  if (item.phase === "CLOSED") return "CLOSED";
+  return item.turn === "OPERATOR" ? "OPERATOR" : "ASKER";
 }
 
 /**
  * 担当者のボードの列ごとに、問い合わせを振り分けて並べる。
- * 列の中は新しい順（送られた日時）で、未読の件を上に寄せる。日時も同じなら渡された順のまま。
+ * 列の中は新しい順（担当者に初めて渡した日時）で、緊急度が「業務が止まっている」の件、
+ * 未読の件の順に上へ寄せる。日時も同じなら渡された順のまま。
  * @param items 一覧の全件
  */
 export function arrangeOperatorBoard(
   items: OperatorItem[],
-): Record<HandlingStatus, OperatorItem[]> {
-  const board: Record<HandlingStatus, OperatorItem[]> = {
-    OPEN: [],
-    IN_PROGRESS: [],
-    DONE: [],
+): Record<OperatorColumn, OperatorItem[]> {
+  const board: Record<OperatorColumn, OperatorItem[]> = {
+    OPERATOR: [],
+    ASKER: [],
+    CLOSED: [],
   };
   for (const item of items) board[operatorColumnOf(item)].push(item);
   for (const column of OPERATOR_COLUMNS) {
-    board[column] = sortUnreadFirstNewest(
+    board[column] = sortUrgentUnreadNewest(
       board[column],
+      (item) => item.urgency === "BLOCKED",
       (item) => !item.read,
       (item) => timeOf(item.filedAt),
     );
   }
   return board;
+}
+
+/**
+ * カードを別の列に落とせるか。落とせるのは「担当者の番」から「本人の番」「終わり」へだけ。
+ * 番を戻すのは本人の操作なので、「本人の番」や「終わり」から動かす操作は受け付けない。
+ * @param from 掴んだカードがある列
+ * @param to 落とす先の列
+ */
+export function canDropOnColumn(
+  from: OperatorColumn,
+  to: OperatorColumn,
+): boolean {
+  return from === "OPERATOR" && to !== "OPERATOR";
+}
+
+/**
+ * 落とした列に対応する、始める操作。「本人の番」なら「本人に送る」、「終わり」なら「見送る」。
+ * @param to 落とす先の列
+ */
+export function dropIntentOf(to: OperatorColumn): DropIntent | null {
+  if (to === "ASKER") return "send";
+  if (to === "CLOSED") return "decline";
+  return null;
+}
+
+/**
+ * カードに添える、待っていることや終わり方。「本人の番」の列では何を待っているか
+ * （返事待ち、結果の確かめ待ち）、「終わり」の列では終わり方。「担当者の番」の列には添えない。
+ * @param item 一覧の1件
+ */
+export function cardNoteOf(
+  item: Pick<StateFields, "phase" | "turn" | "awaiting" | "ending">,
+): string | null {
+  const column = operatorColumnOf(item);
+  if (column === "CLOSED") {
+    return item.ending === null ? null : ENDING_LABELS[item.ending];
+  }
+  if (column === "ASKER") {
+    return item.awaiting === null ? null : AWAITING_LABELS[item.awaiting];
+  }
+  return null;
+}
+
+/**
+ * カードに添える区間。「分かる」「決まる」「行われる」だけを出し、受付と終わりは出さない。
+ * @param item 一覧の1件
+ */
+export function cardPhaseOf(item: Pick<StateFields, "phase">): string | null {
+  return item.phase === "KNOW" ||
+    item.phase === "DECIDE" ||
+    item.phase === "ACT"
+    ? PHASE_LABELS[item.phase]
+    : null;
+}
+
+/**
+ * 一覧が更新されたとき、別の列に移った件を読み上げ用の文にする。複数あれば最後の1件。
+ * 前の一覧になかった件（新しく届いた件）は、移ったものとして扱わない。
+ * @param before 更新前の一覧
+ * @param after 更新後の一覧
+ * @returns 移った件がなければ空文字
+ */
+export function movedMessageOf(
+  before: OperatorItem[],
+  after: OperatorItem[],
+): string {
+  const previous = new Map(
+    before.map((item) => [item.id, operatorColumnOf(item)]),
+  );
+  let message = "";
+  for (const item of after) {
+    const column = operatorColumnOf(item);
+    const was = previous.get(item.id);
+    if (was !== undefined && was !== column) {
+      message = movedText(item.summary, OPERATOR_COLUMN_LABELS[column]);
+    }
+  }
+  return message;
 }
 
 /**
@@ -177,20 +271,6 @@ export function operatorReducer(
         loaded: true,
         failed: false,
       };
-    case "statusMoved":
-      // ドラッグでの移動をすぐ反映する。開いている詳細の切り替えも合わせる
-      return {
-        ...state,
-        items: state.items.map((item) =>
-          item.id === action.id
-            ? { ...item, handlingStatus: action.status }
-            : item,
-        ),
-        detail:
-          state.detail?.id === action.id
-            ? { ...state.detail, handlingStatus: action.status }
-            : state.detail,
-      };
     case "updated":
       return applyUpdate(state, action.item);
     case "listFailed":
@@ -213,13 +293,20 @@ export function operatorReducer(
         ...state,
         detail,
         detailLoading: false,
-        // 対応状況ややり取りの数は、詳細で変わったぶんを一覧の1件にも反映する
+        // 状態、置き場所、やり取りの数は、詳細で変わったぶんを一覧の1件にも反映する
         items: state.items.map((item) =>
           item.id === detail.id
             ? {
                 ...item,
                 read: detail.read ? true : item.read,
-                handlingStatus: detail.handlingStatus ?? item.handlingStatus,
+                urgency: detail.urgency,
+                type: detail.type,
+                system: detail.system,
+                function: detail.function,
+                phase: detail.phase,
+                turn: detail.turn,
+                awaiting: detail.awaiting,
+                ending: detail.ending,
                 messageCount: detail.messages?.length ?? item.messageCount,
               }
             : item,

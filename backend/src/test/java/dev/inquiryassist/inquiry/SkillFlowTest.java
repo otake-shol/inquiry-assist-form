@@ -98,7 +98,7 @@ class SkillFlowTest extends ApiSupport {
 
         assertThat(body).contains("event:failed").contains("AI_UNAVAILABLE").doesNotContain("event:done");
         mvc.perform(get("/api/inquiries/" + id))
-                .andExpect(jsonPath("$.step").value("ANSWERING"))
+                .andExpect(jsonPath("$.awaiting").value("INVESTIGATION"))
                 .andExpect(jsonPath("$.answer").value(Matchers.nullValue()));
         var row = row(id);
         assertThat(row.get("technical_memo")).isNotNull();
@@ -127,7 +127,7 @@ class SkillFlowTest extends ApiSupport {
         stream(id);
 
         sendNow(id)
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.answer").value(Matchers.nullValue()));
 
         String detail = operatorDetail(id);
@@ -145,7 +145,7 @@ class SkillFlowTest extends ApiSupport {
         String second = stream(id);
 
         assertThat(second).contains("event:failed").doesNotContain("event:done");
-        mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.step").value("ANSWERING"));
+        mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.awaiting").value("INVESTIGATION"));
     }
 
     // ---- 問いに答えられたか ----
@@ -206,7 +206,7 @@ class SkillFlowTest extends ApiSupport {
         assertThat((List<?>) JsonPath.read(done, "$.answer.citations")).hasSize(2);
         assertThat((List<?>) JsonPath.read(done, "$.answer.memo.findings")).hasSize(2);
         // 種類ごとの終わり方は変わらない: 仕組みを知りたいは本人の判定を待つ
-        assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("ANSWERED");
+        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
     }
 
     @Test
@@ -215,7 +215,7 @@ class SkillFlowTest extends ApiSupport {
 
         String done = doneOf(stream(id));
 
-        assertThat((String) JsonPath.read(done, "$.outcome")).isEqualTo("FILED");
+        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("HANDLING");
         assertThat((Boolean) JsonPath.read(done, "$.answer.answered")).isFalse();
     }
 
@@ -227,7 +227,7 @@ class SkillFlowTest extends ApiSupport {
 
         String last = finishIntake(id, null);
 
-        assertThat((String) JsonPath.read(last, "$.step")).isEqualTo("STRUCTURED");
+        assertThat((String) JsonPath.read(last, "$.awaiting")).isEqualTo("QUESTION_CONFIRMATION");
         assertThat((String) JsonPath.read(last, "$.structured.summary")).isNotEmpty();
         // 詳しい質問はなく、システムへの答えと文章だけで進んだ
         assertThat((List<String>) JsonPath.read(last, "$.intake.entries[*].questionId"))
@@ -250,7 +250,7 @@ class SkillFlowTest extends ApiSupport {
     @Test
     void 変えてほしいは調査せず_利用量に聞き手と言い直しだけが現れる() throws Exception {
         String id = toStructured("画面を変えてほしい", null);
-        confirm(id).andExpect(jsonPath("$.outcome").value("FILED"));
+        confirm(id).andExpect(jsonPath("$.awaiting").value("HANDLING"));
 
         assertThat(usageSteps(id)).containsExactly("reception", "interviewer", "restater");
     }
@@ -272,9 +272,9 @@ class SkillFlowTest extends ApiSupport {
         pick(id, "system", "job-admin");
         unknown(id, "function");
         pick(id, "q1", "o2");
-        skip(id, "note").andExpect(jsonPath("$.step").value("STRUCTURED"));
+        skip(id, "note").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
         confirm(id);
-        sendNow(id).andExpect(jsonPath("$.outcome").value("FILED"));
+        sendNow(id).andExpect(jsonPath("$.awaiting").value("HANDLING"));
 
         String detail = operatorDetail(id);
 

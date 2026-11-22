@@ -12,6 +12,8 @@ import dev.inquiryassist.core.intake.IntakeEntry;
 import dev.inquiryassist.core.intake.IntakePlanner;
 import dev.inquiryassist.core.intake.PlacedBy;
 import dev.inquiryassist.core.intake.QuestionKind;
+import dev.inquiryassist.core.lifecycle.Ending;
+import dev.inquiryassist.core.lifecycle.Phase;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -128,7 +130,10 @@ class InquiryPresenterTest {
         assertThat(intake.intake().complete()).isFalse();
         assertThat(intake.canSendNow()).isFalse();
 
-        e.step = InquiryStep.CLOSED;
+        e.phase = Phase.CLOSED;
+        e.turn = null;
+        e.awaiting = null;
+        e.ending = Ending.WITHDRAWN;
         InquiryView closed = presenter().toView(e);
         assertThat(closed.intake().next()).isNull();
         assertThat(closed.intake().complete()).isTrue();
@@ -139,7 +144,7 @@ class InquiryPresenterTest {
     void 担当者向けの項目は種類_システム_機能と緊急度を持つ() {
         InquiryEntity e = entity();
         e.urgency = Urgency.BLOCKED;
-        e.filedAt = Instant.now();
+        e.handedOverAt = Instant.now();
         e.intake.add(placed(QuestionKind.TYPE, "LOOKS_WRONG", "x", true));
         e.intake.add(placed(QuestionKind.SYSTEM, "job-admin", "x", false));
         e.intake.add(placed(QuestionKind.FUNCTION, "posting", "x", false));

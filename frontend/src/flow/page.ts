@@ -49,7 +49,7 @@ export function pageSections(view: InquiryView | null): Section[] {
   const sections: Section[] = [];
   if (view.utterance !== null) sections.push({ kind: "utterance" });
 
-  const asking = view.step === "INTAKE";
+  const asking = view.awaiting === "INTAKE_ANSWER";
   view.intake.entries.forEach((_, index) => {
     sections.push({ kind: "entry", index, interactive: asking });
   });
@@ -61,7 +61,7 @@ export function pageSections(view: InquiryView | null): Section[] {
   }
 
   if (view.structured !== null) {
-    const confirmed = view.step !== "STRUCTURED";
+    const confirmed = view.awaiting !== "QUESTION_CONFIRMATION";
     sections.push({
       kind: "restatement",
       confirmed,
@@ -71,26 +71,22 @@ export function pageSections(view: InquiryView | null): Section[] {
     });
   }
 
-  if (view.step === "ANSWERING") sections.push({ kind: "researching" });
+  if (view.awaiting === "INVESTIGATION") {
+    sections.push({ kind: "researching" });
+  }
 
-  // 説明が失敗して ANSWERING のままの間は、answer があっても結果として描かない
-  if (view.answer !== null && view.step !== "ANSWERING") {
+  // 説明が失敗して調査の途中のままの間は、answer があっても結果として描かない
+  if (view.answer !== null && view.awaiting !== "INVESTIGATION") {
     const notice = filedNoticeOf(view);
     if (notice !== null) sections.push({ kind: "filedNotice", text: notice });
     sections.push({ kind: "result" });
   }
 
-  if (view.step === "CLOSED") sections.push({ kind: "closing" });
+  // 終わりの文言を出すのは、終わり方があるときだけ。担当者に渡しても、問い合わせは終わらない
+  if (view.ending !== null) sections.push({ kind: "closing" });
 
-  // 担当者に送った問い合わせは、終わりの後に「いまの状況」とやり取りを置く。
-  // 対応状況が無い古い応答では、やり取りがないものとして何も足さない。
-  if (
-    view.step === "CLOSED" &&
-    view.outcome === "FILED" &&
-    view.handlingStatus != null
-  ) {
-    sections.push({ kind: "followup" });
-  }
+  // 担当者に渡したことのある問い合わせは、「いまの状況」とやり取り、追記の入力欄を置く
+  if (view.handedOverAt !== null) sections.push({ kind: "followup" });
   return sections;
 }
 
@@ -103,8 +99,7 @@ export function pageSections(view: InquiryView | null): Section[] {
  */
 function filedNoticeOf(view: InquiryView): "lookWrong" | "doForMe" | null {
   if (
-    view.step !== "CLOSED" ||
-    view.outcome !== "FILED" ||
+    view.handedOverAt === null ||
     view.sentImmediately ||
     view.answer === null
   ) {
@@ -139,17 +134,17 @@ export function sectionKey(section: Section): string {
 
 /**
  * ページの下部に「答えを待たずに担当者に送る」を出すか。API の `canSendNow` が真のときだけ。
- * 入口の質問の間は出さない（AI の失敗で進めなくなった場合は、エラーの表示の中に「担当者に送る」を出す）。
+ * 入口の質問の間と、言い直しを確かめている画面には出さない（作り直しを使い切った場合は、
+ * 言い直しの部品の中の「このまま担当者に送る」だけを出す。AI の失敗で進めなくなった場合は、
+ * エラーの表示の中に「担当者に送る」を出す）。
  * @param view 現在の問い合わせ
  */
 export function showSendNowFooter(view: InquiryView | null): boolean {
-  // 言い直しの確認の画面では、作り直しを使い切ったときに部品の中へ
-  // 「このまま担当者に送る」を出す。下部に重ねて置かない
   return (
     view !== null &&
     view.canSendNow &&
-    view.step !== "INTAKE" &&
-    view.step !== "STRUCTURED"
+    view.awaiting !== "INTAKE_ANSWER" &&
+    view.awaiting !== "QUESTION_CONFIRMATION"
   );
 }
 
@@ -159,7 +154,35 @@ export function showSendNowFooter(view: InquiryView | null): boolean {
  * @param view 現在の問い合わせ
  */
 export function composeStalled(view: InquiryView | null): boolean {
-  return view !== null && view.step === "INTAKE" && view.intake.complete;
+  return (
+    view !== null && view.awaiting === "INTAKE_ANSWER" && view.intake.complete
+  );
+}
+
+/**
+ * 結果を確かめている件の結果が、担当者が伝えたものか。AI の答えの後に担当者に渡した件が、
+ * 結果を確かめる番に戻るのは、担当者が結果を伝えたときだけ（担当者に渡したことがなければ AI の答え）。
+ * @param view 現在の問い合わせ
+ */
+export function resultFromOperator(view: InquiryView): boolean {
+  return view.handedOverAt !== null;
+}
+
+/**
+ * 追記の入力欄を出せるか。担当者に渡したことがあり、取り下げていない件。
+ * 終わっている件（解決済み、回答済み、見送り）でも、追記で開き直せる。
+ * @param view 現在の問い合わせ
+ */
+export function canAppend(view: InquiryView): boolean {
+  return view.handedOverAt !== null && view.ending !== "WITHDRAWN";
+}
+
+/**
+ * 取り下げるリンクを出せるか。終わっていない件だけ。
+ * @param view 現在の問い合わせ（未作成なら null）
+ */
+export function canWithdraw(view: InquiryView | null): boolean {
+  return view !== null && view.ending === null && view.phase !== "CLOSED";
 }
 
 /** 「文章で書く」の入力欄の最大文字数（契約書: 1〜4000文字）。 */

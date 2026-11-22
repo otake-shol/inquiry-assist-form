@@ -17,6 +17,12 @@ import {
   ungroundedAnswer,
   type RecordedCall,
   type RouteResult,
+  CONFIRMATION_STATE,
+  HANDED_OVER_AT,
+  HANDLING_STATE,
+  INVESTIGATION_STATE,
+  RESULT_STATE,
+  closedState,
 } from "./test/fakes.ts";
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -338,7 +344,7 @@ describe("質問の描き方", () => {
   it("選択肢つきの質問は、質問文とひも付いたボタンの並びで、最後に「わからない」がある。押すと optionId が送られる", async () => {
     const user = userEvent.setup();
     const next = intakeView(null, [makeTypeEntry()], {
-      step: "STRUCTURED",
+      ...CONFIRMATION_STATE,
     });
     const { calls } = openInquiry(intakeView(Q_SINCE), {
       "POST /api/inquiries/inq-1/intake/answers": { body: next },
@@ -432,7 +438,7 @@ describe("質問の描き方", () => {
     const user = userEvent.setup();
     const { calls } = openInquiry(intakeView(Q_NOTE), {
       "POST /api/inquiries/inq-1/intake/answers": {
-        body: intakeView(null, [makeTypeEntry()], { step: "STRUCTURED" }),
+        body: intakeView(null, [makeTypeEntry()], { ...CONFIRMATION_STATE }),
       },
     });
 
@@ -458,7 +464,7 @@ describe("質問の描き方", () => {
     const user = userEvent.setup();
     const { calls } = openInquiry(intakeView(Q_NOTE), {
       "POST /api/inquiries/inq-1/intake/answers": {
-        body: intakeView(null, [makeTypeEntry()], { step: "STRUCTURED" }),
+        body: intakeView(null, [makeTypeEntry()], { ...CONFIRMATION_STATE }),
       },
     });
 
@@ -949,12 +955,11 @@ describe("入口から結果までの流れ", () => {
               }),
             },
       "PUT /api/inquiries/inq-1/structured": {
-        body: makeStructuredView({ step: "ANSWERING", canSendNow: true }),
+        body: makeStructuredView({ ...INVESTIGATION_STATE, canSendNow: true }),
       },
       "POST /api/inquiries/inq-1/resolution": {
         body: makeView({
-          step: "CLOSED",
-          outcome: "SELF_RESOLVED",
+          ...closedState("RESOLVED"),
           answer: groundedAnswer,
         }),
       },
@@ -1019,7 +1024,7 @@ describe("入口から結果までの流れ", () => {
     // 調べた結果
     act(() =>
       stream.latest.handlers.onDone(
-        makeStructuredView({ step: "ANSWERED", answer: groundedAnswer }),
+        makeStructuredView({ ...RESULT_STATE, answer: groundedAnswer }),
       ),
     );
     expect(
@@ -1124,6 +1129,13 @@ describe("入口から結果までの流れ", () => {
     ).toBeInTheDocument();
     // 使い切っても、合っていれば確定できる
     expect(screen.getByRole("button", { name: "合っています" })).toBeEnabled();
+    // ページ下部の「答えを待たずに担当者に送る」は重ねて出さない
+    expect(
+      screen.queryByRole("button", { name: SEND_NOW }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("待たずに人に見てもらいたいときはこちら。"),
+    ).not.toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: "このまま担当者に送る" }),
@@ -1145,7 +1157,7 @@ describe("入口から結果までの流れ", () => {
       {},
       {
         "PUT /api/inquiries/inq-1/structured": {
-          body: makeStructuredView({ step: "ANSWERING" }),
+          body: makeStructuredView({ ...INVESTIGATION_STATE }),
         },
       },
     );
@@ -1246,7 +1258,7 @@ describe("種類ごとの結果", () => {
       {
         ...config,
         "PUT /api/inquiries/inq-1/structured": {
-          body: makeStructuredView({ ...view, step: "ANSWERING" }),
+          body: makeStructuredView({ ...view, ...INVESTIGATION_STATE }),
         },
         ...routes,
       },
@@ -1265,7 +1277,7 @@ describe("種類ごとの結果", () => {
     const calls = await reachResult(
       user,
       {},
-      makeStructuredView({ step: "ANSWERED", answer: ungroundedAnswer }),
+      makeStructuredView({ ...RESULT_STATE, answer: ungroundedAnswer }),
       {
         "POST /api/inquiries/inq-1/resolution": {
           body: makeFiledView({
@@ -1313,7 +1325,7 @@ describe("種類ごとの結果", () => {
       doForMe,
       makeStructuredView({
         ...doForMe,
-        step: "ANSWERED",
+        ...RESULT_STATE,
         answer: { ...groundedAnswer, answered: true },
       }),
       {
@@ -1321,8 +1333,7 @@ describe("種類ごとの結果", () => {
           (body as { resolved: boolean }).resolved
             ? {
                 body: makeView({
-                  step: "CLOSED",
-                  outcome: "SELF_RESOLVED",
+                  ...closedState("RESOLVED"),
                   answer: groundedAnswer,
                 }),
               }
@@ -1372,15 +1383,14 @@ describe("種類ごとの結果", () => {
       doForMe,
       makeStructuredView({
         ...doForMe,
-        step: "ANSWERED",
+        ...RESULT_STATE,
         answer: { ...groundedAnswer, answered: true },
       }),
       {
         "POST /api/inquiries/inq-1/resolution": {
           body: makeView({
             ...doForMe,
-            step: "CLOSED",
-            outcome: "SELF_RESOLVED",
+            ...closedState("RESOLVED"),
             answer: groundedAnswer,
           }),
         },
@@ -1409,10 +1419,9 @@ describe("種類ごとの結果", () => {
       doForMe,
       makeStructuredView({
         ...doForMe,
-        step: "CLOSED",
-        outcome: "FILED",
+        ...HANDLING_STATE,
+        handedOverAt: HANDED_OVER_AT,
         answer: ungroundedAnswer,
-        handlingStatus: "OPEN",
         messages: [],
       }),
     );
@@ -1442,10 +1451,9 @@ describe("種類ごとの結果", () => {
       wrong,
       makeStructuredView({
         ...wrong,
-        step: "CLOSED",
-        outcome: "FILED",
+        ...HANDLING_STATE,
+        handedOverAt: HANDED_OVER_AT,
         answer: groundedAnswer,
-        handlingStatus: "OPEN",
         messages: [],
       }),
     );
@@ -1529,7 +1537,7 @@ describe("答えを待たずに送る", () => {
   it("canSendNow が真の調べている間だけページの下部に出て、send-now を呼んで完了になる", async () => {
     const user = userEvent.setup();
     const { calls } = openRestatement(
-      { step: "ANSWERING", canSendNow: true },
+      { ...INVESTIGATION_STATE, canSendNow: true },
       {
         "POST /api/inquiries/inq-1/send-now": {
           body: makeFiledView({ structured: makeStructuredView().structured }),
@@ -1556,7 +1564,7 @@ describe("答えを待たずに送る", () => {
   });
 
   it("canSendNow が偽なら、どの段階でも出さない", async () => {
-    openRestatement({ step: "ANSWERING", canSendNow: false });
+    openRestatement({ ...INVESTIGATION_STATE, canSendNow: false });
 
     await screen.findByRole("heading", { name: "調べています" });
     expect(
@@ -1578,7 +1586,7 @@ describe("答えを待たずに送る", () => {
 
   it("調べた結果の画面でも、canSendNow が真なら出る", async () => {
     openRestatement({
-      step: "ANSWERED",
+      ...RESULT_STATE,
       answer: groundedAnswer,
       canSendNow: true,
     });
@@ -1592,7 +1600,11 @@ describe("答えを待たずに送る", () => {
 describe("エラーの導線", () => {
   /** 調べている最中まで進める。 */
   function reachResearching(stream: FakeStream) {
-    return openRestatement({ step: "ANSWERING", canSendNow: true }, {}, stream);
+    return openRestatement(
+      { ...INVESTIGATION_STATE, canSendNow: true },
+      {},
+      stream,
+    );
   }
 
   it("進捗ストリームの failed で再試行と「答えを待たずに担当者に送る」が出る", async () => {
@@ -2057,7 +2069,10 @@ describe("調査の結果と説明の失敗", () => {
   /** 調べている最中まで進める。`researching` は取得した問い合わせ。 */
   function reachResearching(
     stream: FakeStream,
-    researching = makeStructuredView({ step: "ANSWERING", canSendNow: true }),
+    researching = makeStructuredView({
+      ...INVESTIGATION_STATE,
+      canSendNow: true,
+    }),
   ) {
     return openInquiry(researching, {}, stream);
   }
@@ -2069,7 +2084,7 @@ describe("調査の結果と説明の失敗", () => {
     await waitFor(() => expect(stream.subscriptions).toHaveLength(1));
     act(() =>
       stream.latest.handlers.onDone(
-        makeStructuredView({ step: "ANSWERED", answer }),
+        makeStructuredView({ ...RESULT_STATE, answer }),
       ),
     );
     await screen.findByRole("heading", { name: "調べた結果" });
@@ -2134,7 +2149,7 @@ describe("調査の結果と説明の失敗", () => {
     const stream = new FakeStream();
     reachResearching(
       stream,
-      makeStructuredView({ step: "ANSWERING", answer: groundedAnswer }),
+      makeStructuredView({ ...INVESTIGATION_STATE, answer: groundedAnswer }),
     );
 
     expect(
@@ -2166,7 +2181,7 @@ describe("問いに答えられたか", () => {
       extra,
       {
         "PUT /api/inquiries/inq-1/structured": {
-          body: makeStructuredView({ ...extra, step: "ANSWERING" }),
+          body: makeStructuredView({ ...extra, ...INVESTIGATION_STATE }),
         },
         "POST /api/inquiries/inq-1/resolution": {
           body: makeFiledView({
@@ -2197,7 +2212,7 @@ describe("問いに答えられたか", () => {
     await showResult(
       user,
       makeStructuredView({
-        step: "ANSWERED",
+        ...RESULT_STATE,
         answer: { ...groundedAnswer, answered: true },
       }),
     );
@@ -2216,7 +2231,7 @@ describe("問いに答えられたか", () => {
     const user = userEvent.setup();
     await showResult(
       user,
-      makeStructuredView({ step: "ANSWERED", answer: relatedAnswer }),
+      makeStructuredView({ ...RESULT_STATE, answer: relatedAnswer }),
     );
 
     const off = screen.getByText(OFF_TOPIC);
@@ -2258,7 +2273,7 @@ describe("問いに答えられたか", () => {
     await showResult(
       user,
       makeStructuredView({
-        step: "ANSWERED",
+        ...RESULT_STATE,
         answer: { ...ungroundedAnswer, answered: false },
       }),
     );
@@ -2274,7 +2289,7 @@ describe("問いに答えられたか", () => {
     const user = userEvent.setup();
     await showResult(
       user,
-      makeStructuredView({ step: "ANSWERED", answer: groundedAnswer }),
+      makeStructuredView({ ...RESULT_STATE, answer: groundedAnswer }),
     );
 
     expect(groundedAnswer).not.toHaveProperty("answered");
@@ -2291,8 +2306,8 @@ describe("問いに答えられたか", () => {
       user,
       makeStructuredView({
         type: LOOKS_WRONG,
-        step: "CLOSED",
-        outcome: "FILED",
+        ...HANDLING_STATE,
+        handedOverAt: HANDED_OVER_AT,
         answer: relatedAnswer,
       }),
       { type: LOOKS_WRONG },

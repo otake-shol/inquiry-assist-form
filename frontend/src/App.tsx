@@ -37,17 +37,21 @@ import {
   type Route,
 } from "./path.ts";
 import {
+  canAppend,
+  canWithdraw,
   composeStalled,
   firstQuestionOf,
   pageSections,
   readTextParam,
+  resultFromOperator,
   sectionKey,
   showSendNowFooter,
   type Section,
 } from "./flow/page.ts";
 import { TracePanel } from "./components/TracePanel.tsx";
-import { USER_TEXT } from "./text/inquiries.ts";
-import { TEXT } from "./text/labels.ts";
+import { Withdraw } from "./components/Withdraw.tsx";
+import { USER_TEXT, askerStatusLabel } from "./text/inquiries.ts";
+import { TEXT, handoverText } from "./text/labels.ts";
 
 /** App の props。 */
 interface AppProps {
@@ -93,7 +97,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
     resume,
   } = state;
   const viewId = view?.id;
-  const step = view?.step;
+  const awaiting = view?.awaiting;
 
   const pathname = usePathname();
   const route: Route = useMemo(() => parseRoute(pathname), [pathname]);
@@ -123,7 +127,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
   }, []);
 
   useEffect(() => {
-    if (step !== "ANSWERING" || viewId === undefined) return;
+    if (awaiting !== "INVESTIGATION" || viewId === undefined) return;
     let unsubscribe: (() => void) | null = null;
     // StrictMode の開発時二重実行で接続が二重にならないよう、購読開始を1タスク遅らせる
     const timer = setTimeout(() => {
@@ -138,7 +142,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
       clearTimeout(timer);
       unsubscribe?.();
     };
-  }, [step, viewId, streamAttempt, subscribe]);
+  }, [awaiting, viewId, streamAttempt, subscribe]);
 
   /**
    * API 呼び出しを実行し、結果の InquiryView かエラーを状態に反映する。通信中は busy にする。
@@ -411,7 +415,10 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
         return (
           <Result
             answer={view!.answer!}
-            awaitingResolution={view!.step === "ANSWERED"}
+            awaitingResolution={
+              view!.awaiting === "RESULT_CONFIRMATION" &&
+              !resultFromOperator(view!)
+            }
             doForMe={view!.type?.id === "DO_FOR_ME"}
             busy={busy}
             onResolve={(resolved) =>
@@ -422,8 +429,8 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
       case "closing":
         return (
           <Closing
-            view={view!}
-            filedGuidance={filedGuidance}
+            ending={view!.ending!}
+            declined={view!.declined}
             onRestart={restart}
             showRestart={!hasFollowUp}
           />
@@ -431,11 +438,18 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
       case "followup":
         return (
           <FollowUp
-            status={view!.handlingStatus}
+            statusLabel={askerStatusLabel(view!, resultFromOperator(view!))}
             messages={view!.messages ?? []}
+            awaiting={view!.awaiting}
+            canAppend={canAppend(view!)}
+            ended={view!.ending !== null}
+            handover={handoverText(view!, filedGuidance)}
             busy={busy}
             onSend={async (body) =>
               (await run(() => api.postMessage(view!.id, body))) !== null
+            }
+            onResolve={(resolved, note) =>
+              void run(() => api.resolve(view!.id, resolved, note))
             }
             onRestart={restart}
           />
@@ -452,7 +466,7 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
   let retry: (() => void) | undefined;
   let retryLabel: string | undefined;
   let sendNowInError: (() => void) | undefined;
-  if (step === "ANSWERING" && streamError !== null) {
+  if (awaiting === "INVESTIGATION" && streamError !== null) {
     retry = () => dispatch({ type: "streamRetried" });
     retryLabel = TEXT.retryResearch;
   } else if (
@@ -548,6 +562,12 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
                 {TEXT.sendNow}
               </button>
             </footer>
+          )}
+          {view !== null && canWithdraw(view) && (
+            <Withdraw
+              busy={busy}
+              onWithdraw={() => void run(() => api.withdraw(view.id))}
+            />
           )}
           {trace && view !== null && <TracePanel entries={view.trace} />}
         </>

@@ -153,7 +153,7 @@ class SkillSpyTest extends ApiSupport {
                 .orElseThrow()
                 .substring("data:".length())
                 .trim();
-        assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("ANSWERED");
+        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
         assertThat((String) JsonPath.read(done, "$.answer.askerExplanation")).isNotBlank();
         assertThat(jdbc.queryForObject("select answer_grounded from inquiries where id = ?::uuid", Boolean.class, id))
                 .isTrue();

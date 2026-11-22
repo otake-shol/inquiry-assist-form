@@ -37,7 +37,7 @@ class IntakeApiTest extends ApiSupport {
         String created = start();
         String id = idOf(created);
 
-        assertThat((String) JsonPath.read(created, "$.step")).isEqualTo("INTAKE");
+        assertThat((String) JsonPath.read(created, "$.awaiting")).isEqualTo("INTAKE_ANSWER");
         assertThat((Object) JsonPath.read(created, "$.type")).isNull();
         assertThat((Object) JsonPath.read(created, "$.utterance")).isNull();
         assertThat((Boolean) JsonPath.read(created, "$.intake.complete")).isFalse();
@@ -85,7 +85,7 @@ class IntakeApiTest extends ApiSupport {
 
         String last = text(skip(id, "note").andExpect(status().isOk()));
 
-        assertThat((String) JsonPath.read(last, "$.step")).isEqualTo("STRUCTURED");
+        assertThat((String) JsonPath.read(last, "$.awaiting")).isEqualTo("QUESTION_CONFIRMATION");
         assertThat((Object) JsonPath.read(last, "$.intake.next")).isNull();
         assertThat((Boolean) JsonPath.read(last, "$.intake.complete")).isTrue();
         assertThat(entryIds(last)).containsExactly("type", "system", "function", "since", "note");
@@ -159,7 +159,7 @@ class IntakeApiTest extends ApiSupport {
 
         pick(id, "system", "reports")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.intake.entries[*].questionId").value(contains("type", "system")));
         assertThat(usageSteps(id)).containsExactly("reception", "interviewer", "restater");
     }
@@ -197,7 +197,7 @@ class IntakeApiTest extends ApiSupport {
         skip(id, "note").andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"));
         write(id, "note", "画面が真っ白")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.utterance").value("画面が真っ白"));
     }
 
@@ -232,7 +232,7 @@ class IntakeApiTest extends ApiSupport {
 
         // 詳しい質問に答えると、補足は聞かずに問いが組み立てられる
         pick(id, "since", "today")
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.intake.complete").value(true));
         // 設定の質問の答えを文章から読み取る聞き手の呼び出しが、受付と言い直しの間に入る
         assertThat(usageSteps(id)).containsExactly("reception", "interviewer", "restater");
@@ -267,7 +267,7 @@ class IntakeApiTest extends ApiSupport {
         // 種類は HOW_TO のまま。設定の詳しい質問（おかしいかもしれない用）は当てはまらず、聞き手の質問になる
         assertThat(next(view, "questionId")).isEqualTo("q1");
         // 文章を書いたので、最後に補足は聞かれない
-        pick(id, "q1", "o1").andExpect(jsonPath("$.step").value("STRUCTURED"));
+        pick(id, "q1", "o1").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
     }
 
     @Test
@@ -282,7 +282,7 @@ class IntakeApiTest extends ApiSupport {
                 .andExpect(jsonPath("$.utterance").value("ちょっと補足です"));
 
         pick(id, "q1", "o3")
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.intake.entries[*].questionId").value(contains("type", "system", "q1")));
     }
 
@@ -294,7 +294,7 @@ class IntakeApiTest extends ApiSupport {
         String last = finishIntake(id, null);
 
         assertThat((String) JsonPath.read(last, "$.utterance")).isEqualTo("最初の文章\n\n切り替えた文章");
-        assertThat((String) JsonPath.read(last, "$.step")).isEqualTo("STRUCTURED");
+        assertThat((String) JsonPath.read(last, "$.awaiting")).isEqualTo("QUESTION_CONFIRMATION");
     }
 
     @Test
@@ -315,7 +315,7 @@ class IntakeApiTest extends ApiSupport {
         pick(id, "type", "HOW_TO");
         pick(id, "system", "reports");
         pick(id, "q1", "o1")
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.utterance").value("[判定エラー] 求人管理画面のことです"));
     }
 
@@ -340,7 +340,7 @@ class IntakeApiTest extends ApiSupport {
         assertThat(next(view(id), "questionId")).isEqualTo("function");
         // この置き場所に設定の質問はなく、聞き手の質問に進む
         pick(id, "function", "invoice").andExpect(jsonPath("$.intake.next.questionId").value("q1"));
-        pick(id, "q1", "o1").andExpect(jsonPath("$.step").value("STRUCTURED"));
+        pick(id, "q1", "o1").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
     }
 
     // ---- 戻る ----
@@ -353,7 +353,7 @@ class IntakeApiTest extends ApiSupport {
 
         back(id, "system")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("INTAKE"))
+                .andExpect(jsonPath("$.awaiting").value("INTAKE_ANSWER"))
                 .andExpect(jsonPath("$.intake.entries[*].questionId").value(contains("type")))
                 .andExpect(jsonPath("$.type.id").value("LOOKS_WRONG"))
                 .andExpect(jsonPath("$.system").value(nullValue()))
@@ -364,7 +364,7 @@ class IntakeApiTest extends ApiSupport {
         pick(id, "system", "billing").andExpect(jsonPath("$.intake.next.questionId").value("function"));
         pick(id, "function", "invoice").andExpect(jsonPath("$.intake.next.questionId").value("q1"));
         pick(id, "q1", "o1")
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.system.by").value("ASKER"));
         assertThat(usageSteps(id).stream().filter(s -> s.equals("reception")).count()).isEqualTo(1);
     }
@@ -388,7 +388,7 @@ class IntakeApiTest extends ApiSupport {
         pick(id, "type", "HOW_TO");
         pick(id, "system", "reports");
         pick(id, "q1", "o2");
-        write(id, "note", "メモ").andExpect(jsonPath("$.step").value("STRUCTURED"));
+        write(id, "note", "メモ").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
         // STRUCTURED では戻れない。reopen で補足へ戻ってから、詳しい質問へ戻る
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/inquiries/" + id + "/reopen"));
 
@@ -426,11 +426,11 @@ class IntakeApiTest extends ApiSupport {
         skip(id, "note").andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"));
         write(id, "note", "ログインできない")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("CLOSED"))
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.turn").value("OPERATOR"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(true))
                 .andExpect(jsonPath("$.urgency").value("BLOCKED"))
-                .andExpect(jsonPath("$.handlingStatus").value("OPEN"))
+                .andExpect(jsonPath("$.turn").value("OPERATOR"))
                 .andExpect(jsonPath("$.canSendNow").value(false))
                 // 言い直しは組み立てて残す
                 .andExpect(jsonPath("$.structured.summary").isNotEmpty());
@@ -450,8 +450,8 @@ class IntakeApiTest extends ApiSupport {
         // 種類は置かれ、システムは置かれる。機能は文章にないので聞かれる
         assertThat(next(view(id), "questionId")).isEqualTo("function");
         unknown(id, "function")
-                .andExpect(jsonPath("$.step").value("CLOSED"))
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.turn").value("OPERATOR"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(true));
         assertThat(notifier.notices()).hasSize(1);
     }
@@ -462,8 +462,8 @@ class IntakeApiTest extends ApiSupport {
 
         unknown(id, "system")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("CLOSED"))
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.turn").value("OPERATOR"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(true))
                 .andExpect(jsonPath("$.structured").value(nullValue()));
 
@@ -498,8 +498,8 @@ class IntakeApiTest extends ApiSupport {
 
         urgency(id, "BLOCKED")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("CLOSED"))
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.turn").value("OPERATOR"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(true));
     }
 
@@ -510,8 +510,8 @@ class IntakeApiTest extends ApiSupport {
 
         urgency(id, "BLOCKED")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("CLOSED"))
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.turn").value("OPERATOR"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(true))
                 .andExpect(jsonPath("$.structured.summary").value(summary));
 
@@ -525,7 +525,7 @@ class IntakeApiTest extends ApiSupport {
     void 通常以外への変更は入口と確認の間でだけ許され_不正な値は400() throws Exception {
         String id = toStructured("期限の仕様", null);
 
-        urgency(id, "HURRY").andExpect(jsonPath("$.step").value("STRUCTURED")).andExpect(jsonPath("$.urgency").value("HURRY"));
+        urgency(id, "HURRY").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION")).andExpect(jsonPath("$.urgency").value("HURRY"));
         urgency(id, "URGENT").andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"));
         postJson("/api/inquiries/" + id + "/intake/answers", "{}").andExpect(status().isBadRequest());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/inquiries/" + id + "/urgency")
@@ -567,7 +567,7 @@ class IntakeApiTest extends ApiSupport {
         intakeReply(id, "{\"text\":\"a\"}").andExpect(status().isBadRequest());
         write(id, "note", "   ").andExpect(status().isBadRequest());
         write(id, "note", "あ".repeat(4001)).andExpect(status().isBadRequest());
-        write(id, "note", "あ".repeat(4000)).andExpect(status().isOk()).andExpect(jsonPath("$.step").value("STRUCTURED"));
+        write(id, "note", "あ".repeat(4000)).andExpect(status().isOk()).andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
     }
 
     @Test

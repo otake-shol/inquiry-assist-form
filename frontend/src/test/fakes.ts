@@ -5,6 +5,8 @@ import type {
 } from "../api/stream.ts";
 import type {
   AppConfig,
+  Ending,
+  StateFields,
   InquiryListItem,
   InquiryMessage,
   InquiryView,
@@ -82,12 +84,71 @@ export function makeTypeEntry(
   };
 }
 
+/** 入口の質問に答えている状態。 */
+export const INTAKE_STATE: StateFields = {
+  phase: "INTAKE",
+  turn: "ASKER",
+  awaiting: "INTAKE_ANSWER",
+  ending: null,
+};
+
+/** 言い直しを確かめている状態。 */
+export const CONFIRMATION_STATE: StateFields = {
+  phase: "INTAKE",
+  turn: "ASKER",
+  awaiting: "QUESTION_CONFIRMATION",
+  ending: null,
+};
+
+/** AI が調べている状態。 */
+export const INVESTIGATION_STATE: StateFields = {
+  phase: "KNOW",
+  turn: "AI",
+  awaiting: "INVESTIGATION",
+  ending: null,
+};
+
+/** 結果（AI の答え、または担当者の結果）を本人が確かめている状態。 */
+export const RESULT_STATE: StateFields = {
+  phase: "KNOW",
+  turn: "ASKER",
+  awaiting: "RESULT_CONFIRMATION",
+  ending: null,
+};
+
+/** 担当者が受けている状態。 */
+export const HANDLING_STATE: StateFields = {
+  phase: "DECIDE",
+  turn: "OPERATOR",
+  awaiting: "HANDLING",
+  ending: null,
+};
+
+/** 担当者が聞き返し、本人の返事を待っている状態。 */
+export const ASKER_REPLY_STATE: StateFields = {
+  phase: "DECIDE",
+  turn: "ASKER",
+  awaiting: "ASKER_REPLY",
+  ending: null,
+};
+
+/**
+ * 終わっている状態。
+ * @param ending 終わり方
+ */
+export function closedState(ending: Ending): StateFields {
+  return { phase: "CLOSED", turn: null, awaiting: null, ending };
+}
+
+/** 担当者に初めて渡した時刻（テスト用の固定値）。 */
+export const HANDED_OVER_AT = "2026-11-21T05:00:00Z";
+
 /** テスト用に問い合わせの表現を作る。省いた項目は、入口の1問目を聞いている初期状態。 */
 export function makeView(overrides: Partial<InquiryView> = {}): InquiryView {
   return {
     id: "inq-1",
-    step: "INTAKE",
-    outcome: "IN_PROGRESS",
+    ...INTAKE_STATE,
+    declined: null,
     urgency: "NORMAL",
     type: null,
     system: null,
@@ -99,6 +160,8 @@ export function makeView(overrides: Partial<InquiryView> = {}): InquiryView {
     answer: null,
     canSendNow: false,
     sentImmediately: false,
+    handedOverAt: null,
+    unreadReply: false,
     mock: true,
     ...overrides,
   };
@@ -111,6 +174,7 @@ export function makeMessage(
   return {
     id: "msg-1",
     from: "OPERATOR",
+    kind: "ASK",
     authorName: "担当者（開発用）",
     body: "確認します。少しお待ちください。",
     createdAt: "2026-11-21T06:00:00Z",
@@ -126,9 +190,9 @@ export function makeListItem(
     id: "inq-1",
     createdAt: "2026-11-21T05:00:00Z",
     summary: "求人の掲載期限を、何日まで延ばせるかを知りたい。",
-    step: "CLOSED",
-    outcome: "FILED",
-    handlingStatus: "OPEN",
+    ...HANDLING_STATE,
+    urgency: "NORMAL",
+    handedOverAt: HANDED_OVER_AT,
     unreadReply: false,
     messageCount: 0,
     ...overrides,
@@ -157,10 +221,9 @@ export function makeFiledView(
   overrides: Partial<InquiryView> = {},
 ): InquiryView {
   return makeView({
-    step: "CLOSED",
-    outcome: "FILED",
+    ...HANDLING_STATE,
+    handedOverAt: HANDED_OVER_AT,
     sentImmediately: true,
-    handlingStatus: "OPEN",
     messages: [],
     ...overrides,
   });
@@ -171,7 +234,7 @@ export function makeStructuredView(
   overrides: Partial<InquiryView> = {},
 ): InquiryView {
   return makeView({
-    step: "STRUCTURED",
+    ...CONFIRMATION_STATE,
     type: { id: "HOW_IT_WORKS", label: "仕組みを知りたい", by: "ASKER" },
     intake: { entries: [makeTypeEntry()], next: null, complete: true },
     structured: {
@@ -301,8 +364,10 @@ export function makeItem(overrides: Partial<OperatorItem> = {}): OperatorItem {
     function: null,
     urgency: "NORMAL",
     summary: "求人が一覧に出なくなった理由を知りたい。",
+    ...HANDLING_STATE,
     sentImmediately: false,
     read: false,
+    messageCount: 0,
     ...overrides,
   };
 }
@@ -313,6 +378,8 @@ export function makeDetail(
 ): OperatorDetail {
   return {
     id: "op-1",
+    ...HANDLING_STATE,
+    declined: null,
     filedAt: "2026-11-21T05:00:00Z",
     askerId: "local-user",
     utterance: "昨日まで見えていた求人が今日は見えません",
@@ -377,6 +444,7 @@ export function makeDetail(
     sentImmediately: false,
     read: false,
     slackStatus: "POSTED",
+    history: [],
     ...overrides,
   };
 }

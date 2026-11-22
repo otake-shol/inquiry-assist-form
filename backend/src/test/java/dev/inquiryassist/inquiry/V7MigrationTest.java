@@ -121,7 +121,7 @@ class V7MigrationTest {
         UUID work = legacy("CLOSED", "WORK_REQUEST", "WORK_REQUEST", "FILED", null, false, "[]", false, null);
         UUID incident = legacy("CLOSED", "INCIDENT", "INCIDENT", "INCIDENT_REDIRECTED", null, false, "[]", true, null);
 
-        flyway("latest").migrate();
+        flyway("7").migrate();
 
         assertThat(JsonPath.<String>read(json(spec, "intake"), "$[0].answer.optionId")).isEqualTo("HOW_IT_WORKS");
         assertThat(JsonPath.<String>read(json(bug, "intake"), "$[0].answer.optionId")).isEqualTo("LOOKS_WRONG");
@@ -140,7 +140,7 @@ class V7MigrationTest {
         UUID untouched = legacy("STRUCTURED", "SUSPECTED_BUG", "SUSPECTED_BUG", "IN_PROGRESS", null, false, "[]", true, null);
         UUID changed = legacy("STRUCTURED", "SPEC_QUESTION", "SUSPECTED_BUG", "IN_PROGRESS", null, false, "[]", true, null);
 
-        flyway("latest").migrate();
+        flyway("7").migrate();
 
         assertThat(JsonPath.<String>read(json(untouched, "intake"), "$[0].answer.kind")).isEqualTo("INFERRED");
         assertThat(JsonPath.<String>read(json(changed, "intake"), "$[0].answer.kind")).isEqualTo("OPTION");
@@ -153,7 +153,7 @@ class V7MigrationTest {
         UUID none = legacy("STRUCTURED", "SPEC_QUESTION", "SPEC_QUESTION", "IN_PROGRESS", null, false, "[]", true, null);
         UUID triagedNone = legacy("TRIAGED", "SPEC_QUESTION", "SPEC_QUESTION", "IN_PROGRESS", null, false, "[]", false, null);
 
-        flyway("latest").migrate();
+        flyway("7").migrate();
 
         assertThat(JsonPath.<String>read(json(guessed, "intake"), "$[1].answer.kind")).isEqualTo("INFERRED");
         assertThat(JsonPath.<String>read(json(guessed, "intake"), "$[1].answer.optionId")).isEqualTo("billing");
@@ -171,7 +171,7 @@ class V7MigrationTest {
         UUID redirected = legacy("CLOSED", "INCIDENT", "INCIDENT", "INCIDENT_REDIRECTED", null, false, "[]", true, null);
         UUID closed = legacy("CLOSED", "SUSPECTED_BUG", "SUSPECTED_BUG", "FILED", null, false, "[]", false, null);
 
-        flyway("latest").migrate();
+        flyway("7").migrate();
 
         assertThat(value(triaged, "step")).isEqualTo("INTAKE");
         assertThat(value(failedTriage, "step")).isEqualTo("INTAKE");
@@ -192,7 +192,7 @@ class V7MigrationTest {
     void 送信済みの追加質問と回答は詳しい質問への答えとして移り_本人が書いた発話は文章に入る() {
         UUID id = legacy("STRUCTURED", "SPEC_QUESTION", "SPEC_QUESTION", "IN_PROGRESS", "job-admin", false, QUESTIONS, true, null);
 
-        flyway("latest").migrate();
+        flyway("7").migrate();
 
         String intake = json(id, "intake");
         assertThat(JsonPath.<List<String>>read(intake, "$[*].questionId")).containsExactly("type", "system", "q1", "q2");
@@ -209,7 +209,7 @@ class V7MigrationTest {
         UUID id = legacy("STRUCTURED", "SUSPECTED_BUG", "SUSPECTED_BUG", "IN_PROGRESS", null, false, "[]", true, structured("SUSPECTED_BUG"));
         UUID incident = legacy("CLOSED", "INCIDENT", "INCIDENT", "INCIDENT_REDIRECTED", null, false, "[]", true, structured("INCIDENT"));
 
-        flyway("latest").migrate();
+        flyway("7").migrate();
 
         String migrated = json(id, "structured_by_ai");
         assertThat(JsonPath.<String>read(migrated, "$.type")).isEqualTo("LOOKS_WRONG");
@@ -227,7 +227,7 @@ class V7MigrationTest {
     void 移した入口の答えは新しい形のまま読める() {
         UUID id = legacy("STRUCTURED", "SPEC_QUESTION", "WORK_REQUEST", "IN_PROGRESS", "billing", true, QUESTIONS, true, null);
 
-        flyway("latest").migrate();
+        flyway("7").migrate();
 
         List<IntakeEntry> entries = JSON.readValue(json(id, "intake"), new TypeReference<List<IntakeEntry>>() {});
         assertThat(entries).hasSize(4);
@@ -238,7 +238,7 @@ class V7MigrationTest {
 
     @Test
     void 使わなくなった列は落ち_新しい段階と結果の制約が効く() {
-        flyway("latest").migrate();
+        flyway("7").migrate();
 
         List<String> dropped = jdbc.queryForList(
                 "select column_name from information_schema.columns where table_name = 'inquiries'"

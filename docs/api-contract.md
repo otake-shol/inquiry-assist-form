@@ -15,31 +15,63 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 - **種類（type）**: `HOW_TO`（使い方を知りたい）／`HOW_IT_WORKS`（仕組みを知りたい）／`LOOKS_WRONG`（おかしいかもしれない）／`DO_FOR_ME`（やってほしい）／`CHANGE_REQUEST`（変えてほしい）
 - **緊急度（urgency）**: `NORMAL`（通常）／`HURRY`（急ぎ）／`BLOCKED`（業務が止まっている）。種類とは別に持つ。障害は種類ではない
 - **置き場所**: 種類、システム、機能の3つ。それぞれ、本人が選んだか（`ASKER`）、AI が置いたか（`AI`）を持つ
-- **段階（step）**: 問い合わせ1件の進行位置
-- **結果（outcome）**: `IN_PROGRESS`／`SELF_RESOLVED`（自己解決）／`FILED`（担当者に送った）／`ABANDONED`（離脱。自動では設定しない）
+- **状態**: 問い合わせ1件がいまどこにあるか。区間、誰の番か、何を待っているか、終わり方の4つで表す（下記「状態」）
 
-状態を「区間 × 誰の番か」に、結果を4つの終わり方に置き換えるのは、次の作業（段階 1-B）。この文書の `step` と `outcome` は、それまでの形。
+## 状態
 
-## 段階の遷移
+問い合わせ1件の状態は、4つの項目で表す。以前の「段階」「結果」「対応状況」は、これに置き換えた。
 
-| step | 意味 | 次の操作 |
+| 項目 | 値 | 意味 |
 | --- | --- | --- |
-| `INTAKE` | 入口の質問に答えている | 質問に答える（3）、前の質問に戻る（3a）、文章で書く（3b） |
-| `STRUCTURED` | 組み立てた問い（言い直し）が出た | 確定（5）、作り直し（5a）、入口の質問へ戻る（5b） |
-| `ANSWERING` | 調べて答えを作っている | 進捗ストリームの購読（6） |
-| `ANSWERED` | 答えが出て、本人が結果を確かめる | 解決の判定（7） |
-| `CLOSED` | 終了。`outcome` が結果を示す | なし |
+| 区間（`phase`） | `INTAKE`（受付）／`KNOW`（分かる）／`DECIDE`（決まる）／`ACT`（行われる）／`CLOSED`（終わり） | いま埋めようとしている不足の種類。`framework.md` の区間に、受付と終わりを加えたもの |
+| 誰の番か（`turn`） | `ASKER`（本人）／`AI`／`OPERATOR`（担当者）。終わった件は `null` | 次に動く人 |
+| 待っていること（`awaiting`） | 下の表。終わった件は `null` | 番の人に、何をしてもらうのを待っているか。画面は、これを見て描くものを決める |
+| 終わり方（`ending`） | `RESOLVED`（解決済み）／`ANSWERED`（回答済み）／`DECLINED`（見送り）／`WITHDRAWN`（取り下げ）。終わっていない件は `null` | 不足は埋まったか |
 
-種類ごとの経路:
+仕様の持ち主への相談（持ち主の番）は、段階3で加える。
+
+### 待っていること
+
+| `awaiting` | 番 | 区間 | 意味 | 次の操作 |
+| --- | --- | --- | --- | --- |
+| `INTAKE_ANSWER` | 本人 | 受付 | 入口の質問に答えている | 質問に答える（3）、前の質問に戻る（3a）、文章で書く（3b） |
+| `QUESTION_CONFIRMATION` | 本人 | 受付 | 組み立てた問い（言い直し）を確かめている | 確定（5）、作り直し（5a）、入口の質問へ戻る（5b） |
+| `INVESTIGATION` | AI | 分かる | 調べて答えを作っている | 進捗ストリームの購読（6） |
+| `RESULT_CONFIRMATION` | 本人 | 分かる、決まる、行われる | 結果（AI の答え、または担当者が伝えた結果）を、本人が確かめている | 結果の確かめ（7） |
+| `HANDLING` | 担当者 | 分かる、決まる、行われる | 担当者が受けている | 担当者の操作（「担当者の操作」の節） |
+| `ASKER_REPLY` | 本人 | 分かる、決まる、行われる | 担当者が本人に聞き返し、返事を待っている | 追記（11） |
+
+### 種類ごとの経路
 
 | 種類 | 調べるか | 言い直しを確定した後 |
 | --- | --- | --- |
-| `HOW_TO`、`HOW_IT_WORKS` | 調べる | 答えを本人が確かめる（`ANSWERED`）。本人の判定で `SELF_RESOLVED` か `FILED` |
-| `LOOKS_WRONG` | 調べる | 答えの完了と同時に `FILED`（意図した動きかは、担当者が判断する） |
-| `DO_FOR_ME` | 調べる | 根拠があり、問いに答えている（本人が自分でできる手順が見つかった）場合は `ANSWERED`。本人が、自分で行うか（`SELF_RESOLVED`）、担当者に頼むか（`FILED`）を選ぶ。それ以外は、答えの完了と同時に `FILED` |
-| `CHANGE_REQUEST` | 調べない | 確定と同時に `FILED` |
+| `HOW_TO`、`HOW_IT_WORKS` | 調べる | 答えを本人が確かめる（`KNOW`、`RESULT_CONFIRMATION`） |
+| `LOOKS_WRONG` | 調べる | 答えの完了と同時に、担当者に渡す（意図した動きかは、担当者が判断する） |
+| `DO_FOR_ME` | 調べる | 根拠があり、問いに答えている（本人が自分でできる手順が見つかった）場合は、本人が確かめる（`KNOW`、`RESULT_CONFIRMATION`）。それ以外は、答えの完了と同時に、担当者に渡す |
+| `CHANGE_REQUEST` | 調べない | 確定と同時に、担当者に渡す |
 
-緊急度が `BLOCKED` の問い合わせは、種類にかかわらず、入口の質問を終えた時点で `FILED` にする（言い直しの確認と調査を待たない）。
+緊急度が `BLOCKED` の問い合わせは、種類にかかわらず、入口の質問を終えた時点で担当者に渡す（言い直しの確認と調査を待たない）。
+
+### 担当者に渡す
+
+「担当者に渡す」とは、番を担当者にすること（`turn: OPERATOR`、`awaiting: HANDLING`）。問い合わせは終わらない。
+
+- 渡したときの区間は、種類で決まる。`HOW_TO`、`HOW_IT_WORKS`、種類が決まっていない場合は `KNOW`（知識の不足のまま、担当者が答える）。`LOOKS_WRONG`、`DO_FOR_ME`、`CHANGE_REQUEST` は `DECIDE`（意図どおりか、受けるか、採るかを決める）。
+- 初めて渡したときに、担当者に通知する（「オペレータへの通知」の節）。その時刻を `handedOverAt` に持つ。2回目以降は通知しない（担当者のボードには、番が戻ったことが即時に届く）。
+- 担当者の側の未読（`read`）を `false` にする。
+
+### 本人が結果を確かめる
+
+答えたのが AI でも担当者でも、結果は本人が確かめる（7）。
+
+| 本人の答え | その後 |
+| --- | --- |
+| 解決した | 終わる（`phase: CLOSED`、`ending: RESOLVED`） |
+| 解決していない | 担当者に渡す。区間は、AI の答えの後なら上の決まり、担当者の結果の後なら変えない |
+
+`DO_FOR_ME` で AI が手順を示した場合、「解決した」は自分で行えたこと、「解決していない」は担当者に頼むことを意味する。
+
+返事がないまま期間が過ぎた件を `ANSWERED`（回答済み）にする処理は、段階2で作る。それまで、`ANSWERED` で終わる件は、移行で読み替えた既存の件だけになる。
 
 ## InquiryView
 
@@ -49,8 +81,11 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 {
   "id": "0b9c…(UUID)",
   "createdAt": "2026-11-22T03:00:00Z",
-  "step": "INTAKE",
-  "outcome": "IN_PROGRESS",
+  "phase": "INTAKE",
+  "turn": "ASKER",
+  "awaiting": "INTAKE_ANSWER",
+  "ending": null,
+  "declined": null,
   "urgency": "NORMAL",
   "type": { "id": "LOOKS_WRONG", "label": "おかしいかもしれない", "by": "ASKER" },
   "system": { "id": "system-a", "label": "システムA", "by": "ASKER" },
@@ -72,19 +107,21 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
   "answer": null,
   "canSendNow": false,
   "sentImmediately": false,
-  "handlingStatus": null,
+  "handedOverAt": null,
+  "unreadReply": false,
   "messages": [],
   "trace": [],
   "mock": true
 }
 ```
 
-- `type`、`system`、`function` は、決まっていなければ `null`。`by` は `ASKER`（本人が選んだ）か `AI`（AI が置いた）。本人が「わからない」と答え、AI も置けなかった場合は `null` のまま。
+- `type`、`system`、`function` は、決まっていなければ `null`。`by` は `ASKER`（本人が選んだ）、`AI`（AI が置いた）、`OPERATOR`（担当者が置き直した）のいずれか。本人が「わからない」と答え、AI も置けなかった場合は `null` のまま。
 - `utterance` は、本人が書いた文章。文章で始めた場合の本文、文章に切り替えたときの本文、補足のいずれか。複数ある場合は、書いた順に空行でつなぐ。何も書いていなければ `null`。
 - `intake.entries` は、答え終えた質問（聞いた順）。`intake.next` は、次に答える質問。入口が終わっていれば `null` で、`complete` が `true`。
 - `intake.entries[].answer.kind` は `OPTION`（選択肢を選んだ。`optionId` と `label`）、`TEXT`（文章で答えた。`text`）、`UNKNOWN`（わからない）、`SKIPPED`（補足を書かずに進んだ）、`INFERRED`（本人が書いた文章から AI が読み取った。選択肢なら `optionId` と `label`、文章で答える質問なら `text`）のいずれか。
 - `intake.next.kind` は `TYPE`、`SYSTEM`、`FUNCTION`、`DETAIL`、`NOTE` のいずれか。`options` が空の質問は文章で答える。`allowsText` が `true` の質問は、選択肢のほかに文章でも答えられる。`canSkip` は `NOTE` だけが `true` になりうる。「わからない」は、`NOTE` 以外のすべての質問で選べる（画面が常に出す）。
-- `structured` は `STRUCTURED` 以降で非 null。項目は `summary`（本人に見せる言い直しの文章。必須）、`targetSystem`、`goal`、`whatHappened`、`expectedResult`。`urgency` は `structured` から外し、問い合わせの `urgency` に一本化する。
+- `phase`、`turn`、`awaiting`、`ending` は「状態」の節のとおり。`declined` は、見送りで終わった件だけが持つ（`{ "reasonKind": "KNOWN_LIMITATION", "reason": "理由の文章" }`）。`handedOverAt` は、担当者に初めて渡した時刻（渡していなければ `null`）。
+- `structured` は、問いを組み立てた後（`awaiting` が `QUESTION_CONFIRMATION` になった時点）から非 null。項目は `summary`（本人に見せる言い直しの文章。必須）、`targetSystem`、`goal`、`whatHappened`、`expectedResult`。`urgency` は `structured` から外し、問い合わせの `urgency` に一本化する。
 - `answer` は、答えの完了後に非 null。形は従来どおり（`grounded`、`answered`、`askerExplanation`、`memo`、`citations`）。
 - `canSendNow` は、いま「答えを待たずに担当者へ送る」（8）を実行できるか。
 - `revisionsLeft` は、言い直しを作り直せる残り回数（初期値2）。
@@ -175,17 +212,17 @@ inquiry:
 
 リクエスト `{}`、または `{ "text": "1〜4000文字", "urgency": "HURRY" }`。どちらの項目も省ける。
 
-`201` InquiryView（`step: INTAKE`）。
+`201` InquiryView（`awaiting: INTAKE_ANSWER`）。
 
 - `text` がない: 最初の質問（種類）が `intake.next` に入る。AI は呼ばない。
-- `text` がある: 「文章で書く」の決まりで置き場所を置き、残りの最初の質問を `intake.next` に入れる。残りの質問がなければ、そのまま問いを組み立てて `step: STRUCTURED` にする。
+- `text` がある: 「文章で書く」の決まりで置き場所を置き、残りの最初の質問を `intake.next` に入れる。残りの質問がなければ、そのまま問いを組み立てて `awaiting: QUESTION_CONFIRMATION` にする。
 - `urgency` を省くと `NORMAL`。
 
 AI が失敗しても、この操作はエラーにしない（受付と聞き手の失敗は、質問を聞く形に置き換わる。言い直しの失敗は下の3と同じ扱い）。
 
 ### 3. `POST /api/inquiries/{id}/intake/answers`
 
-`intake.next` の質問に答える。`step` が `INTAKE` のときだけ有効。リクエストは次のいずれか。
+`intake.next` の質問に答える。`awaiting` が `INTAKE_ANSWER` のときだけ有効。リクエストは次のいずれか。
 
 | 答え方 | リクエスト |
 | --- | --- |
@@ -200,56 +237,56 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 
 `200` InquiryView。
 
-- 次の質問があれば、`intake.next` に入る（`step: INTAKE`）。
-- 最後の質問に答えた場合は、言い直しのスキルが問いを組み立て、`step: STRUCTURED` にする。
-- 最後の質問に答え、緊急度が `BLOCKED` の場合は、問いを組み立てたうえで `step: CLOSED`、`outcome: FILED`、`sentImmediately: true` にする（担当者に通知する）。言い直しが失敗した場合も、組み立てなしで同じく `FILED` にする。
-- 言い直しのスキルが失敗した場合（`BLOCKED` 以外）は、答えを保存したうえで、エラー（`AI_REFUSED` は422、`AI_UNAVAILABLE` は503）を返す。本文に `inquiryId` を含める。`step` は `INTAKE` のまま、`intake.complete` は `true`、`canSendNow` は `true` になる。エラーの本文には状態を含めないので、画面は `inquiryId` で取得（9）し直して、状態を反映する。同じ操作をやり直す方法は、5b（入口の質問へ戻る）ではなく、`POST /api/inquiries/{id}/intake/compose`（本文なし。問いの組み立てだけをやり直す。`intake.complete` が `true` で `step` が `INTAKE` のときだけ有効）。
+- 次の質問があれば、`intake.next` に入る（`awaiting: INTAKE_ANSWER`）。
+- 最後の質問に答えた場合は、言い直しのスキルが問いを組み立て、`awaiting: QUESTION_CONFIRMATION` にする。
+- 最後の質問に答え、緊急度が `BLOCKED` の場合は、問いを組み立てたうえで担当者に渡す（`sentImmediately: true`）。言い直しが失敗した場合も、組み立てなしで同じく担当者に渡す。
+- 言い直しのスキルが失敗した場合（`BLOCKED` 以外）は、答えを保存したうえで、エラー（`AI_REFUSED` は422、`AI_UNAVAILABLE` は503）を返す。本文に `inquiryId` を含める。`awaiting` は `INTAKE_ANSWER` のまま、`intake.complete` は `true`、`canSendNow` は `true` になる。エラーの本文には状態を含めないので、画面は `inquiryId` で取得（9）し直して、状態を反映する。同じ操作をやり直す方法は、5b（入口の質問へ戻る）ではなく、`POST /api/inquiries/{id}/intake/compose`（本文なし。問いの組み立てだけをやり直す。`intake.complete` が `true` で `awaiting` が `INTAKE_ANSWER` のときだけ有効）。
 
 ### 3a. `POST /api/inquiries/{id}/intake/back`
 
-リクエスト `{ "questionId": "system" }`。答え終えた質問に戻る。`step` が `INTAKE` のときだけ有効。
+リクエスト `{ "questionId": "system" }`。答え終えた質問に戻る。`awaiting` が `INTAKE_ANSWER` のときだけ有効。
 
 `200` InquiryView。指定した質問と、それより後の答えを捨て、指定した質問を `intake.next` にする。捨てた答えで決まっていた置き場所も、決まっていない状態に戻す。`entries` にない `questionId` は `VALIDATION`。本人が書いた文章（`utterance`）は消さない。
 
 ### 3b. `POST /api/inquiries/{id}/intake/text`
 
-リクエスト `{ "text": "1〜4000文字" }`。文章で書く道に切り替える。`step` が `INTAKE` のときだけ有効。
+リクエスト `{ "text": "1〜4000文字" }`。文章で書く道に切り替える。`awaiting` が `INTAKE_ANSWER` のときだけ有効。
 
 `200` InquiryView。「文章で書く」の決まりで、まだ答えていない置き場所を置く。答えかけの質問（`intake.next`）は、置けなければ改めて聞く。
 
 ### 4. `PUT /api/inquiries/{id}/urgency`
 
-リクエスト `{ "urgency": "BLOCKED" }`。本人が緊急度を変える。`step` が `INTAKE` か `STRUCTURED` のときだけ有効。
+リクエスト `{ "urgency": "BLOCKED" }`。本人が緊急度を変える。`awaiting` が `INTAKE_ANSWER` か `QUESTION_CONFIRMATION` のときだけ有効。
 
-`200` InquiryView。`INTAKE` で `BLOCKED` に変えた場合、まだ答えていない詳しい質問は聞かない（`intake.next` が詳しい質問なら、補足に進める）。`STRUCTURED` で `BLOCKED` に変えた場合は、その時点の言い直しで `step: CLOSED`、`outcome: FILED`、`sentImmediately: true` にする。
+`200` InquiryView。入口の質問の途中で `BLOCKED` に変えた場合、まだ答えていない詳しい質問は聞かない（`intake.next` が詳しい質問なら、補足に進める）。言い直しを確かめている途中で `BLOCKED` に変えた場合は、その時点の言い直しで担当者に渡す（`sentImmediately: true`）。
 
 ### 5. `PUT /api/inquiries/{id}/structured`
 
-リクエスト `{}` または `{ "summary": "本人が書き直した文章" }`。言い直しを確定する。`step` が `STRUCTURED` のときだけ有効。
+リクエスト `{}` または `{ "summary": "本人が書き直した文章" }`。言い直しを確定する。`awaiting` が `QUESTION_CONFIRMATION` のときだけ有効。
 
 - 本文が空（`summary` なし）: AIの言い直しをそのまま確定する（「合っています」）
 - `summary` あり（1〜2000文字）: 本人が書き直した文章で確定する。確定値の `summary` だけをこの文章に置き換え、ほかの項目はAIの値を残す。0次回答は `summary` を問いの本文として扱う
 
 `200` InquiryView。
 
-- `CHANGE_REQUEST`: `step: CLOSED`、`outcome: FILED`。担当者に通知する
-- それ以外: `step: ANSWERING`
+- `CHANGE_REQUEST`: 担当者に渡す（区間は `DECIDE`）
+- それ以外: `phase: KNOW`、`turn: AI`、`awaiting: INVESTIGATION`
 
 ### 5a. `POST /api/inquiries/{id}/revision`
 
-リクエスト `{ "note": "消えたのは一昨日から" }`（1〜1000文字）。本人が違う点を一言で伝え、AIが言い直しを作り直す。`step` が `STRUCTURED` で `revisionsLeft` が1以上のときだけ有効。残りが0なら `INVALID_STATE`。
+リクエスト `{ "note": "消えたのは一昨日から" }`（1〜1000文字）。本人が違う点を一言で伝え、AIが言い直しを作り直す。`awaiting` が `QUESTION_CONFIRMATION` で `revisionsLeft` が1以上のときだけ有効。残りが0なら `INVALID_STATE`。
 
-`200` InquiryView（`step: STRUCTURED`、`structured` が新しい言い直し、`revisionsLeft` が1減る）。伝えられた一言は記録に残す。AIが失敗した場合（`AI_REFUSED`／`AI_UNAVAILABLE`）は残り回数を減らさない。
+`200` InquiryView（`awaiting: QUESTION_CONFIRMATION`、`structured` が新しい言い直し、`revisionsLeft` が1減る）。伝えられた一言は記録に残す。AIが失敗した場合（`AI_REFUSED`／`AI_UNAVAILABLE`）は残り回数を減らさない。
 
 ### 5b. `POST /api/inquiries/{id}/reopen`
 
-本文なし。入口の質問へ戻る。`step` が `STRUCTURED` のときだけ有効。
+本文なし。入口の質問へ戻る。`awaiting` が `QUESTION_CONFIRMATION` のときだけ有効。
 
-`200` InquiryView（`step: INTAKE`、`structured` は `null`）。最後に答えた質問を `intake.next` に戻し、その答えを捨てる（3a で最後の質問を指定したのと同じ）。`revisionsLeft` は元に戻さない。
+`200` InquiryView（`awaiting: INTAKE_ANSWER`、`structured` は `null`）。最後に答えた質問を `intake.next` に戻し、その答えを捨てる（3a で最後の質問を指定したのと同じ）。`revisionsLeft` は元に戻さない。
 
 ### 6. `GET /api/inquiries/{id}/answer-stream`
 
-`text/event-stream`。`step` が `ANSWERING` のときに0次回答を生成し、進捗と結果を流す。
+`text/event-stream`。`awaiting` が `INVESTIGATION` のときに0次回答を生成し、進捗と結果を流す。
 
 | event | data | 意味 |
 | --- | --- | --- |
@@ -257,15 +294,15 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | `done` | InquiryView | 完了。この後ストリームを閉じる |
 | `failed` | `{ "code": "AI_REFUSED", "message": "…" }` | 失敗。この後ストリームを閉じる |
 
-- 完了時: 種類ごとの経路の表のとおり。`HOW_TO` と `HOW_IT_WORKS` は `step: ANSWERED`。`LOOKS_WRONG` は `step: CLOSED`、`outcome: FILED`（担当者に通知）。`DO_FOR_ME` は、`answer.grounded` と `answer.answered` がともに `true` なら `step: ANSWERED`、そうでなければ `step: CLOSED`、`outcome: FILED`（担当者に通知）。
-- 失敗時の `code`: `AI_REFUSED`／`AI_UNAVAILABLE`／`INVALID_STATE`（`ANSWERING` でない、または同じ問い合わせの生成が進行中）。失敗しても `step` は `ANSWERING` のままで、再購読による再試行と「答えを待たずに担当者へ送る」（8）ができる。
+- 完了時: 種類ごとの経路の表のとおり。`HOW_TO` と `HOW_IT_WORKS` は、本人が確かめる（`turn: ASKER`、`awaiting: RESULT_CONFIRMATION`）。`LOOKS_WRONG` は担当者に渡す。`DO_FOR_ME` は、`answer.grounded` と `answer.answered` がともに `true` なら本人が確かめる、そうでなければ担当者に渡す。
+- 失敗時の `code`: `AI_REFUSED`／`AI_UNAVAILABLE`／`INVALID_STATE`（`awaiting` が `INVESTIGATION` でない、または同じ問い合わせの生成が進行中）。失敗しても `awaiting` は `INVESTIGATION` のままで、再購読による再試行と「答えを待たずに担当者へ送る」（8）ができる。
 - 画面は `done` か `failed` を受けたら接続を閉じる（EventSource の自動再接続を止める）。
 
 ### 7. `POST /api/inquiries/{id}/resolution`
 
-リクエスト `{ "resolved": true }`。`step` が `ANSWERED` のときだけ有効。
+リクエスト `{ "resolved": true }`、または `{ "resolved": false, "note": "まだ解決していない点（任意。1〜4000文字）" }`。本人が結果を確かめる。`awaiting` が `RESULT_CONFIRMATION` のときだけ有効。
 
-`200` InquiryView（`step: CLOSED`）。`resolved: true` は `SELF_RESOLVED`、`false` は `FILED`（担当者に通知）。
+`200` InquiryView。「本人が結果を確かめる」の決まりのとおり。`note` があれば、本人の追記としてメッセージに加える。画面が `note` を付けるのは、担当者の結果を確かめるときだけ（AI の答えを確かめるときは付けない）。API は、どちらの場合も受け付ける。`resolved` が `true` のときに `note` を付けると `VALIDATION`。
 
 ### 8. `POST /api/inquiries/{id}/send-now`
 
@@ -273,13 +310,13 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 
 実行できるのは、`canSendNow` が `true` のとき。次のいずれか。
 
-- `step` が `ANSWERING` か `ANSWERED`（言い直しを確定した後）
-- AI の失敗で先へ進めない（3 で言い直しが失敗し、`intake.complete` が `true` のまま `step` が `INTAKE` にある）。こちらの失敗を理由に、本人を止めない
-- `step` が `STRUCTURED` で、`revisionsLeft` が 0（言い直しを2回作り直しても合わなかった）。汲み取れなかったのはこちらの側なので、本人を止めない
+- `awaiting` が `INVESTIGATION`、または AI の答えを確かめている `RESULT_CONFIRMATION`（言い直しを確定した後。担当者に渡したことがない場合に限る）
+- AI の失敗で先へ進めない（3 で言い直しが失敗し、`intake.complete` が `true` のまま `awaiting` が `INTAKE_ANSWER` にある）。こちらの失敗を理由に、本人を止めない
+- `awaiting` が `QUESTION_CONFIRMATION` で、`revisionsLeft` が 0（言い直しを2回作り直しても合わなかった）。汲み取れなかったのはこちらの側なので、本人を止めない
 
 それ以外は `INVALID_STATE`。
 
-`200` InquiryView（`step: CLOSED`、`outcome: FILED`、`sentImmediately: true`）。担当者に通知する。
+`200` InquiryView。担当者に渡す（`sentImmediately: true`）。
 
 答えを待たずに送った後も AI の調査を裏で続け、材料を担当者に渡すのは、段階2で作る（RC-8）。いまは、送った時点で調査を行わない。
 
@@ -387,7 +424,7 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 ## オペレータへの通知
 
-問い合わせが担当者に送られた時点（`outcome` が `FILED` になった時点）で、オペレータに2つの方法で知らせる。自己解決では通知しない。
+問い合わせを担当者に初めて渡した時点で、オペレータに2つの方法で知らせる。担当者に渡らずに終わった件（本人が AI の答えで解決した、取り下げた）では通知しない。
 
 - **ツール内の通知**: オペレータ画面の一覧に未読として現れ、開いている画面には即時に届く。
 - **Slack への投稿**: 対象システムに対応するチャンネルへ投稿する。投稿先は設定で決める。
@@ -403,13 +440,13 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 ### `GET /api/operator/inquiries`
 
-担当者に送られた問い合わせの一覧（新しい順）。クエリ `unreadOnly=true` で未読だけに絞る。
+担当者に渡したことのある問い合わせの一覧。クエリ `unreadOnly=true` で未読だけに絞る。
 
-`200` `{ "unreadCount": 2, "items": [{ "id", "filedAt", "type": { "id", "label" } | null, "system": { "id", "label" } | null, "function": { "id", "label" } | null, "urgency", "summary", "sentImmediately", "read": false }] }`。`summary` は言い直しの文章、なければ本人が書いた文章の先頭80文字、それもなければ置き場所の名前（種類、システム、機能を「・」でつないだもの）。並びは新しい順。ただし緊急度が `BLOCKED` の件を先頭に寄せる。
+`200` `{ "unreadCount": 2, "items": [{ "id", "filedAt", "type": { "id", "label" } | null, "system": { "id", "label" } | null, "function": { "id", "label" } | null, "urgency", "summary", "sentImmediately", "read": false, "phase", "turn", "awaiting", "ending", "messageCount" }] }`。`filedAt` は、担当者に初めて渡した時刻（`handedOverAt` と同じ）。`summary` は言い直しの文章、なければ本人が書いた文章の先頭80文字、それもなければ置き場所の名前（種類、システム、機能を「・」でつないだもの）。並びは新しい順。ただし緊急度が `BLOCKED` の件を先頭に寄せる。
 
 ### `GET /api/operator/inquiries/{id}`
 
-`200` 問い合わせの全内容。`id`、`filedAt`、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`handlingStatus`、`messages`、`trace`。担当者に送られていない問い合わせは `NOT_FOUND`。
+`200` 問い合わせの全内容。`id`、`filedAt`、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`declined`、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
 
 `followUps` は廃止し、`intake` に置き換える。入力を終える前に担当者へ送られることがなくなったため、「未回答」の状態は要らなくなった。
 
@@ -431,7 +468,7 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 | `/operator` | ボード。問い合わせは未選択 |
 | `/operator/{id}` | ボードと、その問い合わせの詳細のパネルを開いた状態 |
 
-一覧で問い合わせを選ぶと URL が `/operator/{id}` に変わり、ブラウザの「戻る」で前の選択に戻れる。`{id}` が存在しない、または担当者に送られていない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。`/operator` で始まらないパスは本人向けの画面。
+一覧で問い合わせを選ぶと URL が `/operator/{id}` に変わり、ブラウザの「戻る」で前の選択に戻れる。`{id}` が存在しない、または担当者に渡したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。`/operator` で始まらないパスは本人向けの画面。
 
 ### `POST /api/operator/inquiries/{id}/read`
 
@@ -439,7 +476,7 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 ### `GET /api/operator/stream`
 
-`text/event-stream`。接続中、問い合わせが担当者に送られるたびに event `filed` を流す。data は一覧の1件と同じ形。接続を保つため、一定間隔でコメント行を送る。
+`text/event-stream`。流す event は「オペレータのストリーム」の節のとおり（`filed` と `updated`）。接続を保つため、一定間隔でコメント行を送る。
 
 ## スキルの構成に伴う取り決め
 
@@ -447,7 +484,7 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 
 - **`answer.memo.unconfirmed`**: 調査が挙げたが、根拠の実在を確かめられなかった事実の文の一覧。該当がなければ空配列。**担当者にだけ返す。** 中身が入るのはオペレータの詳細（`GET /api/operator/inquiries/{id}`）の `answer.memo.unconfirmed` だけで、本人向けの InquiryView（2〜9 と進捗ストリームの `done`）では常に空配列にする。裏づけのない内容は、本人には真偽を判断できず、読めばそのまま試してしまうおそれがあるため。画面で隠すのではなく、API が本人向けの応答に含めない。オペレータ画面は「根拠を確かめられなかったこと」として、分かったこと（`findings`）と区別して示す。本人向けの説明（`askerExplanation`）は `findings` の内容だけから書かれ、`unconfirmed` の内容を含まない。
 - **0次回答の進捗**: 調査の進捗に続けて「根拠を確かめています」が流れ、根拠ありの場合はさらに「答えをまとめています」が流れる。
-- **説明の失敗**: 調査と照合が成功し、説明だけが失敗した場合、進捗ストリームは `failed`（`AI_UNAVAILABLE` または `AI_REFUSED`）を流し、`step` は `ANSWERING` のまま。調査の結果（技術メモ、出典と照合結果、利用量）は保存する。ただし本人向けの InquiryView の `answer` は `ANSWERING` の間は `null` のままにする（説明がない状態を「答えが見つからなかった」と誤って見せないため）。画面は従来どおり再試行と「今すぐ担当者に送る」を出す。送った場合、オペレータの詳細（`GET /api/operator/inquiries/{id}`）の `answer` に保存済みの調査の内容が入り、`grounded` は `false`、`askerExplanation` は `null` になる。再試行で調査が成功すれば、保存済みの内容は新しい結果で置き換える。
+- **説明の失敗**: 調査と照合が成功し、説明だけが失敗した場合、進捗ストリームは `failed`（`AI_UNAVAILABLE` または `AI_REFUSED`）を流し、`awaiting` は `INVESTIGATION` のまま。調査の結果（技術メモ、出典と照合結果、利用量）は保存する。ただし本人向けの InquiryView の `answer` は `ANSWERING` の間は `null` のままにする（説明がない状態を「答えが見つからなかった」と誤って見せないため）。画面は従来どおり再試行と「今すぐ担当者に送る」を出す。送った場合、オペレータの詳細（`GET /api/operator/inquiries/{id}`）の `answer` に保存済みの調査の内容が入り、`grounded` は `false`、`askerExplanation` は `null` になる。再試行で調査が成功すれば、保存済みの内容は新しい結果で置き換える。
 - **利用量の記録**: `usages[].step` はスキルの識別子（`reception`、`interviewer`、`restater`、`investigator`、`explainer`）。押して答えただけの入口では、受付は呼ばれない（記録にも現れない）。
 - **問いに答えられたか（`answer.answered`）**: 確かめられた事実があること（`grounded`）と、その事実が本人の問いに答えていること（`answered`）を区別する。根拠はあるが的外れな事実しか集まらなかった場合に、それを答えとして見せないため。
   - `answered` は真偽値。`grounded` が `false` のときは常に `false`。`grounded` が `true` のときは、説明のスキルの判定（問いに答えているか）をそのまま入れる。
@@ -465,75 +502,123 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
   - モックの説明は `answered: true` を返す。タグ `[的外れ]` を付けた場合だけ `false` を返す（調査は通常の事実を返し、説明のスキルが「問いに答えていない」と判定した場合を再現する）。
 - **スキルごとの実装**: `GET /api/config` に `skills` を加える。スキルの識別子から、動いている実装の名前（`mock` または `ollama`）への対応。例: `{ "reception": "ollama", "interviewer": "ollama", "restater": "ollama", "investigator": "mock", "explainer": "ollama" }`。`mock` は、スキルか一次情報の検索に1つでもモックがあれば `true`。画面はモックの案内枠に、どのスキルがモックかを示す。モックのシナリオのタグは、モックで動いているスキルにだけ効く（たとえば受付が実際のモデルなら、`[判定エラー]` を書いても失敗しない）。
 
-## 送った後のやり取り（往復）
+## 担当者に渡した後
 
-問い合わせは、担当者に届いて終わりではない。担当者が返信し、本人がそれを読み、必要なら追記する。やり取りは問い合わせ1件に結びつく。対象は、担当者に送られた問い合わせ（`outcome: FILED`）だけ。
-
-### 対応状況（handlingStatus）
-
-担当者に送られた問い合わせが持つ、担当者側の進み具合。`step`（本人の入力の進行位置）とは別に持つ。
-
-| 値 | 意味 | 本人向けの画面の言葉 |
-| --- | --- | --- |
-| `OPEN` | 未対応。担当者に送られた時点の値 | 担当者の確認を待っています |
-| `IN_PROGRESS` | 対応中 | 担当者が対応しています |
-| `DONE` | 完了 | 対応が完了しました |
-
-- 担当者に送られていない問い合わせでは `null`。
-- 担当者が返信すると、`OPEN` は自動で `IN_PROGRESS` になる（`IN_PROGRESS` と `DONE` は変えない）。
-- 本人が追記すると、`DONE` は自動で `IN_PROGRESS` に戻る（終わった件に追記があったことを、担当者が見落とさないため）。
+担当者に渡した問い合わせは、担当者と本人の間で番を受け渡しながら進む。番を渡すには、相手へのメッセージが要る。
 
 ### メッセージ（messages）
 
-担当者の返信と本人の追記を、1本の時系列として持つ。
+担当者の発言と本人の追記を、1本の時系列として持つ。
 
 ```json
-{ "id": "UUID", "from": "OPERATOR", "authorName": "担当者（開発用）", "body": "本文", "createdAt": "2026-11-21T12:00:00Z" }
+{ "id": "UUID", "from": "OPERATOR", "kind": "ASK", "authorName": "担当者（開発用）", "body": "本文", "createdAt": "2026-11-21T12:00:00Z" }
 ```
 
-- `from` は `OPERATOR`（担当者の返信）か `ASKER`（本人の追記）。
+- `from` は `OPERATOR`（担当者）か `ASKER`（本人）。
+- `kind` は、担当者の発言では `ASK`（聞き返し）、`RESULT`（結果）、`DECLINE`（見送りの連絡）のいずれか。本人の追記では `NOTE`。
 - `authorName` は表示用の名前。認証を加えるまでは、設定の固定値（`inquiry.dev.operator-name`、`inquiry.dev.user-name`）。
 - 古い順に並べる。編集と削除はできない。
 
 ### 未読
 
-- **担当者側**（既存の `read`）: 本人が追記すると `read` を `false` に戻す。
-- **本人側**（`unreadReply`）: 担当者が返信すると `true`、本人がその問い合わせを取得（9）すると `false` になる。
+- **担当者側**（`read`）: 番が担当者に移るたび、また担当者の番の間に本人が追記するたびに、`false` に戻す。
+- **本人側**（`unreadReply`）: 担当者が発言すると `true`、本人がその問い合わせを取得（9）すると `false` になる。
 
-### InquiryView への追加
+### 担当者の操作
 
-| 項目 | 内容 |
+すべて、担当者に渡したことのある問い合わせが対象。そうでない問い合わせは `NOT_FOUND`。`200` で、詳細（`GET /api/operator/inquiries/{id}`）と同じ全内容を返す。
+
+| 操作 | エンドポイント | リクエスト | 実行できるとき | その後 |
+| --- | --- | --- | --- | --- |
+| 本人に聞き返す | `POST /api/operator/inquiries/{id}/replies` | `{ "kind": "ASK", "body": "1〜4000文字" }` | 担当者の番 | メッセージを足し、本人の番にする（`awaiting: ASKER_REPLY`）。区間は変えない |
+| 結果を伝える | 同上 | `{ "kind": "RESULT", "body": "1〜4000文字" }` | 担当者の番 | メッセージを足し、本人の番にする（`awaiting: RESULT_CONFIRMATION`）。区間は変えない |
+| 見送る | `POST /api/operator/inquiries/{id}/decline` | `{ "reasonKind": "KNOWN_LIMITATION", "reason": "1〜2000文字" }` | 担当者の番 | 理由をメッセージ（`kind: DECLINE`）として足し、終わる（`ending: DECLINED`）。`declined` に理由を持つ |
+| 区間を変える | `PUT /api/operator/inquiries/{id}/phase` | `{ "phase": "ACT" }` | 担当者の番 | 区間を `KNOW`、`DECIDE`、`ACT` のいずれかにする。番は変えない |
+| 置き直す | `PUT /api/operator/inquiries/{id}/placement` | `{ "type": "DO_FOR_ME", "systemId": "system-a", "functionId": "a-1" }`（どれも `null` にできる） | 終わっていない | 置き場所を変える。置いた人（`by`）は `OPERATOR` になる。種類が変わった場合は、区間を新しい種類の「担当者に渡す」の決まりに合わせる。番は変えない |
+| 既読にする | `POST /api/operator/inquiries/{id}/read` | 本文なし | いつでも | `read: true` |
+
+- `reasonKind` は `NOT_REPRODUCIBLE`（再現しない）、`KNOWN_LIMITATION`（既知の制限）、`OUT_OF_SCOPE`（対象外）、`DUPLICATE`（重複）、`OTHER`（その他）のいずれか。
+- 実行できないときは `INVALID_STATE`。入力の誤り（空の本文、範囲外の値、システムにない機能、存在しない id）は `VALIDATION`。
+- 担当者は、見送る場合を除いて、問い合わせを終わらせられない。結果を伝えた後、終わらせるのは本人（7）。
+- 以前の `PUT …/status`（未対応、対応中、完了の切り替え）は廃止した。
+
+### 本人の操作（担当者に渡した後）
+
+| 操作 | エンドポイント | 実行できるとき | その後 |
+| --- | --- | --- | --- |
+| 結果を確かめる | 7 | `awaiting: RESULT_CONFIRMATION` | 「本人が結果を確かめる」の決まりのとおり |
+| 追記する | 11 | 担当者に渡したことがあり、取り下げていない | 下の表 |
+| 取り下げる | 12 | 終わっていない | 終わる（`ending: WITHDRAWN`） |
+
+追記（11）の後は、追記したときの状態で決まる。
+
+| 追記したときの状態 | その後 |
 | --- | --- |
-| `createdAt` | 作成日時 |
-| `handlingStatus` | 上の表の値、または `null` |
-| `messages` | メッセージの配列。なければ空配列 |
-| `trace` | スキルの実行記録（下記「スキルの実行記録」）。無効なら `null` |
+| 担当者の番（`HANDLING`） | 番は変えない。担当者の側を未読に戻す |
+| 聞き返しへの返事を待っている（`ASKER_REPLY`） | 担当者の番にする（`HANDLING`） |
+| 担当者の結果を確かめている（`RESULT_CONFIRMATION`） | 担当者の番にする（「解決していない」と答えたのと同じ） |
+| 終わっている（`RESOLVED`、`ANSWERED`、`DECLINED`） | 開き直す。終わり方を消し、区間を終わる前に戻して、担当者の番にする |
+
+担当者に渡したことのない問い合わせ、取り下げた問い合わせへの追記は `INVALID_STATE`。
 
 ### 10. `GET /api/inquiries`
 
 自分（現在の利用者）が作った問い合わせの一覧（新しい順、最大50件）。
 
-`200` `{ "unreadReplyCount": 1, "items": [{ "id", "createdAt", "summary", "step", "outcome", "handlingStatus", "unreadReply", "messageCount" }] }`。`summary` は言い直しの文章、なければ元の発話の先頭80文字。
+`200` `{ "unreadReplyCount": 1, "items": [{ "id", "createdAt", "summary", "urgency", "phase", "turn", "awaiting", "ending", "handedOverAt", "unreadReply", "messageCount" }] }`。`summary` は、担当者向けの一覧と同じ決まり。`handedOverAt` は、結果を確かめている件の結果が、AI の答えか担当者の結果かを見分けるために使う（担当者に渡したことがあれば、担当者の結果）。
 
 ### 11. `POST /api/inquiries/{id}/messages`
 
-リクエスト `{ "body": "1〜4000文字" }`。本人が追記する。`outcome` が `FILED` のときだけ有効（それ以外は `INVALID_STATE`）。
+リクエスト `{ "body": "1〜4000文字" }`。本人が追記する。上の「本人の操作」の決まりのとおり。
 
-`200` InquiryView。担当者側の `read` を `false` に戻し、オペレータのストリームに event `updated` を流す。
+`200` InquiryView。
 
-### 9（変更）. `GET /api/inquiries/{id}`
+### 12. `POST /api/inquiries/{id}/withdraw`
+
+本文なし。本人が取り下げる。終わっていない問い合わせで有効（終わっていれば `INVALID_STATE`）。
+
+`200` InquiryView（`phase: CLOSED`、`ending: WITHDRAWN`）。担当者に渡したことのある問い合わせなら、担当者のストリームに `updated` を流す。
+
+### 9（補足）. `GET /api/inquiries/{id}`
 
 他人の問い合わせは `NOT_FOUND`。取得すると、その問い合わせの `unreadReply` を `false` にする。
 
-### オペレータ向けの追加
+### 状態の履歴（history）
 
-- 一覧（`GET /api/operator/inquiries`）の各件に `handlingStatus`、`messageCount` を加える。
-- 詳細（`GET /api/operator/inquiries/{id}`）に `handlingStatus`、`messages`、`trace`、`askerName`（投稿者の表示用の名前）を加える。
-- `PUT /api/operator/inquiries/{id}/status`: リクエスト `{ "status": "DONE" }`。`200` 詳細と同じ全内容。
-- `POST /api/operator/inquiries/{id}/replies`: リクエスト `{ "body": "1〜4000文字" }`。担当者が返信する。`200` 詳細と同じ全内容。本人側の `unreadReply` を `true` にする。
-- ストリーム（`GET /api/operator/stream`）に event `updated` を加える。data は一覧の1件と同じ形。本人の追記、対応状況の変更、担当者の返信で流す（別の担当者の画面を揃えるため）。
+状態が変わるたびに、1件ずつ記録する。誰の番にどれだけ時間がかかったかを後から測るため（測るのは後の段階。記録は、後から作り直せないので最初から残す）。
 
-担当者に送られていない問い合わせへの操作は、従来どおり `NOT_FOUND`。
+```json
+{ "at": "2026-11-22T03:00:00Z", "actor": "OPERATOR", "event": "ASKED_BACK", "phase": "DECIDE", "turn": "ASKER", "awaiting": "ASKER_REPLY", "ending": null }
+```
+
+- `actor` は、その変化を起こした人。`ASKER`、`AI`、`OPERATOR` のいずれか。
+- `detail` は、`PLACEMENT_CHANGED` 以外では `null`。
+- `phase`、`turn`、`awaiting`、`ending` は、変化の後の状態。
+- `event` は次のいずれか。
+
+| `event` | 起こす人 | 意味 |
+| --- | --- | --- |
+| `CREATED` | 本人 | 問い合わせができた |
+| `QUESTION_COMPOSED` | AI | 問いを組み立てた（言い直しの確認へ） |
+| `REOPENED_INTAKE` | 本人 | 入口の質問へ戻った |
+| `QUESTION_CONFIRMED` | 本人 | 問いを確かめた |
+| `ANSWERED_BY_AI` | AI | AI が答えた（本人が確かめる） |
+| `HANDED_OVER` | 本人、AI | 担当者に渡した（答えを待たずに送った、解決していないと答えた、種類の経路で渡った、業務が止まっている） |
+| `ASKED_BACK` | 担当者 | 本人に聞き返した |
+| `REPLIED` | 本人 | 聞き返しに答えた |
+| `RESULT_DELIVERED` | 担当者 | 結果を伝えた |
+| `RESOLVED` | 本人 | 解決を伝えた |
+| `DECLINED` | 担当者 | 見送った |
+| `WITHDRAWN` | 本人 | 取り下げた |
+| `REOPENED` | 本人 | 終わった件を、追記で開き直した |
+| `PHASE_CHANGED` | 担当者 | 区間を変えた |
+| `PLACEMENT_CHANGED` | 担当者 | 置き直した。この出来事だけ `detail` を持つ: `{ "before": { "type": "おかしいかもしれない", "system": "システムA", "function": null }, "after": { … } }`。値は、既定の言語の名前。決まっていなければ `null` |
+
+履歴は、担当者向けの詳細（`history`）にだけ返す。本人向けの InquiryView には含めない。番が変わらない操作（担当者の番の間の本人の追記、既読）は、履歴に入れない。
+
+### オペレータのストリーム
+
+`GET /api/operator/stream` は、担当者に初めて渡したときに event `filed`、その後に状態やメッセージが変わるたびに event `updated` を流す。data は、一覧の1件と同じ形。
 
 ### 本人向けの画面の URL
 
@@ -547,13 +632,14 @@ AI処理の内部の構成は `docs/skill-architecture.md` が正。画面との
 
 開き直したときの再開:
 
-| `step` | 画面 |
+| `awaiting` | 画面 |
 | --- | --- |
-| `INTAKE` | 答え終えた質問（`intake.entries`）の要約と、次の質問（`intake.next`）。入口の答えは1問ごとに保存されるので、続きから再開できる |
-| `STRUCTURED` | 答え終えた質問の要約と、言い直しの確認 |
-| `ANSWERING` | 進捗ストリームを購読し直す（調査をやり直す） |
-| `ANSWERED` | 調べた結果と、結果の確かめ |
-| `CLOSED` | 経過の要約、終わりの文言、`FILED` なら対応状況とやり取り |
+| `INTAKE_ANSWER` | 答え終えた質問（`intake.entries`）の要約と、次の質問（`intake.next`）。入口の答えは1問ごとに保存されるので、続きから再開できる |
+| `QUESTION_CONFIRMATION` | 答え終えた質問の要約と、言い直しの確認 |
+| `INVESTIGATION` | 進捗ストリームを購読し直す（調査をやり直す） |
+| `RESULT_CONFIRMATION` | 調べた結果、担当者とのやり取り（あれば）、結果の確かめ |
+| `HANDLING`、`ASKER_REPLY` | 経過の要約、いまの状況、やり取り、追記の入力欄 |
+| 終わっている（`null`） | 経過の要約、終わりの文言、担当者に渡したことがあればやり取り |
 
 ## スキルの実行記録（trace）
 

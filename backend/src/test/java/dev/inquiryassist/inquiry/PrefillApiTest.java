@@ -54,7 +54,7 @@ class PrefillApiTest extends ApiSupport {
         String created = create(LOOKS_WRONG_TEXT + "今日から出ません");
         String id = idOf(created);
 
-        assertThat((String) JsonPath.read(created, "$.step")).isEqualTo("STRUCTURED");
+        assertThat((String) JsonPath.read(created, "$.awaiting")).isEqualTo("QUESTION_CONFIRMATION");
         assertThat((List<String>) JsonPath.read(created, "$.intake.entries[*].questionId"))
                 .containsExactly("type", "system", "function", "since");
         assertThat((String) JsonPath.read(created, "$.intake.entries[3].kind")).isEqualTo("DETAIL");
@@ -77,10 +77,10 @@ class PrefillApiTest extends ApiSupport {
         assertThat((List<String>) JsonPath.read(created, "$.intake.entries[*].questionId"))
                 .containsExactly("type", "system", "function", "scope");
         assertThat((String) JsonPath.read(created, "$.intake.entries[3].answer.optionId")).isEqualTo("always");
-        assertThat((String) JsonPath.read(created, "$.step")).isEqualTo("INTAKE");
+        assertThat((String) JsonPath.read(created, "$.awaiting")).isEqualTo("INTAKE_ANSWER");
         assertThat((String) JsonPath.read(created, "$.intake.next.questionId")).isEqualTo("effect");
 
-        pick(id, "effect", "slow").andExpect(jsonPath("$.step").value("STRUCTURED"));
+        pick(id, "effect", "slow").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
         // 読み取りは1回だけ
         assertThat(prefillCalls()).isEqualTo(1);
     }
@@ -102,7 +102,7 @@ class PrefillApiTest extends ApiSupport {
         pick(id, "system", "job-admin");
         pick(id, "function", "posting").andExpect(jsonPath("$.intake.next.questionId").value("since"));
         pick(id, "since", "today");
-        skip(id, "note").andExpect(jsonPath("$.step").value("STRUCTURED"));
+        skip(id, "note").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
 
         assertThat(prefillCalls()).isZero();
         assertThat(usageSteps(id)).containsExactly("restater");
@@ -113,7 +113,7 @@ class PrefillApiTest extends ApiSupport {
         String id = idOf(create(LOOKS_WRONG_TEXT + "今日から", "BLOCKED"));
 
         assertThat(prefillCalls()).isZero();
-        assertThat((String) JsonPath.read(view(id), "$.outcome")).isEqualTo("FILED");
+        assertThat((String) JsonPath.read(view(id), "$.awaiting")).isEqualTo("HANDLING");
         assertThat((List<String>) JsonPath.read(view(id), "$.intake.entries[*].questionId"))
                 .containsExactly("type", "system", "function");
     }
@@ -123,7 +123,7 @@ class PrefillApiTest extends ApiSupport {
         String created = create("[質問エラー] " + LOOKS_WRONG_TEXT + "今日から");
         String id = idOf(created);
 
-        assertThat((String) JsonPath.read(created, "$.step")).isEqualTo("INTAKE");
+        assertThat((String) JsonPath.read(created, "$.awaiting")).isEqualTo("INTAKE_ANSWER");
         assertThat((String) JsonPath.read(created, "$.intake.next.questionId")).isEqualTo("since");
         assertThat(usageSteps(id)).containsExactly("reception", "interviewer");
         assertThat(jdbc.queryForObject(
@@ -133,7 +133,7 @@ class PrefillApiTest extends ApiSupport {
                         "select (usages->1->>'mock')::boolean from inquiries where id = ?::uuid", Boolean.class, id))
                 .isTrue();
         // 失敗した質問も、読み取りは1回で済んだことにして、同じ質問のために呼び直さない
-        pick(id, "since", "earlier").andExpect(jsonPath("$.step").value("STRUCTURED"));
+        pick(id, "since", "earlier").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
         assertThat(prefillCalls()).isEqualTo(1);
     }
 
@@ -146,7 +146,7 @@ class PrefillApiTest extends ApiSupport {
 
         intakeText(id, "今週からです")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.intake.entries[3].questionId").value("since"))
                 .andExpect(jsonPath("$.intake.entries[3].answer.kind").value("INFERRED"))
                 .andExpect(jsonPath("$.intake.entries[3].answer.optionId").value("this-week"));
@@ -162,7 +162,7 @@ class PrefillApiTest extends ApiSupport {
 
         // 文章は「常に」と読めるが、本人が選んだ「今回だけ」は変えない。まだ答えていない質問だけ読み取る
         intakeText(id, "常に遅いです")
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.intake.entries[3].questionId").value("scope"))
                 .andExpect(jsonPath("$.intake.entries[3].answer.kind").value("OPTION"))
                 .andExpect(jsonPath("$.intake.entries[3].answer.optionId").value("once"))
@@ -180,7 +180,7 @@ class PrefillApiTest extends ApiSupport {
 
         back(id, "scope")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("INTAKE"))
+                .andExpect(jsonPath("$.awaiting").value("INTAKE_ANSWER"))
                 .andExpect(jsonPath("$.intake.entries[*].questionId").value(contains("type", "system", "function")))
                 .andExpect(jsonPath("$.intake.next.questionId").value("scope"))
                 .andExpect(jsonPath("$.utterance").value("求人管理画面の応募者の一覧を変えてほしい。常にです"));
@@ -204,7 +204,7 @@ class PrefillApiTest extends ApiSupport {
                 .andExpect(jsonPath("$.intake.entries[*].questionId").value(contains("type", "system", "function")));
         assertThat(prefillCalls()).isEqualTo(1);
 
-        pick(id, "since", "earlier").andExpect(jsonPath("$.step").value("STRUCTURED"));
+        pick(id, "since", "earlier").andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
     }
 
     // ---- 文章で答える質問（モックは読み取らないため、聞き手を差し替えて確かめる） ----
@@ -226,7 +226,7 @@ class PrefillApiTest extends ApiSupport {
                 .containsExactly("type", "system", "function", "partner");
         assertThat((String) JsonPath.read(taken, "$.intake.entries[3].answer.kind")).isEqualTo("INFERRED");
         assertThat((String) JsonPath.read(taken, "$.intake.entries[3].answer.text")).isEqualTo("A社");
-        assertThat((String) JsonPath.read(taken, "$.step")).isEqualTo("STRUCTURED");
+        assertThat((String) JsonPath.read(taken, "$.awaiting")).isEqualTo("QUESTION_CONFIRMATION");
         assertThat((String) JsonPath.read(taken, "$.structured.summary")).contains("（対象の取引先はどこですか: A社）");
 
         // 文章にない答えは採らず、質問として聞く

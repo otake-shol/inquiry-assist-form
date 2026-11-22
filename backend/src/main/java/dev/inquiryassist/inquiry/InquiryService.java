@@ -27,6 +27,9 @@ import dev.inquiryassist.core.intake.IntakeQuestion;
 import dev.inquiryassist.core.intake.IntakeReply;
 import dev.inquiryassist.core.intake.QuestionKind;
 import dev.inquiryassist.core.intake.QuestionMismatchException;
+import dev.inquiryassist.core.lifecycle.Awaiting;
+import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
+import dev.inquiryassist.core.lifecycle.Transition;
 import dev.inquiryassist.core.skill.AnswerPipeline;
 import dev.inquiryassist.core.skill.ExplanationFailedException;
 import dev.inquiryassist.core.skill.Interview;
@@ -138,7 +141,7 @@ public class InquiryService {
      *
      * @param text 本人が書いた文章。書かなければ null（このとき AI は呼ばない）
      * @param urgency 緊急度。省くと {@code NORMAL}
-     * @return {@code INTAKE} の問い合わせ。残りの質問がなければ、問いを組み立てて {@code STRUCTURED}
+     * @return 入口の質問に答えている（{@code INTAKE_ANSWER}）問い合わせ。残りの質問がなければ、問いを組み立てて {@code QUESTION_CONFIRMATION}
      * @throws IllegalArgumentException 文章が空白のみ、または4000文字を超える場合
      * @throws ComposeFailedException 質問がなくなり、問いの組み立てで AI が失敗した場合。答えは保存済み
      */
@@ -147,6 +150,7 @@ public class InquiryService {
         AccessScope scope = users.currentScope();
         InquiryEntity inquiry =
                 new InquiryEntity(scope.userId(), urgency == null ? Urgency.NORMAL : urgency, Instant.now());
+        inquiry.apply(InquiryStateMachine.created(), Instant.now());
         if (written != null) {
             inquiry.texts.add(written);
             place(inquiry);
@@ -160,13 +164,13 @@ public class InquiryService {
      * @param id 問い合わせの識別子
      * @param reply 本人の答え
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code INTAKE} でない、または答えた質問がいま聞いている質問と違う場合
+     * @throws InvalidStateException 入口の質問に答えている状態でない、または答えた質問がいま聞いている質問と違う場合
      * @throws IllegalArgumentException 選択肢にない値、答え方が不正、書けない質問への「書かずに進む」の場合
      * @throws ComposeFailedException 問いの組み立てで AI が失敗した場合（緊急度が {@code BLOCKED} の場合を除く）。答えは保存済み
      */
     public InquiryView answerIntake(UUID id, IntakeReply reply) {
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.INTAKE);
+        requireAwaiting(inquiry, Awaiting.INTAKE_ANSWER);
         IntakeEntry entry;
         try {
             entry = planner.accept(inquiry.snapshot(), reply);
@@ -184,12 +188,12 @@ public class InquiryService {
      * @param id 問い合わせの識別子
      * @param questionId 戻る質問の識別子
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code INTAKE} でない場合
+     * @throws InvalidStateException 入口の質問に答えている状態でない場合
      * @throws IllegalArgumentException 答え終えた質問にない識別子の場合
      */
     public InquiryView back(UUID id, String questionId) {
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.INTAKE);
+        requireAwaiting(inquiry, Awaiting.INTAKE_ANSWER);
         applyBack(inquiry, questionId);
         settle(inquiry, users.currentScope());
         return presenter.toView(commit(inquiry, null));
@@ -200,15 +204,15 @@ public class InquiryService {
      *
      * @param id 問い合わせの識別子
      * @param text 本人が書いた文章
-     * @return 更新後の問い合わせ。残りの質問がなければ、問いを組み立てて {@code STRUCTURED}
-     * @throws InvalidStateException {@code INTAKE} でない場合
+     * @return 更新後の問い合わせ。残りの質問がなければ、問いを組み立てて {@code QUESTION_CONFIRMATION}
+     * @throws InvalidStateException 入口の質問に答えている状態でない場合
      * @throws IllegalArgumentException 文章が空白のみ、または4000文字を超える場合
      * @throws ComposeFailedException 質問がなくなり、問いの組み立てで AI が失敗した場合
      */
     public InquiryView writeText(UUID id, String text) {
         String written = validatedText(text, false);
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.INTAKE);
+        requireAwaiting(inquiry, Awaiting.INTAKE_ANSWER);
         inquiry.texts.add(written);
         // 新しい文章は、まだ答えていない設定の質問について、改めて読み取る
         inquiry.prefillAttempted.clear();
@@ -223,20 +227,20 @@ public class InquiryService {
      * @param id 問い合わせの識別子
      * @param urgency 変更後の緊急度
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code INTAKE} か {@code STRUCTURED} でない場合
+     * @throws InvalidStateException {@code INTAKE} か 言い直しを確かめている状態でない場合
      * @throws ComposeFailedException 入口を終えて問いを組み立てる場合に AI が失敗したとき
      */
     public InquiryView changeUrgency(UUID id, Urgency urgency) {
         InquiryEntity inquiry = load(id);
         AccessScope scope = users.currentScope();
-        if (inquiry.step == InquiryStep.STRUCTURED) {
+        InquiryStateMachine.require(inquiry.state(), Awaiting.INTAKE_ANSWER, Awaiting.QUESTION_CONFIRMATION);
+        if (inquiry.awaiting == Awaiting.QUESTION_CONFIRMATION) {
             inquiry.urgency = urgency;
             if (urgency == Urgency.BLOCKED) {
-                return presenter.toView(commit(inquiry, file(inquiry, true)));
+                return presenter.toView(commit(inquiry, handOver(inquiry, true)));
             }
             return presenter.toView(commit(inquiry, null));
         }
-        requireStep(inquiry, InquiryStep.INTAKE);
         // 組み立てに失敗して止まっている問い合わせは、緊急度を変えただけで組み立て直さない（compose で明示的にやり直す）。
         // ただし BLOCKED なら、言い直しを待たずに担当者へ送る
         boolean wasComplete = planner.next(inquiry.snapshot()) instanceof IntakeNext.Complete;
@@ -253,12 +257,12 @@ public class InquiryService {
      *
      * @param id 問い合わせの識別子
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code INTAKE} でない、または入口が終わっていない場合
+     * @throws InvalidStateException 入口の質問に答えている状態でない、または入口が終わっていない場合
      * @throws ComposeFailedException 組み立てで AI が再び失敗した場合
      */
     public InquiryView compose(UUID id) {
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.INTAKE);
+        requireAwaiting(inquiry, Awaiting.INTAKE_ANSWER);
         if (!(planner.next(inquiry.snapshot()) instanceof IntakeNext.Complete)) {
             throw new InvalidStateException("入口の質問がまだ残っています");
         }
@@ -271,7 +275,7 @@ public class InquiryService {
      * @param id 問い合わせの識別子
      * @param summary 本人が書き直した文章。AI の言い直しをそのまま確定する場合は null
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code STRUCTURED} でない場合
+     * @throws InvalidStateException 言い直しを確かめている状態でない場合
      * @throws IllegalArgumentException summary が空白のみ、または2000文字を超える場合
      */
     public InquiryView confirmStructured(UUID id, String summary) {
@@ -279,15 +283,11 @@ public class InquiryService {
             throw new IllegalArgumentException("summary は1〜" + MAX_SUMMARY_LENGTH + "文字");
         }
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.STRUCTURED);
+        requireAwaiting(inquiry, Awaiting.QUESTION_CONFIRMATION);
         inquiry.structuredConfirmed =
                 summary == null ? inquiry.structuredByAi : inquiry.structuredByAi.withSummary(summary);
-        InquiryType type = inquiry.type();
-        if (type != null && type.filesOnConfirm()) {
-            return presenter.toView(commit(inquiry, file(inquiry, false)));
-        }
-        inquiry.step = InquiryStep.ANSWERING;
-        return presenter.toView(commit(inquiry, null));
+        return presenter.toView(commit(
+                inquiry, apply(inquiry, InquiryStateMachine.confirmed(inquiry.state(), inquiry.context(null)), false)));
     }
 
     /**
@@ -296,7 +296,7 @@ public class InquiryService {
      * @param id 問い合わせの識別子
      * @param note 本人が伝えた、違う点の一言
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code STRUCTURED} でない、または残り回数が0の場合
+     * @throws InvalidStateException 言い直しを確かめている状態でない、または残り回数が0の場合
      * @throws IllegalArgumentException note が空白のみ、または1000文字を超える場合
      */
     public InquiryView revise(UUID id, String note) {
@@ -304,7 +304,7 @@ public class InquiryService {
             throw new IllegalArgumentException("note は1〜" + MAX_NOTE_LENGTH + "文字");
         }
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.STRUCTURED);
+        requireAwaiting(inquiry, Awaiting.QUESTION_CONFIRMATION);
         if (inquiry.revisionsLeft <= 0) {
             throw new InvalidStateException("言い直しを作り直せる回数を使い切りました");
         }
@@ -326,14 +326,14 @@ public class InquiryService {
      *
      * @param id 問い合わせの識別子
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code STRUCTURED} でない場合
+     * @throws InvalidStateException 言い直しを確かめている状態でない場合
      */
     public InquiryView reopen(UUID id) {
         InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.STRUCTURED);
+        requireAwaiting(inquiry, Awaiting.QUESTION_CONFIRMATION);
         inquiry.structuredByAi = null;
         inquiry.structuredConfirmed = null;
-        inquiry.step = InquiryStep.INTAKE;
+        inquiry.apply(InquiryStateMachine.reopenedIntake(inquiry.state()), Instant.now());
         if (!inquiry.intake.isEmpty()) {
             applyBack(inquiry, inquiry.intake.get(inquiry.intake.size() - 1).questionId());
         }
@@ -347,12 +347,12 @@ public class InquiryService {
      * 同じ問い合わせの生成は同時に1つだけ走らせる。
      *
      * <p>説明だけが失敗した場合は、調査と照合の結果（技術メモ、出典と照合結果、利用量）を保存したうえで
-     * 失敗を投げる。段階は {@code ANSWERING} のままで、本人向けの回答は返さない。
+     * 失敗を投げる。待っていることは {@code INVESTIGATION} のままで、本人向けの回答は返さない。
      *
      * @param id 問い合わせの識別子
      * @param progress 進捗の通知先
      * @return 完了後の問い合わせ
-     * @throws InvalidStateException {@code ANSWERING} でない、または同じ問い合わせの生成が進行中の場合
+     * @throws InvalidStateException 調査を待っている状態でない、または同じ問い合わせの生成が進行中の場合
      * @throws dev.inquiryassist.core.AiRefusalException モデルが回答を拒否した場合
      * @throws dev.inquiryassist.core.AiUnavailableException モデルを呼び出せなかった場合
      */
@@ -362,7 +362,7 @@ public class InquiryService {
         }
         try {
             InquiryEntity inquiry = load(id);
-            requireStep(inquiry, InquiryStep.ANSWERING);
+            requireAwaiting(inquiry, Awaiting.INVESTIGATION);
             AccessScope scope = users.currentScope();
             AnswerPipeline.Result result;
             long start = System.nanoTime();
@@ -393,50 +393,63 @@ public class InquiryService {
             inquiry.citations = storedCitations(result.investigation().citationResults());
             result.usages().forEach(inquiry::addUsage);
 
-            // 種類が決まっていない場合は HOW_IT_WORKS と同じ経路
-            if (InquiryType.routeOf(inquiry.type()).filesAfterAnswer(answer.grounded(), answer.answered())) {
-                return presenter.toView(commit(inquiry, file(inquiry, false)));
-            }
-            inquiry.step = InquiryStep.ANSWERED;
-            return presenter.toView(commit(inquiry, null));
+            // 種類が決まっていない場合は HOW_IT_WORKS と同じ経路（状態の遷移が決める）
+            Transition done = InquiryStateMachine.answeredByAi(
+                    inquiry.state(), inquiry.context(null), answer.grounded(), answer.answered());
+            return presenter.toView(commit(inquiry, apply(inquiry, done, false)));
         } finally {
             generating.remove(id);
         }
     }
 
     /**
-     * 本人の解決判定で問い合わせを終える。
+     * 本人が結果（AI の答え、または担当者が伝えた結果）を確かめる。解決したなら終わり、解決していなければ担当者に渡す。
      *
      * @param id 問い合わせの識別子
-     * @param resolved 解決したか。false なら起票する
+     * @param resolved 解決したか
+     * @param note まだ解決していない点（任意）。解決していない場合だけ指定でき、本人の追記としてメッセージに加える
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException {@code ANSWERED} でない場合
+     * @throws InvalidStateException 結果を確かめている状態でない場合
+     * @throws IllegalArgumentException note が空白のみ、4000文字を超える、または解決したのに指定された場合
      */
-    public InquiryView resolve(UUID id, boolean resolved) {
-        InquiryEntity inquiry = load(id);
-        requireStep(inquiry, InquiryStep.ANSWERED);
-        if (resolved) {
-            inquiry.step = InquiryStep.CLOSED;
-            inquiry.outcome = InquiryOutcome.SELF_RESOLVED;
-            return presenter.toView(commit(inquiry, null));
+    public InquiryView resolve(UUID id, boolean resolved, String note) {
+        if (note != null && resolved) {
+            throw new IllegalArgumentException("note は、解決していない場合だけ指定できます");
         }
-        return presenter.toView(commit(inquiry, file(inquiry, false)));
+        String trimmed = note == null ? null : MessageBodies.validated(note);
+        InquiryEntity inquiry = load(id);
+        Transition transition = InquiryStateMachine.resolved(inquiry.state(), inquiry.context(null), resolved);
+        if (trimmed != null) {
+            inquiry.addMessage(MessageAuthor.ASKER, MessageKind.NOTE, properties.dev().userName(), trimmed, Instant.now());
+        }
+        return presenter.toView(commit(inquiry, apply(inquiry, transition, false)));
     }
 
     /**
-     * 答えを待たずに担当者に送る。問いを確かめた後に限る（{@link InquiryEntity#canSendNow}）。
+     * 答えを待たずに担当者に送る。問いを確かめた後に限る（{@link InquiryStateMachine#canSendNow}）。
      *
      * @param id 問い合わせの識別子
      * @return 更新後の問い合わせ
-     * @throws InvalidStateException いま送れない場合（問いの確認前、または終了済み）
+     * @throws InvalidStateException いま送れない場合
      */
     public InquiryView sendNow(UUID id) {
         InquiryEntity inquiry = load(id);
-        IntakeNext next = inquiry.step == InquiryStep.INTAKE ? planner.next(inquiry.snapshot()) : null;
-        if (!inquiry.canSendNow(next)) {
-            throw new InvalidStateException("いまは担当者に送れません（現在: " + inquiry.step + "）");
-        }
-        return presenter.toView(commit(inquiry, file(inquiry, true)));
+        IntakeNext next = inquiry.awaiting == Awaiting.INTAKE_ANSWER ? planner.next(inquiry.snapshot()) : null;
+        Transition transition = InquiryStateMachine.sentNow(inquiry.state(), inquiry.context(next));
+        return presenter.toView(commit(inquiry, apply(inquiry, transition, true)));
+    }
+
+    /**
+     * 本人が取り下げる。終わっていない問い合わせで、どの時点でも有効。
+     *
+     * @param id 問い合わせの識別子
+     * @return 更新後の問い合わせ
+     * @throws InvalidStateException 終わっている場合
+     */
+    public InquiryView withdraw(UUID id) {
+        InquiryEntity inquiry = load(id);
+        Transition transition = InquiryStateMachine.withdrawn(inquiry.state());
+        return presenter.toView(commit(inquiry, apply(inquiry, transition, false)));
     }
 
     /**
@@ -450,6 +463,8 @@ public class InquiryService {
         InquiryEntity inquiry = load(id);
         if (inquiry.askerUnreadReply) {
             repository.clearUnreadReply(id);
+            // 返す表現では、読んだことになっている
+            inquiry.askerUnreadReply = false;
         }
         return presenter.toView(inquiry);
     }
@@ -468,39 +483,37 @@ public class InquiryService {
                                 e.id,
                                 e.createdAt,
                                 presenter.summaryOf(e),
-                                e.step,
-                                e.outcome,
-                                e.handlingStatus,
+                                e.urgency,
+                                e.phase,
+                                e.turn,
+                                e.awaiting,
+                                e.ending,
+                                e.handedOverAt,
                                 e.askerUnreadReply,
                                 e.messages.size()))
                         .toList());
     }
 
     /**
-     * 担当者に送った後の問い合わせに、本人が追記する。担当者側は未読に戻り、完了していた場合は対応中に戻る
-     * （終わった件に追記があったことを、担当者が見落とさないため）。オペレータの画面へ更新を知らせる。
+     * 担当者に渡した後の問い合わせに、本人が追記する。追記したときの状態で、その後が決まる
+     * （担当者の番なら番は変わらず、聞き返しへの返事なら担当者の番に、結果への追記なら担当者の番に、終わった件なら開き直す）。
+     * 担当者の側は未読に戻る。
      *
      * @param id 問い合わせの識別子
      * @param body 本文。前後の空白を除いて1〜4000文字
      * @return 追記後の問い合わせ
      * @throws IllegalArgumentException 本文が空、または長すぎる場合
      * @throws InquiryNotFoundException 存在しない、または他人の問い合わせの場合
-     * @throws InvalidStateException 担当者に送られていない（{@code FILED} でない）場合
+     * @throws InvalidStateException 担当者に渡したことがない、または取り下げた場合
      */
     public InquiryView addMessage(UUID id, String body) {
         String trimmed = MessageBodies.validated(body);
         InquiryEntity inquiry = load(id);
-        if (inquiry.outcome != InquiryOutcome.FILED) {
-            throw new InvalidStateException("担当者に送られた問い合わせにだけ追記できます");
-        }
-        inquiry.addMessage(MessageAuthor.ASKER, properties.dev().userName(), trimmed, Instant.now());
+        Transition transition = InquiryStateMachine.noted(inquiry.state(), inquiry.context(null));
+        inquiry.addMessage(MessageAuthor.ASKER, MessageKind.NOTE, properties.dev().userName(), trimmed, Instant.now());
+        // 担当者の番の間の追記は番が変わらないので、遷移では未読に戻らない。どの場合も、担当者が見落とさないよう戻す
         inquiry.readAt = null;
-        if (inquiry.handlingStatus == HandlingStatus.DONE) {
-            inquiry.handlingStatus = HandlingStatus.IN_PROGRESS;
-        }
-        InquiryEntity saved = commit(inquiry, null);
-        publishUpdated(saved);
-        return presenter.toView(saved);
+        return presenter.toView(commit(inquiry, apply(inquiry, transition, false)));
     }
 
     /**
@@ -545,7 +558,7 @@ public class InquiryService {
             log.warn("言い直しが失敗しました id={}", inquiry.id, e);
             inquiry.addUsage(new SkillUsage(Skill.RESTATER, failedUsageOf(e, Skill.RESTATER), true, millisSince(start)));
             if (inquiry.urgency == Urgency.BLOCKED) {
-                return presenter.toView(commit(inquiry, file(inquiry, true)));
+                return presenter.toView(commit(inquiry, handOver(inquiry, true)));
             }
             commit(inquiry, null);
             throw new ComposeFailedException(inquiry.id, e);
@@ -553,9 +566,9 @@ public class InquiryService {
         inquiry.structuredByAi = result.value();
         inquiry.addUsage(Skill.RESTATER, result.usage(), millisSince(start));
         if (inquiry.urgency == Urgency.BLOCKED) {
-            return presenter.toView(commit(inquiry, file(inquiry, true)));
+            return presenter.toView(commit(inquiry, handOver(inquiry, true)));
         }
-        inquiry.step = InquiryStep.STRUCTURED;
+        inquiry.apply(InquiryStateMachine.composed(inquiry.state()), Instant.now());
         return presenter.toView(commit(inquiry, null));
     }
 
@@ -713,13 +726,23 @@ public class InquiryService {
         };
     }
 
-    /** 起票の状態にし、通知の内容を返す。通知は保存と同じトランザクションで {@link #commit} が出す。 */
-    private FilingNotifier.FilingNotice file(InquiryEntity inquiry, boolean immediately) {
-        inquiry.step = InquiryStep.CLOSED;
-        inquiry.outcome = InquiryOutcome.FILED;
+    /** 業務が止まっている、または答えを待たずに送る場合に、担当者に渡す（入口の途中か、言い直しの確認中から）。 */
+    private FilingNotifier.FilingNotice handOver(InquiryEntity inquiry, boolean immediately) {
+        Transition transition = InquiryStateMachine.handedOverBecauseBlocked(inquiry.state(), inquiry.context(null));
+        return apply(inquiry, transition, immediately);
+    }
+
+    /**
+     * 遷移を反映する。担当者に初めて渡す遷移なら、通知の内容を返す（通知は保存と同じトランザクションで {@link #commit} が出す）。
+     * それ以外は null。
+     */
+    private FilingNotifier.FilingNotice apply(InquiryEntity inquiry, Transition transition, boolean immediately) {
+        boolean first = inquiry.handedOverAt == null && transition.handsOver();
+        inquiry.apply(transition, Instant.now());
+        if (!first) {
+            return null;
+        }
         inquiry.sentImmediately = immediately;
-        inquiry.filedAt = Instant.now();
-        inquiry.handlingStatus = HandlingStatus.OPEN;
         Placement placement = inquiry.placement();
         return new FilingNotifier.FilingNotice(
                 inquiry.id,
@@ -736,7 +759,8 @@ public class InquiryService {
     }
 
     /**
-     * 保存する。起票があれば保存の確定前に通知し、通知が失敗したら保存も取り消す。
+     * 保存する。担当者に初めて渡す場合は保存の確定前に通知し、通知が失敗したら保存も取り消す。
+     * すでに担当者に渡したことのある問い合わせの変更は、オペレータの画面へ更新を知らせる。
      * 他の操作との競合は {@link InvalidStateException} にする。
      */
     private InquiryEntity commit(InquiryEntity inquiry, FilingNotifier.FilingNotice notice) {
@@ -754,12 +778,14 @@ public class InquiryService {
             throw new InvalidStateException("他の操作と競合しました。最新の状態を取得し直してください");
         }
         if (notice != null) {
-            // 保存の確定後に配る。配信側の失敗で、確定済みの起票を失敗にしない
+            // 保存の確定後に配る。配信側の失敗で、確定済みの更新を失敗にしない
             try {
                 events.publishEvent(new InquiryFiledEvent(presenter.toItem(saved)));
             } catch (RuntimeException e) {
-                log.error("起票の通知イベントの配信に失敗 id={}", saved.id, e);
+                log.error("担当者への通知イベントの配信に失敗 id={}", saved.id, e);
             }
+        } else if (saved.handedOverAt != null) {
+            publishUpdated(saved);
         }
         return saved;
     }
@@ -781,11 +807,8 @@ public class InquiryService {
                 .orElseThrow(() -> new InquiryNotFoundException(id));
     }
 
-    private static void requireStep(InquiryEntity inquiry, InquiryStep expected) {
-        if (inquiry.step != expected) {
-            throw new InvalidStateException(
-                    "この操作は " + expected + " でのみ実行できます（現在: " + inquiry.step + "）");
-        }
+    private static void requireAwaiting(InquiryEntity inquiry, Awaiting expected) {
+        InquiryStateMachine.require(inquiry.state(), expected);
     }
 
     private static StoredCitation toStored(CitationVerifier.Result result) {

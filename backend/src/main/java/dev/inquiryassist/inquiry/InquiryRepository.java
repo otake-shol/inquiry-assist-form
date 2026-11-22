@@ -12,11 +12,11 @@ import org.springframework.transaction.annotation.Transactional;
 /** 問い合わせ記録の永続化。 */
 interface InquiryRepository extends JpaRepository<InquiryEntity, UUID> {
 
-    /** 担当者に送られた問い合わせを新しい順に返す。 */
-    List<InquiryEntity> findByOutcomeOrderByFiledAtDesc(InquiryOutcome outcome);
+    /** 担当者に渡したことのある問い合わせを、初めて渡した新しい順に返す。 */
+    List<InquiryEntity> findByHandedOverAtIsNotNullOrderByHandedOverAtDesc();
 
-    /** 担当者に送られた未読の件数を返す。 */
-    long countByOutcomeAndReadAtIsNull(InquiryOutcome outcome);
+    /** 担当者に渡したことのある問い合わせのうち、担当者の側が未読のものの件数を返す。 */
+    long countByHandedOverAtIsNotNullAndReadAtIsNull();
 
     /** 本人が作った問い合わせを新しい順に、最大50件返す。 */
     List<InquiryEntity> findTop50ByAskerIdOrderByCreatedAtDesc(String askerId);

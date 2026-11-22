@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { makeView } from "../test/fakes.ts";
+import {
+  CONFIRMATION_STATE,
+  INVESTIGATION_STATE,
+  RESULT_STATE,
+  makeView,
+} from "../test/fakes.ts";
 import { createInitialState, flowReducer, type FlowState } from "./reducer.ts";
 
 const initialState = createInitialState();
@@ -25,15 +30,15 @@ describe("flowReducer", () => {
     });
   });
 
-  it("ANSWERING 以外の view を受け取ると進捗が消える", () => {
+  it("調べている間（INVESTIGATION）以外の view を受け取ると進捗が消える", () => {
     const streaming = flowReducer(
-      { ...initialState, view: makeView({ step: "ANSWERING" }) },
+      { ...initialState, view: makeView(INVESTIGATION_STATE) },
       { type: "streamProgress", message: "検索中" },
     );
     expect(streaming.progress).toEqual(["検索中"]);
     const done = flowReducer(streaming, {
       type: "viewReceived",
-      view: makeView({ step: "ANSWERED" }),
+      view: makeView(RESULT_STATE),
     });
     expect(done.progress).toEqual([]);
   });
@@ -125,12 +130,12 @@ describe("flowReducer", () => {
   it("開き直した問い合わせは、そのまま表示する状態になる", () => {
     const resumed = flowReducer(
       { ...initialState, resume: "loading" },
-      { type: "inquiryResumed", view: makeView({ step: "STRUCTURED" }) },
+      { type: "inquiryResumed", view: makeView(CONFIRMATION_STATE) },
     );
     expect(resumed).toMatchObject({
       resume: "idle",
       progress: [],
-      view: { step: "STRUCTURED" },
+      view: { awaiting: "QUESTION_CONFIRMATION" },
     });
   });
 

@@ -48,13 +48,13 @@ class InquiryApiTest extends ApiSupport {
         pick(id, "system", "reports").andExpect(status().isOk());
         pick(id, "q1", "o1").andExpect(status().isOk());
         ResultActions last = note == null ? skip(id, "note") : write(id, "note", note);
-        last.andExpect(status().isOk()).andExpect(jsonPath("$.step").value("STRUCTURED"));
+        last.andExpect(status().isOk()).andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
         return id;
     }
 
     private String pushToAnswering(String type, String note) throws Exception {
         String id = pushToStructured(type, note);
-        confirm(id).andExpect(status().isOk()).andExpect(jsonPath("$.step").value("ANSWERING"));
+        confirm(id).andExpect(status().isOk()).andExpect(jsonPath("$.awaiting").value("INVESTIGATION"));
         return id;
     }
 
@@ -105,12 +105,12 @@ class InquiryApiTest extends ApiSupport {
     @Test
     void 使い方を知りたいは本人が解決と判定すると自己解決で終わる() throws Exception {
         String id = pushToStructured("HOW_TO", null);
-        confirm(id).andExpect(jsonPath("$.step").value("ANSWERING"));
+        confirm(id).andExpect(jsonPath("$.awaiting").value("INVESTIGATION"));
 
         String done = doneView(stream(id));
 
-        assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("ANSWERED");
-        assertThat((String) JsonPath.read(done, "$.outcome")).isEqualTo("IN_PROGRESS");
+        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
+        assertThat((Object) JsonPath.read(done, "$.ending")).isNull();
         assertThat((Boolean) JsonPath.read(done, "$.answer.grounded")).isTrue();
         assertThat((Boolean) JsonPath.read(done, "$.answer.answered")).isTrue();
         assertThat((List<?>) JsonPath.read(done, "$.answer.citations")).hasSize(2);
@@ -121,10 +121,10 @@ class InquiryApiTest extends ApiSupport {
 
         resolve(id, true)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("CLOSED"))
-                .andExpect(jsonPath("$.outcome").value("SELF_RESOLVED"));
+                .andExpect(jsonPath("$.phase").value("CLOSED"))
+                .andExpect(jsonPath("$.ending").value("RESOLVED"));
         assertThat(notifier.notices()).isEmpty();
-        assertThat(row(id).get("filed_at")).isNull();
+        assertThat(row(id).get("handed_over_at")).isNull();
     }
 
     @Test
@@ -134,10 +134,10 @@ class InquiryApiTest extends ApiSupport {
 
         resolve(id, false)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("CLOSED"))
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.turn").value("OPERATOR"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(false))
-                .andExpect(jsonPath("$.handlingStatus").value("OPEN"));
+                .andExpect(jsonPath("$.turn").value("OPERATOR"));
 
         assertThat(notifier.notices()).singleElement().satisfies(n -> {
             assertThat(n.inquiryId().toString()).isEqualTo(id);
@@ -149,8 +149,8 @@ class InquiryApiTest extends ApiSupport {
             assertThat(n.memo().findings()).isNotEmpty();
         });
         Map<String, Object> row = row(id);
-        assertThat(row.get("filed_at")).isNotNull();
-        assertThat(row.get("step")).isEqualTo("CLOSED");
+        assertThat(row.get("handed_over_at")).isNotNull();
+        assertThat(row.get("awaiting")).isEqualTo("HANDLING");
         assertThat(row.get("mock")).isEqualTo(true);
         assertThat(row.get("asker_id")).isEqualTo("local-user");
         // 押して答えただけなので、受付は呼ばれない。聞き手、言い直し、調査、説明をスキルの識別子で追記している
@@ -163,15 +163,15 @@ class InquiryApiTest extends ApiSupport {
 
         String done = doneView(stream(id));
 
-        assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("CLOSED");
-        assertThat((String) JsonPath.read(done, "$.outcome")).isEqualTo("FILED");
+        assertThat((String) JsonPath.read(done, "$.turn")).isEqualTo("OPERATOR");
+        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("HANDLING");
         assertThat((Boolean) JsonPath.read(done, "$.sentImmediately")).isFalse();
         assertThat((String) JsonPath.read(done, "$.answer.askerExplanation")).contains("現在の実装では");
         assertThat(notifier.notices()).singleElement().satisfies(n -> {
             assertThat(n.type()).isEqualTo(InquiryType.LOOKS_WRONG);
             assertThat(n.memo().nextChecks()).isNotEmpty();
         });
-        assertThat(row(id).get("filed_at")).isNotNull();
+        assertThat(row(id).get("handed_over_at")).isNotNull();
     }
 
     @Test
@@ -182,11 +182,11 @@ class InquiryApiTest extends ApiSupport {
         String done = doneView(stream(selfService));
         stream(asked);
 
-        assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("ANSWERED");
+        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
         assertThat((Boolean) JsonPath.read(done, "$.answer.grounded")).isTrue();
         assertThat((Boolean) JsonPath.read(done, "$.answer.answered")).isTrue();
-        resolve(selfService, true).andExpect(jsonPath("$.outcome").value("SELF_RESOLVED"));
-        resolve(asked, false).andExpect(jsonPath("$.outcome").value("FILED"));
+        resolve(selfService, true).andExpect(jsonPath("$.ending").value("RESOLVED"));
+        resolve(asked, false).andExpect(jsonPath("$.awaiting").value("HANDLING"));
         assertThat(notifier.notices())
                 .singleElement()
                 .satisfies(n -> assertThat(n.type()).isEqualTo(InquiryType.DO_FOR_ME));
@@ -200,8 +200,8 @@ class InquiryApiTest extends ApiSupport {
 
         for (String id : List.of(ungrounded, offTopic, ghost)) {
             String done = doneView(stream(id));
-            assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("CLOSED");
-            assertThat((String) JsonPath.read(done, "$.outcome")).isEqualTo("FILED");
+            assertThat((String) JsonPath.read(done, "$.turn")).isEqualTo("OPERATOR");
+            assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("HANDLING");
             assertThat((Boolean) JsonPath.read(done, "$.sentImmediately")).isFalse();
         }
         assertThat(notifier.notices()).hasSize(3);
@@ -213,8 +213,8 @@ class InquiryApiTest extends ApiSupport {
 
         confirm(id)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("CLOSED"))
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.turn").value("OPERATOR"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(false))
                 .andExpect(jsonPath("$.answer").value(nullValue()));
 
@@ -233,15 +233,64 @@ class InquiryApiTest extends ApiSupport {
         unknown(id, "q1");
         // すべてわからないと答え、文章もないので、補足は省けない
         write(id, "note", "状況の説明")
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.type").value(nullValue()));
-        confirm(id).andExpect(jsonPath("$.step").value("ANSWERING"));
+        confirm(id).andExpect(jsonPath("$.awaiting").value("INVESTIGATION"));
 
         String done = doneView(stream(id));
 
-        assertThat((String) JsonPath.read(done, "$.step")).isEqualTo("ANSWERED");
+        assertThat((String) JsonPath.read(done, "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
         assertThat((Object) JsonPath.read(done, "$.type")).isNull();
         assertThat((String) JsonPath.read(done, "$.structured.summary")).startsWith("相談したいことがある。");
+    }
+
+    // ---- 状態（区間、番、待っていること） ----
+
+    @Test
+    void 入口からAIの答えまでの各時点の状態は契約書の表のとおり() throws Exception {
+        String created = start();
+        String id = idOf(created);
+        assertState(created, "INTAKE", "ASKER", "INTAKE_ANSWER", null);
+
+        pick(id, "type", "HOW_TO");
+        pick(id, "system", "reports");
+        pick(id, "q1", "o1");
+        String composed = text(skip(id, "note").andExpect(status().isOk()));
+        assertState(composed, "INTAKE", "ASKER", "QUESTION_CONFIRMATION", null);
+
+        String confirmed = text(confirm(id).andExpect(status().isOk()));
+        assertState(confirmed, "KNOW", "AI", "INVESTIGATION", null);
+
+        assertState(doneView(stream(id)), "KNOW", "ASKER", "RESULT_CONFIRMATION", null);
+        // 入口へ戻れば、受付の状態に戻る
+        String other = pushToStructured("HOW_TO", null);
+        assertState(text(reopen(other).andExpect(status().isOk())), "INTAKE", "ASKER", "INTAKE_ANSWER", null);
+    }
+
+    private static void assertState(String view, String phase, String turn, String awaiting, String ending) {
+        assertThat((String) JsonPath.read(view, "$.phase")).isEqualTo(phase);
+        assertThat((Object) JsonPath.read(view, "$.turn")).isEqualTo(turn);
+        assertThat((Object) JsonPath.read(view, "$.awaiting")).isEqualTo(awaiting);
+        assertThat((Object) JsonPath.read(view, "$.ending")).isEqualTo(ending);
+    }
+
+    @Test
+    void 種類が決まっていない問い合わせを渡すと区間はKNOW_渡しても終わらない() throws Exception {
+        String id = idOf(start());
+        unknown(id, "type");
+        unknown(id, "system");
+        unknown(id, "q1");
+        write(id, "note", "状況の説明");
+        confirm(id);
+
+        assertState(text(sendNow(id).andExpect(status().isOk())), "KNOW", "OPERATOR", "HANDLING", null);
+    }
+
+    @Test
+    void やってほしいをAIが手順を示せず渡すと区間はDECIDE() throws Exception {
+        String id = pushToAnswering("DO_FOR_ME", "[根拠なし]");
+
+        assertState(doneView(stream(id)), "DECIDE", "OPERATOR", "HANDLING", null);
     }
 
     // ---- タグの振る舞い（HTTP 経由） ----
@@ -283,8 +332,8 @@ class InquiryApiTest extends ApiSupport {
         var events = events(stream(id));
 
         assertFailedLast(events, "AI_UNAVAILABLE");
-        mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.step").value("ANSWERING"));
-        sendNow(id).andExpect(jsonPath("$.outcome").value("FILED"));
+        mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.awaiting").value("INVESTIGATION"));
+        sendNow(id).andExpect(jsonPath("$.awaiting").value("HANDLING"));
     }
 
     @Test
@@ -310,7 +359,7 @@ class InquiryApiTest extends ApiSupport {
 
         assertThat(body).contains(id);
         String view = view(id);
-        assertThat((String) JsonPath.read(view, "$.step")).isEqualTo("INTAKE");
+        assertThat((String) JsonPath.read(view, "$.awaiting")).isEqualTo("INTAKE_ANSWER");
         assertThat((Boolean) JsonPath.read(view, "$.intake.complete")).isTrue();
         assertThat((Object) JsonPath.read(view, "$.intake.next")).isNull();
         assertThat((Boolean) JsonPath.read(view, "$.canSendNow")).isTrue();
@@ -343,7 +392,7 @@ class InquiryApiTest extends ApiSupport {
         back(id, "note").andExpect(status().isOk()).andExpect(jsonPath("$.canSendNow").value(false));
         write(id, "note", "直しました")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.canSendNow").value(false));
     }
 
@@ -355,8 +404,8 @@ class InquiryApiTest extends ApiSupport {
 
         sendNow(id)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("CLOSED"))
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.turn").value("OPERATOR"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(true));
 
         assertThat(notifier.notices()).singleElement().satisfies(n -> {
@@ -386,12 +435,12 @@ class InquiryApiTest extends ApiSupport {
             assertThat((Boolean) JsonPath.read(view(id), "$.canSendNow")).isTrue();
             sendNow(id)
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.step").value("CLOSED"))
-                    .andExpect(jsonPath("$.outcome").value("FILED"))
+                    .andExpect(jsonPath("$.turn").value("OPERATOR"))
+                    .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                     .andExpect(jsonPath("$.sentImmediately").value(true))
                     .andExpect(jsonPath("$.canSendNow").value(false));
             assertThat(row(id).get("sent_immediately")).isEqualTo(true);
-            assertThat(row(id).get("filed_at")).isNotNull();
+            assertThat(row(id).get("handed_over_at")).isNotNull();
         }
         // 確定した後の問い合わせは、整形後の問いを持って通知される。回答後に送った分は技術メモを持つ
         assertThat(notifier.notices()).hasSize(2).allSatisfy(n -> {
@@ -411,7 +460,7 @@ class InquiryApiTest extends ApiSupport {
         revise(id, "2回目").andExpect(jsonPath("$.revisionsLeft").value(0)).andExpect(jsonPath("$.canSendNow").value(true));
 
         sendNow(id)
-                .andExpect(jsonPath("$.outcome").value("FILED"))
+                .andExpect(jsonPath("$.awaiting").value("HANDLING"))
                 .andExpect(jsonPath("$.sentImmediately").value(true));
         // 送った時点の言い直しで通知される
         assertThat(notifier.notices())
@@ -513,7 +562,7 @@ class InquiryApiTest extends ApiSupport {
         String body = text(mvc.perform(post("/api/inquiries").contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isCreated()));
 
-        assertThat((String) JsonPath.read(body, "$.step")).isEqualTo("INTAKE");
+        assertThat((String) JsonPath.read(body, "$.awaiting")).isEqualTo("INTAKE_ANSWER");
         assertThat((String) JsonPath.read(body, "$.intake.next.questionId")).isEqualTo("type");
         assertThat((String) JsonPath.read(body, "$.urgency")).isEqualTo("NORMAL");
     }
@@ -532,7 +581,7 @@ class InquiryApiTest extends ApiSupport {
                                 + "\"expectedResult\":null,\"urgency\":\"NORMAL\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION"));
-        mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.step").value("STRUCTURED"));
+        mvc.perform(get("/api/inquiries/" + id)).andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"));
     }
 
     @Test
@@ -553,7 +602,7 @@ class InquiryApiTest extends ApiSupport {
         String id = toStructured(text, null);
 
         confirmSummary(id, "自分で書き直した文章")
-                .andExpect(jsonPath("$.step").value("ANSWERING"))
+                .andExpect(jsonPath("$.awaiting").value("INVESTIGATION"))
                 .andExpect(jsonPath("$.structured.summary").value("自分で書き直した文章"))
                 .andExpect(jsonPath("$.structured.goal").value(text));
         String done = doneView(stream(id));
@@ -655,7 +704,7 @@ class InquiryApiTest extends ApiSupport {
 
         revise(id, "消えたのは一昨日から")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.revisionsLeft").value(1))
                 .andExpect(jsonPath("$.structured.summary").value(base + " 補足: 消えたのは一昨日から"))
                 .andExpect(jsonPath("$.structured.goal").value(SPEC));
@@ -675,7 +724,7 @@ class InquiryApiTest extends ApiSupport {
                         id))
                 .isEqualTo(3); // 言い直し1回と作り直し2回
         // 使い切っても、そのまま確定して先へ進める
-        confirm(id).andExpect(jsonPath("$.step").value("ANSWERING"));
+        confirm(id).andExpect(jsonPath("$.awaiting").value("INVESTIGATION"));
     }
 
     @Test
@@ -694,7 +743,7 @@ class InquiryApiTest extends ApiSupport {
 
         reopen(id)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.step").value("INTAKE"))
+                .andExpect(jsonPath("$.awaiting").value("INTAKE_ANSWER"))
                 .andExpect(jsonPath("$.structured").value(nullValue()))
                 .andExpect(jsonPath("$.intake.next.questionId").value("note"))
                 .andExpect(jsonPath("$.intake.next.kind").value("NOTE"))
@@ -704,10 +753,10 @@ class InquiryApiTest extends ApiSupport {
                 .andExpect(jsonPath("$.revisionsLeft").value(1));
 
         write(id, "note", "その他")
-                .andExpect(jsonPath("$.step").value("STRUCTURED"))
+                .andExpect(jsonPath("$.awaiting").value("QUESTION_CONFIRMATION"))
                 .andExpect(jsonPath("$.revisionsLeft").value(1))
                 .andExpect(jsonPath("$.structured.summary").value(org.hamcrest.Matchers.containsString("その他")));
-        confirm(id).andExpect(jsonPath("$.step").value("ANSWERING"));
+        confirm(id).andExpect(jsonPath("$.awaiting").value("INVESTIGATION"));
     }
 
     @Test
@@ -749,6 +798,6 @@ class InquiryApiTest extends ApiSupport {
         // 調査の進捗3件に続けて、根拠の確認と説明のまとめ
         assertThat(events.subList(0, 5).stream().map(e -> (String) JsonPath.read(e.getValue(), "$.message")).toList())
                 .endsWith("根拠を確かめています", "答えをまとめています");
-        assertThat((String) JsonPath.read(events.get(events.size() - 1).getValue(), "$.step")).isEqualTo("ANSWERED");
+        assertThat((String) JsonPath.read(events.get(events.size() - 1).getValue(), "$.awaiting")).isEqualTo("RESULT_CONFIRMATION");
     }
 }

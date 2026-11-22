@@ -88,44 +88,30 @@ export const AI_ERROR_SEND_NOW_HINT =
 export const AI_ERROR_BEFORE_CREATE_HINT =
   "内容を少し変えるか、時間をおいてもう一度送信してください。";
 
-/** 終わりの文言。 */
-export interface ClosingText {
+/** 担当者に渡した直後の案内。 */
+export interface HandoverText {
   lead: string;
   /** 送った後の案内（API の filedGuidance）。 */
   guidance: string | null;
 }
 
 /**
- * 結果ごとの終わりの文言を決める。
- * @param view 終了した問い合わせ
+ * 担当者に渡したことを伝える案内を決める。渡し方（業務が止まっている、答えを待たずに送った、
+ * 調べた結果を添えた、入力を添えた）で、添えた内容の言い方が変わる。
+ * @param view 担当者に渡したことのある問い合わせ
  * @param filedGuidance 担当者に送った後の案内文（API の設定）
  */
-export function closingText(
+export function handoverText(
   view: InquiryView,
   filedGuidance: string | null,
-): ClosingText {
-  switch (view.outcome) {
-    case "SELF_RESOLVED":
-      return {
-        lead: "解決してよかったです。この内容は記録しておきます。",
-        guidance: null,
-      };
-    case "FILED":
-      return {
-        lead:
-          view.urgency === "BLOCKED" && view.sentImmediately
-            ? "担当者にすぐ届けました。書いていただいた内容をそのまま添えています。"
-            : view.sentImmediately
-              ? "担当者に送りました。書いていただいた内容をそのまま添えています。"
-              : view.answer !== null
-                ? "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。"
-                : "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。",
-        guidance: filedGuidance,
-      };
-    default:
-      return {
-        lead: "この問い合わせは終了しました。",
-        guidance: null,
-      };
-  }
+): HandoverText {
+  const lead =
+    view.urgency === "BLOCKED" && view.sentImmediately
+      ? "担当者にすぐ届けました。書いていただいた内容をそのまま添えています。"
+      : view.sentImmediately
+        ? "担当者に送りました。書いていただいた内容をそのまま添えています。"
+        : view.answer !== null
+          ? "担当者に送りました。ここまでの内容と調べた結果を添えています。同じ説明をもう一度する必要はありません。"
+          : "担当者に送りました。ここまでの内容を添えています。同じ説明をもう一度する必要はありません。";
+  return { lead, guidance: filedGuidance };
 }

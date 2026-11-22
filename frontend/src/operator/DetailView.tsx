@@ -1,38 +1,71 @@
+import { useEffect, useRef, useState } from "react";
+import type { PlacementInput, ReplyKind } from "../api/client.ts";
 import type {
-  HandlingStatus,
+  ConfigSystem,
+  DeclineReasonKind,
   OperatorDetail,
+  Phase,
   Placement,
   SystemOption,
+  TypeOption,
 } from "../api/types.ts";
-import { MessageForm, MessageThread } from "../components/Exchange.tsx";
+import { MessageThread } from "../components/Exchange.tsx";
 import { TracePanel } from "../components/TracePanel.tsx";
 import { SOURCE_TYPE_LABELS } from "../text/labels.ts";
 import {
-  HANDLING_LABELS,
+  DeclineForm,
+  HistoryList,
+  PhaseSwitch,
+  PlacementForm,
+  SendToAsker,
+} from "./Controls.tsx";
+import {
   OP_TEXT,
   formatFiledAt,
   opAnswerLabel,
   opUrgencyLabel,
+  stateLine,
+  waitingText,
 } from "./labels.ts";
+import type { DropIntent } from "./state.ts";
 
-/** 対応状況の切り替えボタンの並び順。 */
-const STATUS_ORDER: HandlingStatus[] = ["OPEN", "IN_PROGRESS", "DONE"];
+/** カードをドラッグで落としたときの、入力欄へのフォーカスの要求。 */
+export interface FocusRequest {
+  /** 問い合わせの id */
+  id: string;
+  /** 「本人に送る」か「見送る」の入力欄 */
+  target: DropIntent;
+  /** 同じ要求を続けて受けても、もう一度フォーカスを移せるようにする通し番号 */
+  token: number;
+}
 
 /** DetailView の props。 */
 interface DetailViewProps {
   detail: OperatorDetail;
   /** 設定の緊急度の選択肢（緊急度の名前に使う。取得前は空） */
   urgencies: SystemOption[];
+  /** 設定の種類（置き直しの選択肢。取得前は空） */
+  types: TypeOption[];
+  /** 設定のシステム（置き直しの選択肢。取得前は空） */
+  systems: ConfigSystem[];
   /** スキルの実行記録を最下部に出すか（`GET /api/config` の `trace`） */
   trace: boolean;
-  /** 状況の切り替えや返信を送っている最中か */
+  /** 操作を送っている最中か */
   busy: boolean;
   /** 直近の操作が失敗したか */
   failed: boolean;
-  /** 対応状況を切り替える。成功したら true */
-  onStatus: (status: HandlingStatus) => Promise<boolean>;
-  /** 本人に返信する。成功したら true */
-  onReply: (body: string) => Promise<boolean>;
+  /** ドラッグで落とされたときの、入力欄へのフォーカスの要求 */
+  focusRequest: FocusRequest | null;
+  /** フォーカスを移し終えた（要求を消す） */
+  onFocusHandled: () => void;
+  /** 区間を切り替える。成功したら true */
+  onPhase: (phase: Phase) => Promise<boolean>;
+  /** 置き直す。成功したら true */
+  onPlacement: (placement: PlacementInput) => Promise<boolean>;
+  /** 本人に聞き返す、または結果を伝える。成功したら true */
+  onReply: (kind: ReplyKind, body: string) => Promise<boolean>;
+  /** 見送りとして終える。成功したら true */
+  onDecline: (kind: DeclineReasonKind, reason: string) => Promise<boolean>;
 }
 
 /**
@@ -60,25 +93,66 @@ function List({ title, items }: { title: string; items: string[] }) {
  */
 function placementLabel(placement: Placement | null, unknown: string): string {
   if (placement === null) return unknown;
-  return placement.label + (placement.by === "AI" ? OP_TEXT.placedByAi : "");
+  const mark =
+    placement.by === "AI"
+      ? OP_TEXT.placedByAi
+      : placement.by === "OPERATOR"
+        ? OP_TEXT.placedByOperator
+        : "";
+  return placement.label + mark;
 }
 
 /**
  * 1件の問い合わせの全内容。元の発話から調べた結果、出典の照合結果まで。
- * 上部に対応状況の切り替え、下部にやり取りと返信の入力欄、最下部にスキルの実行記録を置く。
+ * 上部にいまの状態と区間の切り替え、下部にやり取りと、本人に送る・見送る操作、状態の履歴、
+ * 最下部にスキルの実行記録を置く。担当者の番でないときは、操作の代わりに待っていることを示す。
  * @param props 問い合わせの全内容と、操作の受け口
  */
 export function DetailView({
   detail,
   urgencies,
+  types,
+  systems,
   trace,
   busy,
   failed,
-  onStatus,
+  focusRequest,
+  onFocusHandled,
+  onPhase,
+  onPlacement,
   onReply,
+  onDecline,
 }: DetailViewProps) {
   const { structured, answer } = detail;
   const messages = detail.messages ?? [];
+  const ended = detail.ending !== null;
+  const operatorsTurn = !ended && detail.turn === "OPERATOR";
+
+  // ドラッグで落とされたら、対応する入力欄にフォーカスを移す（見送るは、折りたたみを開いてから）
+  const sendRef = useRef<HTMLTextAreaElement | null>(null);
+  const declineRef = useRef<HTMLTextAreaElement | null>(null);
+  const [declineOpen, setDeclineOpen] = useState(false);
+  const target =
+    focusRequest !== null && focusRequest.id === detail.id
+      ? focusRequest.target
+      : null;
+  const token = focusRequest?.token;
+  // 「見送る」への要求が来たら、描画のうちに折りたたみを開く（要求ごとに1回）
+  const [openedFor, setOpenedFor] = useState<number | undefined>(undefined);
+  if (target === "decline" && operatorsTurn && token !== openedFor) {
+    setOpenedFor(token);
+    setDeclineOpen(true);
+  }
+  useEffect(() => {
+    if (target === null) return;
+    if (!operatorsTurn) {
+      onFocusHandled();
+      return;
+    }
+    if (target === "send") sendRef.current?.focus();
+    else declineRef.current?.focus();
+    onFocusHandled();
+  }, [target, token, operatorsTurn, onFocusHandled]);
   return (
     <article className="op-article">
       <header className="op-article-head">
@@ -116,25 +190,26 @@ export function DetailView({
           {" ・ "}
           {detail.askerName ?? detail.askerId}
         </p>
-        <div
-          className="op-status-switch"
-          role="group"
-          aria-label={OP_TEXT.statusSwitchLabel}
-        >
-          {STATUS_ORDER.map((status) => (
-            <button
-              key={status}
-              type="button"
-              aria-pressed={detail.handlingStatus === status}
-              disabled={busy}
-              onClick={() => {
-                if (detail.handlingStatus !== status) void onStatus(status);
-              }}
-            >
-              {HANDLING_LABELS[status]}
-            </button>
-          ))}
-        </div>
+        <p className="op-state" aria-live="polite">
+          <span className="op-state-label">{OP_TEXT.stateLabel}</span>
+          <strong>{stateLine(detail)}</strong>
+        </p>
+        <PhaseSwitch
+          phase={detail.phase}
+          enabled={operatorsTurn}
+          busy={busy}
+          onChange={(phase) => void onPhase(phase)}
+        />
+        {!ended && (
+          <PlacementForm
+            key={`${detail.type?.id}:${detail.system?.id}:${detail.function?.id}`}
+            detail={detail}
+            types={types}
+            systems={systems}
+            busy={busy}
+            onSubmit={onPlacement}
+          />
+        )}
       </header>
 
       {detail.utterance !== null && (
@@ -248,18 +323,28 @@ export function DetailView({
         {messages.length === 0 && (
           <p className="op-muted">{OP_TEXT.noMessages}</p>
         )}
-        <MessageForm
-          label={OP_TEXT.replyLabel}
-          submitLabel={OP_TEXT.replySubmit}
-          busy={busy}
-          onSubmit={onReply}
-        />
+        {operatorsTurn ? (
+          <>
+            <SendToAsker busy={busy} inputRef={sendRef} onSend={onReply} />
+            <DeclineForm
+              open={declineOpen}
+              onToggle={setDeclineOpen}
+              busy={busy}
+              reasonRef={declineRef}
+              onSubmit={onDecline}
+            />
+          </>
+        ) : (
+          <p className="op-waiting">{waitingText(detail)}</p>
+        )}
         {failed && (
           <p className="op-muted" role="alert">
             {OP_TEXT.actionFailed}
           </p>
         )}
       </section>
+
+      <HistoryList history={detail.history} />
 
       {trace && <TracePanel entries={detail.trace} />}
     </article>

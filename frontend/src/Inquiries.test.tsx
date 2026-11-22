@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Root from "./Root.tsx";
@@ -17,6 +24,12 @@ import {
   makeTypeEntry,
   makeView,
   type RecordedCall,
+  ASKER_REPLY_STATE,
+  HANDLING_STATE,
+  INTAKE_STATE,
+  INVESTIGATION_STATE,
+  RESULT_STATE,
+  closedState,
 } from "./test/fakes.ts";
 
 const INPUT_LABEL =
@@ -146,43 +159,54 @@ describe("送った問い合わせのボード", () => {
   const boardItems = [
     makeListItem({
       id: "a",
-      summary: "掲載期限を知りたい。",
-      unreadReply: true,
-      handlingStatus: "IN_PROGRESS",
-      messageCount: 2,
+      summary: "入力の途中の件。",
+      ...INTAKE_STATE,
     }),
     makeListItem({
       id: "b",
-      summary: "請求書を直したい。",
-      handlingStatus: "DONE",
+      summary: "聞き返された件。",
+      ...ASKER_REPLY_STATE,
+      unreadReply: true,
+      messageCount: 2,
     }),
     makeListItem({
       id: "c",
-      summary: "確認待ちの件。",
-      handlingStatus: "OPEN",
+      summary: "結果が届いた件。",
+      ...RESULT_STATE,
+      handedOverAt: "2026-11-21T05:00:00Z",
+      messageCount: 1,
     }),
     makeListItem({
       id: "d",
-      summary: "解決した件。",
-      outcome: "SELF_RESOLVED",
-      handlingStatus: null,
+      summary: "AI の答えを確かめる件。",
+      ...RESULT_STATE,
+      handedOverAt: null,
+      // やり取りがあっても、担当者に渡していなければ AI の答え
+      messageCount: 1,
+    }),
+    makeListItem({
+      id: "e",
+      summary: "担当者が確認している件。",
+      ...HANDLING_STATE,
     }),
     makeListItem({
       id: "f",
-      summary: "途中の件。",
-      step: "STRUCTURED",
-      outcome: "IN_PROGRESS",
-      handlingStatus: null,
+      summary: "調べている件。",
+      ...INVESTIGATION_STATE,
     }),
     makeListItem({
       id: "g",
-      summary: "終了した件。",
-      outcome: "ABANDONED",
-      handlingStatus: null,
+      summary: "解決した件。",
+      ...closedState("RESOLVED"),
+    }),
+    makeListItem({
+      id: "h",
+      summary: "見送られた件。",
+      ...closedState("DECLINED"),
     }),
   ];
 
-  it("4つの列と件数を出し、カードを状態に合う列に入れる。言い直し・日時・未読の返信の印も出す", async () => {
+  it("あなたの番・相手の番・終わりの3列と件数を出し、カードを番の列に入れる。言い直し・日時・未読の返信の印も出す", async () => {
     installFakeFetch({
       ...config,
       "GET /api/inquiries": {
@@ -193,39 +217,47 @@ describe("送った問い合わせのボード", () => {
 
     await screen.findAllByRole("link", { name: /。/ });
     const column = (name: string) => screen.getByRole("region", { name });
-    const draft = column("入力の途中 1件");
-    const waiting = column("担当者の確認待ち 1件");
-    const working = column("担当者が対応中 1件");
-    const done = column("完了 3件");
+    const yours = column("あなたの番 4件");
+    const theirs = column("相手の番 2件");
+    const closed = column("終わり 2件");
     expect(
       screen
         .getAllByRole("heading", { level: 3 })
         .map((heading) => heading.textContent),
-    ).toEqual(["入力の途中", "担当者の確認待ち", "担当者が対応中", "完了"]);
+    ).toEqual(["あなたの番", "相手の番", "終わり"]);
 
-    expect(within(draft).getByText("途中の件。")).toBeInTheDocument();
-    expect(within(waiting).getByText("確認待ちの件。")).toBeInTheDocument();
-    expect(within(working).getByText("掲載期限を知りたい。")).toBeVisible();
-    for (const text of ["請求書を直したい。", "解決した件。", "終了した件。"]) {
-      expect(within(done).getByText(text)).toBeInTheDocument();
+    for (const text of [
+      "入力の途中の件。",
+      "聞き返された件。",
+      "結果が届いた件。",
+      "AI の答えを確かめる件。",
+    ]) {
+      expect(within(yours).getByText(text)).toBeInTheDocument();
+    }
+    for (const text of ["担当者が確認している件。", "調べている件。"]) {
+      expect(within(theirs).getByText(text)).toBeInTheDocument();
+    }
+    for (const text of ["解決した件。", "見送られた件。"]) {
+      expect(within(closed).getByText(text)).toBeInTheDocument();
     }
 
-    const card = within(working).getByRole("listitem");
+    const card = within(yours)
+      .getAllByRole("listitem")
+      .find((item) => item.textContent?.includes("聞き返された件"))!;
     expect(within(card).getByRole("link")).toHaveAttribute(
       "href",
-      "/inquiries/a",
+      "/inquiries/b",
     );
     expect(card).toHaveTextContent("未読の返信");
     expect(card).toHaveTextContent("やり取り 2件");
-    expect(card).toHaveTextContent("担当者が対応中");
     expect(within(card).getByText(/\d+\/\d+/)).toBeInTheDocument();
-    expect(within(waiting).getByRole("listitem")).not.toHaveTextContent(
+    expect(within(theirs).getAllByRole("listitem")[0]).not.toHaveTextContent(
       "未読の返信",
     );
     expect(document.body.textContent).not.toMatch(FORBIDDEN);
   });
 
-  it("完了の列のカードには終わり方を添える。ほかの列では見た目に出さない", async () => {
+  it("どのカードにも、本人に見せる言葉（いまの状況、終わっていれば終わり方）を添える", async () => {
     installFakeFetch({
       ...config,
       "GET /api/inquiries": {
@@ -235,22 +267,21 @@ describe("送った問い合わせのボード", () => {
     open("/inquiries");
     await screen.findAllByRole("link", { name: /。/ });
 
-    const done = screen.getByRole("region", { name: "完了 3件" });
     const note = (text: string) => {
-      const card = within(done)
+      const card = screen
         .getAllByRole("listitem")
         .find((item) => item.textContent?.includes(text))!;
       return card.querySelector(".board-note")?.textContent;
     };
-    expect(note("請求書")).toBe("対応完了");
+    expect(note("入力の途中の件")).toBe("入力の途中です");
+    expect(note("聞き返された件")).toBe("担当者から質問が届いています");
+    // 担当者に渡したことがある件は、担当者の結果が届いている件
+    expect(note("結果が届いた件")).toBe("担当者から結果が届いています");
+    expect(note("AI の答えを確かめる件")).toBe("結果を確かめてください");
+    expect(note("担当者が確認している件")).toBe("担当者が確認しています");
+    expect(note("調べている件")).toBe("調べています");
     expect(note("解決した件")).toBe("解決済み");
-    expect(note("終了した件")).toBe("終了");
-
-    const working = screen.getByRole("region", { name: "担当者が対応中 1件" });
-    expect(working.querySelector(".board-note")).toBeNull();
-    expect(
-      within(working).getByText("担当者が対応中", { selector: "span" }),
-    ).toHaveClass("visually-hidden");
+    expect(note("見送られた件")).toBe("見送り");
   });
 
   it("列の中は、未読の返信を上に寄せ、同じ条件なら新しい順に並ぶ", async () => {
@@ -283,7 +314,7 @@ describe("送った問い合わせのボード", () => {
     open("/inquiries");
 
     const waiting = await screen.findByRole("region", {
-      name: "担当者の確認待ち 3件",
+      name: "相手の番 3件",
     });
     expect(
       within(waiting)
@@ -296,7 +327,7 @@ describe("送った問い合わせのボード", () => {
     ]);
     // 件のない列も出し、「ありません」と示す
     expect(
-      within(screen.getByRole("region", { name: "完了 0件" })).getByText(
+      within(screen.getByRole("region", { name: "終わり 0件" })).getByText(
         "ありません",
       ),
     ).toBeInTheDocument();
@@ -391,8 +422,7 @@ describe("作成と URL", () => {
       ...config,
       "GET /api/inquiries/inq-1": {
         body: makeView({
-          step: "CLOSED",
-          outcome: "SELF_RESOLVED",
+          ...closedState("RESOLVED"),
           answer: groundedAnswer,
         }),
       },
@@ -536,7 +566,7 @@ describe("開き直したときの再開", () => {
     installFakeFetch({
       ...config,
       "GET /api/inquiries/inq-1": {
-        body: makeStructuredView({ step: "ANSWERING" }),
+        body: makeStructuredView({ ...INVESTIGATION_STATE }),
       },
     });
     open("/inquiries/inq-1", stream);
@@ -554,7 +584,7 @@ describe("開き直したときの再開", () => {
     installFakeFetch({
       ...config,
       "GET /api/inquiries/inq-1": {
-        body: makeStructuredView({ step: "ANSWERED", answer: groundedAnswer }),
+        body: makeStructuredView({ ...RESULT_STATE, answer: groundedAnswer }),
       },
     });
     open("/inquiries/inq-1");
@@ -570,17 +600,17 @@ describe("開き直したときの再開", () => {
     ).toBeInTheDocument();
   });
 
-  it("CLOSED かつ FILED は、終わりの文言に続けて「いまの状況」とやり取りを出す", async () => {
+  it("担当者の番（HANDLING）は、終わりの文言を出さず、「いまの状況」とやり取り、追記の入力欄を出す", async () => {
     installFakeFetch({
       ...config,
       "GET /api/inquiries/inq-1": {
         body: makeFiledView({
-          handlingStatus: "IN_PROGRESS",
           messages: [
             makeMessage({ id: "m1", body: "確認します。" }),
             makeMessage({
               id: "m2",
               from: "ASKER",
+              kind: "NOTE",
               authorName: "開発用ユーザー",
               body: "お願いします。",
             }),
@@ -593,13 +623,14 @@ describe("開き直したときの再開", () => {
     expect(
       await screen.findByRole("heading", { name: "いまの状況" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("担当者が対応しています")).toBeInTheDocument();
+    expect(screen.getByText("担当者が確認しています")).toBeInTheDocument();
+    expect(screen.getByLabelText("追加で伝える")).toBeInTheDocument();
+    // 終わっていないので、終わりの文言は出ない
     expect(
-      screen.getByText(
-        "担当者に送りました。書いていただいた内容をそのまま添えています。",
-      ),
-    ).toBeInTheDocument();
-    // 「答えを待たずに担当者に送る」は終わると出さない
+      screen.queryByText("解決してよかったです。この内容は記録しておきます。"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/取り下げました/)).not.toBeInTheDocument();
+    // 「答えを待たずに担当者に送る」は担当者に渡した後は出さない
     expect(
       screen.queryByRole("button", { name: "答えを待たずに担当者に送る" }),
     ).not.toBeInTheDocument();
@@ -608,45 +639,94 @@ describe("開き直したときの再開", () => {
     expect(thread).toHaveAttribute("aria-live", "polite");
     const items = within(thread).getAllByRole("listitem");
     expect(items).toHaveLength(2);
-    // 古い順。担当者の返信は左、自分の追記は右（色でも分かれる）
+    // 古い順。担当者の発言は左、自分の追記は右（色でも分かれる）
     expect(items[0]).toHaveTextContent("確認します。");
     expect(items[0]).toHaveClass("by-operator", "theirs");
     expect(items[1]).toHaveTextContent("お願いします。");
     expect(items[1]).toHaveClass("by-asker", "mine");
-    expect(
-      screen.queryByText("担当者からの返信は、ここに表示されます。"),
-    ).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(FORBIDDEN);
   });
 
-  it("返信がまだなければ、返信がここに出ることを伝える。対応状況ごとの言葉も出る", async () => {
-    for (const [status, text] of [
-      ["OPEN", "担当者の確認を待っています"],
-      ["DONE", "対応が完了しました"],
-    ] as const) {
-      installFakeFetch({
-        ...config,
-        "GET /api/inquiries/inq-1": {
-          body: makeFiledView({ handlingStatus: status }),
-        },
-      });
-      window.history.replaceState({}, "", "/inquiries/inq-1");
-      const { unmount } = render(
-        <Root subscribeAnswers={new FakeStream().subscribe} />,
-      );
-      expect(await screen.findByText(text)).toBeInTheDocument();
-      expect(
-        screen.getByText("担当者からの返信は、ここに表示されます。"),
-      ).toBeInTheDocument();
-      unmount();
-    }
+  it("担当者の発言がまだない間だけ、渡した直後の案内と返信がここに出る旨を、いまの状況の下に出す", async () => {
+    installFakeFetch({
+      "GET /api/config": {
+        body: makeConfig({
+          filedGuidance: "担当者が内容を確認して連絡します。",
+        }),
+      },
+      "GET /api/inquiries/inq-1": { body: makeFiledView() },
+    });
+    open("/inquiries/inq-1");
+
+    const status = await screen.findByText("担当者が確認しています");
+    const lead = screen.getByText(
+      "担当者に送りました。書いていただいた内容をそのまま添えています。",
+    );
+    expect(
+      status.compareDocumentPosition(lead) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByText("担当者が内容を確認して連絡します。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("担当者からの返信は、ここに表示されます。"),
+    ).toBeInTheDocument();
   });
 
-  it("担当者に送っていない終わり方（解決済み）には、状況とやり取りを出さない", async () => {
+  it("担当者の発言が1つでもあれば、渡した直後の案内は出さない。本人の追記だけでは出し続ける", async () => {
+    installFakeFetch({
+      "GET /api/config": {
+        body: makeConfig({
+          filedGuidance: "担当者が内容を確認して連絡します。",
+        }),
+      },
+      "GET /api/inquiries/inq-1": {
+        body: makeFiledView({
+          messages: [
+            makeMessage({
+              id: "m1",
+              from: "ASKER",
+              kind: "NOTE",
+              body: "急いでいます。",
+            }),
+          ],
+        }),
+      },
+    });
+    open("/inquiries/inq-1");
+    expect(
+      await screen.findByText("担当者が内容を確認して連絡します。"),
+    ).toBeInTheDocument();
+    cleanup();
+
+    installFakeFetch({
+      "GET /api/config": {
+        body: makeConfig({
+          filedGuidance: "担当者が内容を確認して連絡します。",
+        }),
+      },
+      "GET /api/inquiries/inq-1": {
+        body: makeFiledView({
+          messages: [makeMessage({ id: "m1", body: "確認します。" })],
+        }),
+      },
+    });
+    window.history.replaceState({}, "", "/inquiries/inq-1");
+    render(<Root subscribeAnswers={new FakeStream().subscribe} />);
+    expect(await screen.findByText("確認します。")).toBeInTheDocument();
+    expect(
+      screen.queryByText("担当者が内容を確認して連絡します。"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/担当者に送りました。書いていただいた内容/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("担当者に渡していない終わり方（AI の答えで解決）は、終わりの文言だけを出し、状況とやり取りは出さない", async () => {
     installFakeFetch({
       ...config,
       "GET /api/inquiries/inq-1": {
-        body: makeView({ step: "CLOSED", outcome: "SELF_RESOLVED" }),
+        body: makeView({ ...closedState("RESOLVED") }),
       },
     });
     open("/inquiries/inq-1");
@@ -659,11 +739,12 @@ describe("開き直したときの再開", () => {
     expect(
       screen.queryByRole("heading", { name: "いまの状況" }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("追加で伝える")).not.toBeInTheDocument();
   });
 
-  it("任意の項目（handlingStatus、messages、trace、createdAt）が欠けた応答でも表示できる", async () => {
+  it("任意の項目（messages、trace、createdAt）が欠けた応答でも表示できる", async () => {
     const legacy = { ...makeFiledView() } as Record<string, unknown>;
-    for (const key of ["handlingStatus", "messages", "trace", "createdAt"]) {
+    for (const key of ["messages", "trace", "createdAt"]) {
       delete legacy[key];
     }
     installFakeFetch({
@@ -678,8 +759,8 @@ describe("開き直したときの再開", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "いまの状況" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("heading", { name: "いまの状況" }),
+    ).toBeInTheDocument();
   });
 
   it("見つからない問い合わせは「この問い合わせは見つかりませんでした」と示し、新しい問い合わせを書ける", async () => {

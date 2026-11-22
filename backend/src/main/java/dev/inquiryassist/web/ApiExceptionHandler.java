@@ -2,6 +2,7 @@ package dev.inquiryassist.web;
 
 import dev.inquiryassist.core.AiRefusalException;
 import dev.inquiryassist.core.AiUnavailableException;
+import dev.inquiryassist.core.lifecycle.IllegalTransitionException;
 import dev.inquiryassist.inquiry.ComposeFailedException;
 import dev.inquiryassist.inquiry.InquiryNotFoundException;
 import dev.inquiryassist.inquiry.InvalidStateException;
@@ -60,6 +61,17 @@ public class ApiExceptionHandler {
      */
     @ExceptionHandler(InvalidStateException.class)
     public ResponseEntity<ErrorBody> invalidState(InvalidStateException e) {
+        return json(HttpStatus.CONFLICT, "INVALID_STATE", e.getMessage());
+    }
+
+    /**
+     * いまの状態では実行できない操作を 409 にする。
+     *
+     * @param e 例外
+     * @return 409 の応答
+     */
+    @ExceptionHandler(IllegalTransitionException.class)
+    public ResponseEntity<ErrorBody> illegalTransition(IllegalTransitionException e) {
         return json(HttpStatus.CONFLICT, "INVALID_STATE", e.getMessage());
     }
 

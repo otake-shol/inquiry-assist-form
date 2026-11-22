@@ -8,9 +8,10 @@ import java.util.UUID;
  *
  * @param id 識別子
  * @param from 投稿者の区分
+ * @param kind 発言の種類。担当者は {@code ASK}、{@code RESULT}、{@code DECLINE}、本人は {@code NOTE}
  * @param authorName 表示用の名前。投稿した時点の設定値
  * @param body 本文
  * @param createdAt 投稿時刻
  */
 public record MessageView(
-        UUID id, MessageAuthor from, String authorName, String body, Instant createdAt) {}
+        UUID id, MessageAuthor from, MessageKind kind, String authorName, String body, Instant createdAt) {}

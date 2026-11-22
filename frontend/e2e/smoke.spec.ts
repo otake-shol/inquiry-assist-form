@@ -58,7 +58,8 @@ async function fileByText(page: Page, text: string) {
     timeout: 30_000,
   });
   await page.getByRole("button", { name: /まだ解決していません/ }).click();
-  await expect(page.getByText(/担当者に送りました/)).toBeVisible();
+  // 担当者に渡しても、問い合わせは終わらない。担当者の番になる
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
 }
 
 /**
@@ -377,124 +378,179 @@ test("問いに答えていない結果は関連して分かったこととし�
 });
 
 /**
- * 送った後の往復: 本人が送る → 担当者が返信する → 本人が開き直して読み、追記する →
- * 担当者に未読として戻り、完了にする → 本人の画面に完了が出る。
+ * 担当者と本人が、番を受け渡しながら解決まで進める。
+ * 聞き返す → 本人が答える → 結果を伝える → 本人が解決していないと答える →
+ * もう一度結果を伝える → 本人が解決を伝えて終わる。
  */
-test("送った後に担当者と本人がやり取りでき、開き直しても続きが見える", async ({
+test("担当者と本人が番を受け渡しながら、解決まで進められる", async ({
   page,
 }) => {
   const { consoleErrors, pageErrors } = watchErrors(page);
-
   const mark = `往復確認 ${Date.now()}`;
-  const reply = `担当者からの返信 ${Date.now()}`;
-  const append = `本人からの追記 ${Date.now()}`;
+  const question = `担当者からの質問 ${Date.now()}`;
+  const reply = `本人の返事 ${Date.now()}`;
+  const result = `担当者からの結果 ${Date.now()}`;
 
-  // 本人が送る。作成後は URL がその問い合わせを指す
   await fileByText(page, `${mark} 請求書の宛名を知りたい`);
-  await expect(page).toHaveURL(/\/inquiries\/[0-9a-f-]{36}$/);
   const askerUrl = page.url();
-  await expect(page.getByText("担当者の確認を待っています")).toBeVisible();
+
+  const board = page.getByRole("region", { name: "受付一覧" });
+  const operatorTurn = board.getByRole("region", { name: /^担当者の番/ });
+  const askerTurn = board.getByRole("region", { name: /^本人の番/ });
+  const closed = board.getByRole("region", { name: /^終わり/ });
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+  const cardIn = (column: typeof operatorTurn) =>
+    column.getByRole("listitem").filter({ hasText: mark });
+
+  // 担当者が聞き返す。本人の番になる
+  await page.goto("/operator");
+  await cardIn(operatorTurn).getByRole("button").click();
+  await detail.getByLabel("本人に送る").fill(question);
+  await detail.getByRole("button", { name: "聞き返す" }).click();
+  await expect(cardIn(askerTurn)).toBeVisible();
+  await expect(cardIn(operatorTurn)).toHaveCount(0);
+  // 本人の番の間は、担当者は送れない
+  await expect(detail.getByRole("button", { name: "聞き返す" })).toHaveCount(0);
+
+  // 本人のボードでは「あなたの番」に入り、質問が届いたことが分かる
+  await page.goto("/inquiries");
+  const mine = page
+    .getByRole("region", { name: /^あなたの番/ })
+    .getByRole("listitem")
+    .filter({ hasText: mark });
+  await expect(mine).toContainText("担当者から質問が届いています");
+  await page.goto(askerUrl);
+  await expect(page.getByText(question)).toBeVisible();
+  await page.getByLabel("担当者の質問に答える").fill(reply);
+  await page.getByRole("button", { name: "送る", exact: true }).click();
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+
+  // 番が担当者に戻る。担当者が結果を伝える
+  await page.goto("/operator");
+  await cardIn(operatorTurn).getByRole("button").click();
+  await expect(detail.getByText(reply)).toBeVisible();
+  await detail.getByLabel("本人に送る").fill(result);
+  await detail.getByRole("button", { name: "結果を伝える" }).click();
+  await expect(cardIn(askerTurn)).toBeVisible();
+
+  // 本人が結果を確かめる。解決していないと答えると、担当者の番に戻る
+  await page.goto(askerUrl);
+  await expect(page.getByText("担当者から結果が届いています")).toBeVisible();
+  await expect(page.getByText(result)).toBeVisible();
+  await page.getByRole("button", { name: "まだ解決していません" }).click();
+  await page
+    .getByLabel("どこが解決していませんか（任意）")
+    .fill("宛名の変え方が分かりません");
+  await page.getByRole("button", { name: "担当者に送る" }).click();
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+
+  // 担当者がもう一度結果を伝え、本人が解決を伝えて終わる
+  await page.goto("/operator");
+  await cardIn(operatorTurn).getByRole("button").click();
+  await expect(detail.getByText("宛名の変え方が分かりません")).toBeVisible();
+  await detail.getByLabel("本人に送る").fill(`${result} その2`);
+  await detail.getByRole("button", { name: "結果を伝える" }).click();
+  await expect(cardIn(askerTurn)).toBeVisible();
+
+  await page.goto(askerUrl);
+  await page.getByRole("button", { name: "解決しました" }).click();
   await expect(
-    page.getByText("担当者からの返信は、ここに表示されます。"),
+    page.getByText("解決してよかったです。この内容は記録しておきます。"),
   ).toBeVisible();
 
-  // 担当者が開いて返信する。未対応は自動で対応中になる
+  // 担当者のボードでは「終わり」に入り、終わり方が分かる。状態の履歴も開ける
   await page.goto("/operator");
-  const list = page.getByRole("region", { name: "受付一覧" });
-  await list.getByRole("button").filter({ hasText: mark }).click();
-  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
-  const statusSwitch = detail.getByRole("group", {
-    name: "対応状況を切り替える",
-  });
-  await expect(
-    statusSwitch.getByRole("button", { name: "未対応" }),
-  ).toHaveAttribute("aria-pressed", "true");
-  await detail.getByLabel("本人に返信する").fill(reply);
-  await detail.getByRole("button", { name: "返信を送る" }).click();
-  await expect(detail.getByText(reply)).toBeVisible();
-  await expect(
-    statusSwitch.getByRole("button", { name: "対応中" }),
-  ).toHaveAttribute("aria-pressed", "true");
-
-  // 本人の一覧に未読の返信の印がつき、開くと返信が読める
-  await page.goto("/inquiries");
-  const mine = page.getByRole("listitem").filter({ hasText: mark });
-  await expect(mine).toContainText("担当者が対応中");
-  await expect(mine).toContainText("未読の返信");
-  await page.goto(askerUrl);
-  await expect(page.getByText("担当者が対応しています")).toBeVisible();
-  await expect(page.getByText(reply)).toBeVisible();
-
-  // 本人が追記する
-  await page.getByLabel("追加で伝える").fill(append);
-  await page.getByRole("button", { name: "送る", exact: true }).click();
-  await expect(page.getByText(append)).toBeVisible();
-
-  // 担当者に追記が届き、完了にする
-  await page.goto("/operator");
-  await list.getByRole("button").filter({ hasText: mark }).click();
-  await expect(detail.getByText(append)).toBeVisible();
-  await statusSwitch.getByRole("button", { name: "完了" }).click();
-  await expect(
-    statusSwitch.getByRole("button", { name: "完了" }),
-  ).toHaveAttribute("aria-pressed", "true");
-
-  // 本人の画面に完了が出る。裏側の表示も開ける
-  await page.goto(askerUrl);
-  await expect(page.getByText("対応が完了しました")).toBeVisible();
-  await page.getByText("裏側を見る（開発者向け）").click();
-  await expect(page.getByText("照合（コード）")).toBeVisible();
+  await expect(cardIn(closed)).toContainText("解決済み");
+  await cardIn(closed).getByRole("button").click();
+  await detail.getByText("状態の履歴").click();
+  await detail.getByText("裏側を見る（開発者向け）").click();
+  await expect(detail.getByText("照合（コード）")).toBeVisible();
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
 
 /**
- * 担当者のボード: カードを別の列へドラッグすると対応状況が変わり、
- * 開き直しても変わったままで、本人のボードでも同じ状態の列に入る。
+ * 担当者のボード: カードを別の列に落としても状態は変わらず、
+ * パネルが開いて、その列に対応する入力欄に移る。見送ると「終わり」に入る。
  */
-test("担当者がカードをドラッグして対応状況を変えられる", async ({ page }) => {
-  const pageErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+test("カードを落とすと対応する入力欄が開き、見送りで終えられる", async ({
+  page,
+}) => {
+  const { pageErrors } = watchErrors(page);
   const mark = `ボード確認 ${Date.now()}`;
+  const reason = `見送りの理由 ${Date.now()}`;
 
   await fileByText(page, `${mark} 請求書の宛名を知りたい`);
-  await expect(page.getByText("担当者の確認を待っています")).toBeVisible();
+  const askerUrl = page.url();
 
-  // 届いた時点では「未対応」の列にある
   await page.goto("/operator");
   const board = page.getByRole("region", { name: "受付一覧" });
-  const open = board.getByRole("region", { name: /^未対応/ });
-  const inProgress = board.getByRole("region", { name: /^対応中/ });
+  const operatorTurn = board.getByRole("region", { name: /^担当者の番/ });
+  const askerTurn = board.getByRole("region", { name: /^本人の番/ });
+  const closed = board.getByRole("region", { name: /^終わり/ });
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
   const card = board.getByRole("listitem").filter({ hasText: mark });
   await expect(
-    open.getByRole("listitem").filter({ hasText: mark }),
+    operatorTurn.getByRole("listitem").filter({ hasText: mark }),
   ).toBeVisible();
 
-  // 「対応中」の列へドラッグする
-  await card.dragTo(inProgress);
+  // 「本人の番」に落とす: 本人へのメッセージが要るので、状態は変わらず、入力欄に移る
+  await card.dragTo(askerTurn);
+  await expect(detail.getByLabel("本人に送る")).toBeFocused();
   await expect(
-    inProgress.getByRole("listitem").filter({ hasText: mark }),
+    operatorTurn.getByRole("listitem").filter({ hasText: mark }),
+  ).toBeVisible();
+
+  // 「終わり」に落とす: 見送りの入力欄が開く。理由を書いて終える
+  await card.dragTo(closed);
+  await detail.getByLabel("理由", { exact: true }).fill(reason);
+  await detail.getByRole("button", { name: "見送りとして終える" }).click();
+  await expect(
+    closed.getByRole("listitem").filter({ hasText: mark }),
+  ).toContainText("見送り");
+
+  // 本人のページに、見送りの連絡と理由が出る
+  await page.goto(askerUrl);
+  await expect(
+    page.getByText("担当者から、今回は対応を見送るとの連絡がありました。"),
+  ).toBeVisible();
+  await expect(page.getByText(reason).first()).toBeVisible();
+
+  expect(pageErrors).toEqual([]);
+});
+
+/**
+ * 本人は、終わっていない問い合わせをいつでも取り下げられる。
+ */
+test("本人が問い合わせを取り下げられる", async ({ page }) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /仕組みを知りたい/ }).click();
+  await expect(page).toHaveURL(/\/inquiries\/[0-9a-f-]{36}$/);
+  await page
+    .getByRole("button", { name: "この問い合わせを取り下げる" })
+    .click();
+  // その場に確認が出る。やめると何も起きない
+  await expect(
+    page.getByText("取り下げますか。取り下げた後は、続きを送れません。"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "やめる" }).click();
+  await expect(page.getByText("どのシステムですか")).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "この問い合わせを取り下げる" })
+    .click();
+  await page.getByRole("button", { name: "取り下げる", exact: true }).click();
+  await expect(
+    page.getByText("この問い合わせは取り下げました。"),
   ).toBeVisible();
   await expect(
-    open.getByRole("listitem").filter({ hasText: mark }),
+    page.getByRole("button", { name: "この問い合わせを取り下げる" }),
   ).toHaveCount(0);
 
-  // 開き直しても「対応中」のまま
-  await page.reload();
-  await expect(
-    inProgress.getByRole("listitem").filter({ hasText: mark }),
-  ).toBeVisible();
-
-  // 本人のボードでも「担当者が対応中」の列に入る
-  await page.goto("/inquiries");
-  await expect(
-    page
-      .getByRole("region", { name: /^担当者が対応中/ })
-      .getByRole("listitem")
-      .filter({ hasText: mark }),
-  ).toBeVisible();
-
+  expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
 

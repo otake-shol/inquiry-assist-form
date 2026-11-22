@@ -12,6 +12,15 @@ import dev.inquiryassist.core.intake.IntakeEntry;
 import dev.inquiryassist.core.intake.IntakeNext;
 import dev.inquiryassist.core.intake.IntakeQuestion;
 import dev.inquiryassist.core.intake.IntakeSnapshot;
+import dev.inquiryassist.core.lifecycle.Awaiting;
+import dev.inquiryassist.core.lifecycle.Declined;
+import dev.inquiryassist.core.lifecycle.Ending;
+import dev.inquiryassist.core.lifecycle.HistoryEntry;
+import dev.inquiryassist.core.lifecycle.InquiryStateMachine;
+import dev.inquiryassist.core.lifecycle.InquiryState;
+import dev.inquiryassist.core.lifecycle.Phase;
+import dev.inquiryassist.core.lifecycle.Transition;
+import dev.inquiryassist.core.lifecycle.Turn;
 import dev.inquiryassist.core.skill.Skill;
 import dev.inquiryassist.core.skill.SkillUsage;
 import jakarta.persistence.Column;
@@ -61,7 +70,8 @@ class InquiryEntity {
             Long durationMillis) {}
 
     /** 保存するやり取り1件。担当者の返信と本人の追記を同じ形で持つ。 */
-    record StoredMessage(UUID id, MessageAuthor from, String authorName, String body, Instant createdAt) {}
+    record StoredMessage(
+            UUID id, MessageAuthor from, MessageKind kind, String authorName, String body, Instant createdAt) {}
 
     /** 言い直しを作り直せる回数の初期値。 */
     static final int INITIAL_REVISIONS = 2;
@@ -81,9 +91,44 @@ class InquiryEntity {
     @Column(name = "asker_id", nullable = false)
     String askerId;
 
+    /** 区間。 */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    InquiryStep step;
+    Phase phase = Phase.INTAKE;
+
+    /** 誰の番か。終わった件は null。 */
+    @Enumerated(EnumType.STRING)
+    Turn turn = Turn.ASKER;
+
+    /** 待っていること。終わった件は null。 */
+    @Enumerated(EnumType.STRING)
+    Awaiting awaiting = Awaiting.INTAKE_ANSWER;
+
+    /** 終わり方。終わっていない件は null。 */
+    @Enumerated(EnumType.STRING)
+    Ending ending;
+
+    /** 終わる前の区間。終わった件を開き直したとき、この区間に戻す。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "phase_before_closed")
+    Phase phaseBeforeClosed;
+
+    /** 見送りの内容。見送りで終わった件だけが持つ。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    Declined declined;
+
+    /** 状態の履歴。状態が変わるたびに1件。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(nullable = false)
+    List<HistoryEntry> history = new ArrayList<>();
+
+    /**
+     * 担当者が置き直した置き場所。ある場合は、入口の答えから導いた置き場所の代わりに使う。
+     * 入口で本人が何を選んだかは、入口の答え（{@link #intake}）にそのまま残す。
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "placement_override")
+    Placement placementOverride;
 
     /** 緊急度。本人が申告する。種類とは別に持つ。 */
     @Enumerated(EnumType.STRING)
@@ -158,10 +203,6 @@ class InquiryEntity {
     @Column(nullable = false)
     List<StoredCitation> citations = new ArrayList<>();
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    InquiryOutcome outcome = InquiryOutcome.IN_PROGRESS;
-
     @Column(name = "sent_immediately", nullable = false)
     boolean sentImmediately;
 
@@ -172,15 +213,12 @@ class InquiryEntity {
     @Column(name = "revision_notes", nullable = false)
     List<String> revisionNotes = new ArrayList<>();
 
-    @Column(name = "filed_at")
-    Instant filedAt;
+    /** 担当者に初めて渡した時刻。渡したことがなければ null。 */
+    @Column(name = "handed_over_at")
+    Instant handedOverAt;
 
     @Column(name = "read_at")
     Instant readAt;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "handling_status")
-    HandlingStatus handlingStatus;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false)
@@ -216,7 +254,6 @@ class InquiryEntity {
         this.id = UUID.randomUUID();
         this.askerId = askerId;
         this.urgency = urgency;
-        this.step = InquiryStep.INTAKE;
         this.createdAt = now;
         this.updatedAt = now;
     }
@@ -266,12 +303,13 @@ class InquiryEntity {
      * やり取りに1件追記する。投稿者の名前は、投稿した時点の値を保存する。
      *
      * @param from 投稿者の区分
+     * @param kind 発言の種類
      * @param authorName 表示用の名前
      * @param body 本文
      * @param now 投稿時刻
      */
-    void addMessage(MessageAuthor from, String authorName, String body, Instant now) {
-        messages.add(new StoredMessage(UUID.randomUUID(), from, authorName, body, now));
+    void addMessage(MessageAuthor from, MessageKind kind, String authorName, String body, Instant now) {
+        messages.add(new StoredMessage(UUID.randomUUID(), from, kind, authorName, body, now));
     }
 
     /**
@@ -298,12 +336,13 @@ class InquiryEntity {
     }
 
     /**
-     * 置き場所（種類、システム、機能）を返す。本人が選んだものと、受付が置いたものの両方を含む。
+     * 置き場所（種類、システム、機能）を返す。担当者が置き直していればそれ、なければ入口の答えから導く
+     * （本人が選んだものと、受付が置いたものの両方を含む）。
      *
      * @return 置き場所。決まっていない項目は null
      */
     Placement placement() {
-        return IntakeEntries.placement(intake);
+        return placementOverride != null ? placementOverride : IntakeEntries.placement(intake);
     }
 
     /**
@@ -323,22 +362,68 @@ class InquiryEntity {
     }
 
     /**
-     * いま「答えを待たずに担当者へ送る」を実行できるかを返す。
-     *
-     * <p>問いを確かめた後に限る（入力が足りないまま担当者に渡すと、聞き返しが増えるだけになるため）。
-     * ただし、AI の失敗で先へ進めない場合（入口を終えたのに組み立てられない）と、言い直しを作り直せる回数を
-     * 使い切った場合は、こちらの側の事情なので、本人を止めない。
-     *
-     * @param next 入口で次にすること。{@code INTAKE} のときだけ見る
-     * @return 実行できる場合は true
+     * @return いまの状態
      */
-    boolean canSendNow(IntakeNext next) {
-        return switch (step) {
-            case ANSWERING, ANSWERED -> true;
-            case INTAKE -> next instanceof IntakeNext.Complete;
-            case STRUCTURED -> revisionsLeft == 0;
-            case CLOSED -> false;
-        };
+    InquiryState state() {
+        return new InquiryState(phase, turn, awaiting, ending);
+    }
+
+    /**
+     * 状態の遷移に使う、状態以外の情報を作る。
+     *
+     * @param next 入口で次にすること。入口の質問に答えている間だけ見る
+     * @return 文脈
+     */
+    InquiryStateMachine.Context context(IntakeNext next) {
+        return new InquiryStateMachine.Context(
+                type(),
+                handedOverAt != null,
+                phaseBeforeClosed,
+                next instanceof IntakeNext.Complete,
+                revisionsLeft);
+    }
+
+    /**
+     * 遷移の結果を、状態と履歴に反映する。状態が変わらない遷移（出来事がないもの）は、何もしない。
+     * 番が担当者に移ったときは、担当者の側を未読に戻し、初めてなら担当者に渡した時刻を持つ。
+     *
+     * @param transition 遷移の結果
+     * @param now 現在時刻
+     */
+    void apply(Transition transition, Instant now) {
+        apply(transition, now, null);
+    }
+
+    /**
+     * 遷移の結果を、状態と履歴に反映する。履歴の補足（置き直しの前後の名前）を添える。
+     *
+     * @param transition 遷移の結果
+     * @param now 現在時刻
+     * @param detail 履歴の補足。なければ null
+     */
+    void apply(Transition transition, Instant now, java.util.Map<String, java.util.Map<String, String>> detail) {
+        if (transition.event() == null) {
+            return;
+        }
+        InquiryState to = transition.to();
+        if (to.closed() && !phase.equals(Phase.CLOSED)) {
+            phaseBeforeClosed = phase;
+        }
+        phase = to.phase();
+        turn = to.turn();
+        awaiting = to.awaiting();
+        ending = to.ending();
+        if (transition.handsOver()) {
+            readAt = null;
+            if (handedOverAt == null) {
+                handedOverAt = now;
+            }
+        }
+        if (transition.event() == dev.inquiryassist.core.lifecycle.HistoryEvent.REOPENED) {
+            declined = null;
+        }
+        history.add(new HistoryEntry(
+                now, transition.actor(), transition.event(), phase, turn, awaiting, ending, detail));
     }
 
     /**

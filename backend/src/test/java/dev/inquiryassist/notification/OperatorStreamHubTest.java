@@ -3,7 +3,9 @@ package dev.inquiryassist.notification;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.inquiryassist.core.Urgency;
-import dev.inquiryassist.inquiry.HandlingStatus;
+import dev.inquiryassist.core.lifecycle.Awaiting;
+import dev.inquiryassist.core.lifecycle.Phase;
+import dev.inquiryassist.core.lifecycle.Turn;
 import dev.inquiryassist.inquiry.InquiryFiledEvent;
 import dev.inquiryassist.inquiry.OperatorItem;
 import java.io.IOException;
@@ -35,7 +37,7 @@ class OperatorStreamHubTest {
 
     private static InquiryFiledEvent event() {
         return new InquiryFiledEvent(
-                new OperatorItem(UUID.randomUUID(), Instant.now(), null, null, null, Urgency.NORMAL, "要約", false, false, HandlingStatus.OPEN, 0));
+                new OperatorItem(UUID.randomUUID(), Instant.now(), null, null, null, Urgency.NORMAL, "要約", false, false, Phase.KNOW, Turn.OPERATOR, Awaiting.HANDLING, null, 0));
     }
 
     @Test
