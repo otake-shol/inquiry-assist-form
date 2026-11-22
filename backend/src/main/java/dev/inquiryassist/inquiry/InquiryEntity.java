@@ -289,6 +289,11 @@ class InquiryEntity {
     @Column(name = "translations", nullable = false)
     java.util.Map<String, java.util.Map<String, String>> translations = new java.util.LinkedHashMap<>();
 
+    /** 仕様の持ち主への相談（古い順）。決定を待っている（{@code OPEN}）ものは、同時に1つだけ。 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "consultations", nullable = false)
+    List<Consultation> consultations = new ArrayList<>();
+
     /** AI の案（助言）の状況。 */
     @Enumerated(EnumType.STRING)
     @Column(name = "advice_status", nullable = false)
@@ -402,6 +407,24 @@ class InquiryEntity {
      */
     void addMessage(MessageAuthor from, MessageKind kind, String authorName, String body, Instant now) {
         messages.add(new StoredMessage(UUID.randomUUID(), from, kind, authorName, body, now));
+    }
+
+    /**
+     * @return 決定を待っている相談。なければ null
+     */
+    Consultation openConsultation() {
+        return consultations.stream().filter(Consultation::open).findFirst().orElse(null);
+    }
+
+    /**
+     * 決定を待っている相談を、取り下げた相談にする（本人が問い合わせを取り下げたとき）。なければ何もしない。
+     *
+     * @param now 取り下げた時刻
+     */
+    void cancelOpenConsultations(Instant now) {
+        consultations = new ArrayList<>(consultations.stream()
+                .map(c -> c.open() ? c.canceled(now) : c)
+                .toList());
     }
 
     /**

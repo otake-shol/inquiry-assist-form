@@ -6,7 +6,8 @@ import type {
 import { I18nProvider } from "./i18n/I18nProvider.tsx";
 import { navigateTo, usePathname } from "./location.ts";
 import { OperatorApp } from "./operator/OperatorApp.tsx";
-import { operatorPathOf, parseRoute } from "./path.ts";
+import { OwnerApp } from "./owner/OwnerApp.tsx";
+import { operatorPathOf, ownerPathOf, parseRoute } from "./path.ts";
 
 /** Root の props。 */
 interface RootProps {
@@ -15,9 +16,9 @@ interface RootProps {
 }
 
 /**
- * パスで本人向けの画面と担当者の画面を切り替える。ルーターのライブラリは使わず、
+ * パスで本人向けの画面、担当者の画面、仕様の持ち主の画面を切り替える。ルーターのライブラリは使わず、
  * `location.pathname` と History API（pushState / popstate）だけで見る。
- * 担当者の画面で問い合わせを選ぶと URL が `/operator/{id}` に変わる。
+ * 担当者の画面で問い合わせを選ぶと URL が `/operator/{id}` に、仕様の持ち主の画面では `/owner/{id}` に変わる。
  * 本人向けの画面（`/`、`/inquiries`、`/inquiries/{id}`）の切り替えは `App` が受け持つ。
  * どちらの画面も、言語の提供元（`I18nProvider`）の中に置く。
  * @param props 購読関数の差し替え口
@@ -34,6 +35,11 @@ export default function Root({
           subscribe={subscribeOperator}
           routeId={route.id}
           onNavigate={(id) => navigateTo(operatorPathOf(id))}
+        />
+      ) : route.kind === "owner" ? (
+        <OwnerApp
+          routeId={route.id}
+          onNavigate={(id) => navigateTo(ownerPathOf(id))}
         />
       ) : (
         <App subscribe={subscribeAnswers} />

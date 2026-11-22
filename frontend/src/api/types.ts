@@ -13,13 +13,13 @@ export type InquiryTypeId =
  */
 export type Phase = "INTAKE" | "KNOW" | "DECIDE" | "ACT" | "CLOSED";
 
-/** 誰の番か。次に動く人。終わった件は null。 */
-export type Turn = "ASKER" | "AI" | "OPERATOR";
+/** 誰の番か。次に動く人（`OWNER` は仕様の持ち主）。終わった件は null。 */
+export type Turn = "ASKER" | "AI" | "OPERATOR" | "OWNER";
 
 /**
  * 待っていること。画面は、これを見て描くものを決める。終わった件は null。
  * 入口の質問に答えている、問いを確かめている、AI が調べている、結果を確かめている、
- * 担当者が受けている、聞き返しへの返事を待っている。
+ * 担当者が受けている、聞き返しへの返事を待っている、仕様の持ち主の決定を待っている。
  */
 export type Awaiting =
   | "INTAKE_ANSWER"
@@ -27,7 +27,8 @@ export type Awaiting =
   | "INVESTIGATION"
   | "RESULT_CONFIRMATION"
   | "HANDLING"
-  | "ASKER_REPLY";
+  | "ASKER_REPLY"
+  | "CONSULTATION";
 
 /** 終わり方。解決済み、回答済み、見送り、取り下げ。終わっていない件は null。 */
 export type Ending = "RESOLVED" | "ANSWERED" | "DECLINED" | "WITHDRAWN";
@@ -49,7 +50,8 @@ export interface Declined {
 
 /**
  * 担当者に渡した理由（直近に渡したときの理由）。本人が答えを待たずに送った、解決していないと答えた、
- * 業務が止まっている、種類の経路、AI が答えられなかった、調査の時間切れ、終わった件への追記。
+ * 業務が止まっている、種類の経路、AI が答えられなかった、調査の時間切れ、終わった件への追記、
+ * 仕様の持ち主が決めた（相談に答えて、担当者の番に戻った）。
  */
 export type HandoverReason =
   | "SENT_NOW"
@@ -58,7 +60,8 @@ export type HandoverReason =
   | "ROUTE"
   | "NO_ANSWER"
   | "TIMEOUT"
-  | "REOPENED";
+  | "REOPENED"
+  | "DECIDED";
 
 /** AI の調査の状況。 */
 export type InvestigationStatus = "NOT_RUN" | "RUNNING" | "DONE" | "FAILED";
@@ -433,6 +436,8 @@ export interface OperatorItem extends StateFields {
   read: boolean;
   /** やり取りの数 */
   messageCount: number;
+  /** 相談先の名前（相談中の件だけ。古い API では欠ける） */
+  consultants?: string[];
 }
 
 /** `GET /api/operator/inquiries` の応答。 */
@@ -496,6 +501,12 @@ export interface OperatorDetail extends StateFields {
   investigation: Investigation;
   /** AI の案（判断の案、手順の案） */
   advice: Advice;
+  /** 既定の相談先の名前（なければ空。古い API では欠ける） */
+  defaultConsultants?: string[];
+  /** 仕様の持ち主への相談（古い順。古い API では欠ける） */
+  consultations?: Consultation[];
+  /** 仕様の持ち主の決定（先例。古い順。古い API では欠ける） */
+  decisions?: Precedent[];
   /** 返事がないときの予定（本人の返事を待っている間だけ非 null） */
   noReply: NoReply | null;
   filedAt: string;
@@ -526,7 +537,7 @@ export interface OperatorDetail extends StateFields {
 }
 
 /** 状態の履歴で、変化を起こした人。 */
-export type HistoryActor = "ASKER" | "AI" | "OPERATOR" | "TIME";
+export type HistoryActor = "ASKER" | "AI" | "OPERATOR" | "OWNER" | "TIME";
 
 /** 置き場所の名前（既定の言語）。決まっていなければ null。 */
 export interface PlacementNames {
@@ -549,4 +560,91 @@ export interface HistoryEntry extends StateFields {
   event: string;
   /** 置き直し（`PLACEMENT_CHANGED`）だけが持つ、変える前と後の置き場所。それ以外は null */
   detail?: PlacementChange | null;
+}
+
+/** 仕様の持ち主の決定の種類。 */
+export type DecisionKind =
+  "AS_INTENDED" | "DEFECT" | "ACCEPT" | "REJECT" | "ADOPT" | "DEFER" | "OTHER";
+
+/** 決定の種類（選択肢に並べる順）。 */
+export const DECISION_KINDS: DecisionKind[] = [
+  "AS_INTENDED",
+  "DEFECT",
+  "ACCEPT",
+  "REJECT",
+  "ADOPT",
+  "DEFER",
+  "OTHER",
+];
+
+/** 相談の状況。決定を待っている、決まった、取り下げた。 */
+export type ConsultationStatus = "OPEN" | "DECIDED" | "CANCELED";
+
+/** 仕様の持ち主への相談の1件。 */
+export interface Consultation {
+  id: string;
+  askedAt: string;
+  /** 相談した担当者の名前 */
+  askedBy: string;
+  /** 相談先の名前 */
+  to: string[];
+  /** 相談した文章 */
+  question: string;
+  status: ConsultationStatus;
+  closedAt: string | null;
+  /** 決まったときの先例の id */
+  precedentId: string | null;
+}
+
+/** 先例。仕様の持ち主が下した決定の記録。文章は書かれたときのままで、訳さない。 */
+export interface Precedent {
+  id: string;
+  inquiryId: string;
+  /** 決めた時点の置き場所（名前は見る人の言語） */
+  type: SystemOption | null;
+  system: SystemOption | null;
+  function: SystemOption | null;
+  /** どんな状況についての決定か */
+  situation: string;
+  decisionKind: DecisionKind;
+  decision: string;
+  reason: string;
+  decidedBy: string;
+  recordedBy: string;
+  /** 決めた人が内容を確かめたか */
+  confirmed: boolean;
+  /** 文章が書かれた言語 */
+  language: string;
+  decidedAt: string;
+}
+
+/** 仕様の持ち主の画面の、決定を待っている相談の1件。 */
+export interface OwnerConsultationItem {
+  inquiryId: string;
+  consultationId: string;
+  askedAt: string;
+  askedBy: string;
+  to: string[];
+  question: string;
+  summary: string;
+  type: SystemOption | null;
+  system: SystemOption | null;
+  function: SystemOption | null;
+  urgency: Urgency;
+  /** 本人の言語 */
+  language: string;
+}
+
+/** `GET /api/owner/consultations` の応答。 */
+export interface OwnerList {
+  items: OwnerConsultationItem[];
+}
+
+/** `POST /api/owner/inquiries/{id}/decision` のリクエスト。 */
+export interface DecisionRequest {
+  decisionKind: DecisionKind;
+  decision: string;
+  reason: string;
+  situation: string;
+  decidedBy: string;
 }

@@ -41,6 +41,9 @@ public class OperatorService {
     private static final Logger log = LoggerFactory.getLogger(OperatorService.class);
     private static final int MAX_REASON_LENGTH = 2000;
     private static final int MAX_NOTE_LENGTH = 2000;
+    private static final int MAX_CONSULTATION_LENGTH = 4000;
+    private static final int MAX_CONSULTANTS = 5;
+    private static final int MAX_CONSULTANT_NAME_LENGTH = 100;
 
     private final InquiryRepository repository;
     private final InquiryProperties properties;
@@ -51,6 +54,7 @@ public class OperatorService {
     private final InvestigationRunner runner;
     private final DrafterSkill drafter;
     private final InquiryCommitter committer;
+    private final PrecedentRepository precedents;
 
     /**
      * @param repository 問い合わせ記録の保存先
@@ -62,6 +66,7 @@ public class OperatorService {
      * @param runner 調べ直しの実行
      * @param drafter 返信の下書き
      * @param committer 下書きの利用量の保存
+     * @param precedents 先例（詳細の {@code decisions}）
      */
     OperatorService(
             InquiryRepository repository,
@@ -72,7 +77,8 @@ public class OperatorService {
             ApplicationEventPublisher events,
             InvestigationRunner runner,
             DrafterSkill drafter,
-            InquiryCommitter committer) {
+            InquiryCommitter committer,
+            PrecedentRepository precedents) {
         this.repository = repository;
         this.properties = properties;
         this.implementations = implementations;
@@ -82,6 +88,7 @@ public class OperatorService {
         this.runner = runner;
         this.drafter = drafter;
         this.committer = committer;
+        this.precedents = precedents;
     }
 
     /**
@@ -249,6 +256,80 @@ public class OperatorService {
     }
 
     /**
+     * 担当者が仕様の持ち主に相談する。相談を足し、仕様の持ち主の番にする（区間は変えない）。
+     *
+     * @param id 問い合わせの識別子
+     * @param to 相談先の名前（1〜5人）。{@code null} か空なら、既定の相談先
+     * @param question 相談の文章。前後の空白を除いて1〜4000文字
+     * @return 相談後の全内容
+     * @throws IllegalArgumentException 相談の文章が不正、相談先が1人も決まらない、6人以上、名前が不正な場合
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
+     * @throws dev.inquiryassist.core.lifecycle.IllegalTransitionException 担当者の番でない場合
+     */
+    public OperatorDetail consult(UUID id, List<String> to, String question, String lang) {
+        String trimmed = question == null ? "" : question.strip();
+        if (trimmed.isEmpty() || trimmed.length() > MAX_CONSULTATION_LENGTH) {
+            throw new IllegalArgumentException("question は前後の空白を除いて1〜" + MAX_CONSULTATION_LENGTH + "文字");
+        }
+        InquiryEntity inquiry = loadHandedOver(id);
+        List<String> targets = consultants(to, inquiry);
+        Transition transition = InquiryStateMachine.consulted(inquiry.state());
+        Instant now = Instant.now();
+        List<Consultation> all = new ArrayList<>(inquiry.consultations);
+        all.add(new Consultation(
+                UUID.randomUUID(),
+                now,
+                properties.dev().operatorName(),
+                targets,
+                trimmed,
+                ConsultationStatus.OPEN,
+                null,
+                null));
+        inquiry.consultations = all;
+        inquiry.apply(transition, now);
+        return toDetail(saveAndPublish(inquiry), lang);
+    }
+
+    /**
+     * 担当者が相談を取り下げる。相談を取り下げた相談にし、担当者の番に戻す（渡した理由は変えない）。
+     *
+     * @param id 問い合わせの識別子
+     * @return 取り下げ後の全内容
+     * @throws InquiryNotFoundException 存在しない、または担当者に渡したことがない場合
+     * @throws dev.inquiryassist.core.lifecycle.IllegalTransitionException 持ち主の決定を待っている状態でない場合
+     */
+    public OperatorDetail cancelConsultation(UUID id, String lang) {
+        InquiryEntity inquiry = loadHandedOver(id);
+        Transition transition = InquiryStateMachine.consultationCanceled(inquiry.state());
+        Instant now = Instant.now();
+        inquiry.cancelOpenConsultations(now);
+        inquiry.apply(transition, now);
+        return toDetail(saveAndPublish(inquiry), lang);
+    }
+
+    /** 相談先を決める。省くか空なら既定の相談先。1〜5人、名前は前後の空白を除いて1〜100文字。 */
+    private List<String> consultants(List<String> to, InquiryEntity inquiry) {
+        List<String> chosen = to == null || to.isEmpty() ? properties.consultantsFor(inquiry.placement()) : to;
+        List<String> names = new ArrayList<>();
+        for (String name : chosen) {
+            String trimmed = name == null ? "" : name.strip();
+            if (trimmed.isEmpty() || trimmed.length() > MAX_CONSULTANT_NAME_LENGTH) {
+                throw new IllegalArgumentException("相談先の名前は前後の空白を除いて1〜" + MAX_CONSULTANT_NAME_LENGTH + "文字");
+            }
+            if (!names.contains(trimmed)) {
+                names.add(trimmed);
+            }
+        }
+        if (names.isEmpty()) {
+            throw new IllegalArgumentException("相談先が決まりません（設定にも、指定にもありません）");
+        }
+        if (names.size() > MAX_CONSULTANTS) {
+            throw new IllegalArgumentException("相談先は" + MAX_CONSULTANTS + "人までです");
+        }
+        return List.copyOf(names);
+    }
+
+    /**
      * 担当者が本人に送る文章の下書きを作る。状態は変えず、メッセージも足さない。担当者が確かめ、直してから、別の操作で送る。
      * 利用量だけを記録する（記録の保存が、ほかの操作と競合しても、下書きは返す）。
      *
@@ -396,7 +477,14 @@ public class OperatorService {
                 .orElseThrow(() -> new InquiryNotFoundException(id));
     }
 
-    private OperatorDetail toDetail(InquiryEntity e, String lang) {
+    /**
+     * 全内容を作る。担当者向けと、仕様の持ち主向け（{@link OwnerService}）で同じ形を返すため、ここで組み立てる。
+     *
+     * @param e 問い合わせ記録
+     * @param lang 見る人の言語
+     * @return 全内容
+     */
+    OperatorDetail toDetail(InquiryEntity e, String lang) {
         // 説明だけが失敗した場合も、保存済みの調査の内容（技術メモ・出典）を出す。このとき grounded は false
         OperatorDetail.AnswerDetail answer = e.answerGrounded == null && e.technicalMemo == null
                 ? null
@@ -444,6 +532,11 @@ public class OperatorService {
                 e.handoverReason,
                 presenter.investigationOf(e),
                 presenter.adviceOf(e),
+                properties.consultantsFor(e.placement()),
+                List.copyOf(e.consultations),
+                precedents.findByInquiryIdOrderByDecidedAtAsc(e.id).stream()
+                        .map(p -> presenter.precedentOf(p, lang))
+                        .toList(),
                 presenter.noReplyOf(e),
                 MessageBodies.viewsOf(e),
                 List.copyOf(e.history),

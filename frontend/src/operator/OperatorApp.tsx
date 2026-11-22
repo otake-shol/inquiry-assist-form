@@ -21,8 +21,8 @@ import type {
   Translation,
 } from "../api/types.ts";
 import { BoardColumn } from "../components/BoardColumn.tsx";
-import { DevLink } from "../components/Navigation.tsx";
-import { NEW_INQUIRY_PATH } from "../path.ts";
+import { DevLinks } from "../components/Navigation.tsx";
+import { NEW_INQUIRY_PATH, OWNER_PATH } from "../path.ts";
 import { useI18n, useMessages } from "../i18n/context.ts";
 import { LanguageSwitch } from "../components/LanguageSwitch.tsx";
 import { DetailView, type FocusRequest } from "./DetailView.tsx";
@@ -152,9 +152,9 @@ function OperatorCard({
 }
 
 /**
- * オペレータ画面。担当者に渡したことのある問い合わせを、誰の番かで分けた列（担当者の番・本人の番・終わり）に
- * カードとして並べるボード。カードを押すと右に詳細のパネルが開く。ドラッグして「本人の番」「終わり」に
- * 落とすと、状態は変えずにパネルを開き、「本人に送る」「見送る」の入力欄にフォーカスを移す。
+ * オペレータ画面。担当者に渡したことのある問い合わせを、誰の番かで分けた列（担当者の番・相談中・本人の番・終わり）に
+ * カードとして並べるボード。カードを押すと右に詳細のパネルが開く。ドラッグして「相談中」「本人の番」「終わり」に
+ * 落とすと、状態は変えずにパネルを開き、「相談する」「本人に送る」「見送る」の入力欄にフォーカスを移す。
  * 新しい問い合わせは通知ストリームで届き、「担当者の番」の列に足される。
  * @param props 購読関数の差し替え口と、URL との受け渡し
  */
@@ -493,7 +493,11 @@ export function OperatorApp({
       setFocusRequest({ id, target: intent, token: focusCounter.current });
       onNavigate(id);
       setAnnouncement(
-        intent === "send" ? OP_TEXT.dropSend : OP_TEXT.dropDecline,
+        intent === "send"
+          ? OP_TEXT.dropSend
+          : intent === "consult"
+            ? OP_TEXT.dropConsult
+            : OP_TEXT.dropDecline,
       );
     },
   });
@@ -666,13 +670,24 @@ export function OperatorApp({
                     api.declineInquiry(detail.id, kind, reason),
                   )
                 }
+                onConsult={(to, question) =>
+                  operate(detail.id, () => api.consult(detail.id, to, question))
+                }
+                onCancelConsultation={() =>
+                  operate(detail.id, () => api.cancelConsultation(detail.id))
+                }
               />
             )}
           </section>
         )}
       </div>
       {showDevLink && (
-        <DevLink to={NEW_INQUIRY_PATH}>{USER_TEXT.devToAsker}</DevLink>
+        <DevLinks
+          links={[
+            { to: NEW_INQUIRY_PATH, label: USER_TEXT.devToAsker },
+            { to: OWNER_PATH, label: USER_TEXT.devToOwner },
+          ]}
+        />
       )}
       <div className="visually-hidden" aria-live="polite">
         {announcement}

@@ -72,7 +72,8 @@ class OllamaSkillsTest {
                 new InquiryProperties.Trace(true),
                 new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"),
                 java.util.Map.of(),
-                InquiryProperties.Rules.defaults());
+                InquiryProperties.Rules.defaults(),
+                List.of());
     }
 
     private OllamaClient client() {

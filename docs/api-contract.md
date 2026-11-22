@@ -24,11 +24,11 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 | 項目 | 値 | 意味 |
 | --- | --- | --- |
 | 区間（`phase`） | `INTAKE`（受付）／`KNOW`（分かる）／`DECIDE`（決まる）／`ACT`（行われる）／`CLOSED`（終わり） | いま埋めようとしている不足の種類。`framework.md` の区間に、受付と終わりを加えたもの |
-| 誰の番か（`turn`） | `ASKER`（本人）／`AI`／`OPERATOR`（担当者）。終わった件は `null` | 次に動く人 |
+| 誰の番か（`turn`） | `ASKER`（本人）／`AI`／`OPERATOR`（担当者）／`OWNER`（仕様の持ち主）。終わった件は `null` | 次に動く人 |
 | 待っていること（`awaiting`） | 下の表。終わった件は `null` | 番の人に、何をしてもらうのを待っているか。画面は、これを見て描くものを決める |
 | 終わり方（`ending`） | `RESOLVED`（解決済み）／`ANSWERED`（回答済み）／`DECLINED`（見送り）／`WITHDRAWN`（取り下げ）。終わっていない件は `null` | 不足は埋まったか |
 
-仕様の持ち主への相談（持ち主の番）は、段階3で加える。
+仕様の持ち主の番（`OWNER`）になるのは、担当者が相談している間だけ（「仕様の持ち主への相談」の節）。
 
 ### 待っていること
 
@@ -40,6 +40,7 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
 | `RESULT_CONFIRMATION` | 本人 | 分かる、決まる、行われる | 結果（AI の答え、または担当者が伝えた結果）を、本人が確かめている | 結果の確かめ（7） |
 | `HANDLING` | 担当者 | 分かる、決まる、行われる | 担当者が受けている | 担当者の操作（「担当者の操作」の節） |
 | `ASKER_REPLY` | 本人 | 分かる、決まる、行われる | 担当者が本人に聞き返し、返事を待っている | 追記（11） |
+| `CONSULTATION` | 仕様の持ち主 | 分かる、決まる、行われる | 担当者が仕様の持ち主に相談し、決定を待っている | 持ち主の決定、担当者の取り下げ（「仕様の持ち主への相談」の節） |
 
 ### 種類ごとの経路
 
@@ -68,6 +69,7 @@ description: 問い合わせフォームの画面とAPIの間のHTTP契約。状
   | `NO_ANSWER` | AI が答えられなかった（`HOW_TO`、`HOW_IT_WORKS`、種類が決まっていない場合） |
   | `TIMEOUT` | 調査が時間内に終わらなかった |
   | `REOPENED` | 本人が、終わった件に追記した |
+  | `DECIDED` | 仕様の持ち主が、相談に答えて決めた（担当者の番に戻った） |
 
 - 初めて渡したときに、担当者に通知する（「オペレータへの通知」の節）。その時刻を `handedOverAt` に持つ。2回目以降は通知しない（担当者のボードには、番が戻ったことが即時に届く）。
 - 担当者の側の未読（`read`）を `false` にする。
@@ -598,6 +600,7 @@ AI が失敗しても、この操作はエラーにしない（受付と聞き�
 | 言語 | `ja`、`en`（既定は `ja`） |
 | 種類（`en`） | How to use something（Steps for an operation）、How something works（Why it behaves the way it does）、Something looks wrong（It does not behave as expected）、Do something for me（Fix data or change a setting）、Change something（Add or improve a feature）。括弧の中は説明文（`hint`） |
 | 緊急度（`en`） | Normal、Urgent、Work is blocked |
+| `consultants` | 全体の相談先。「仕様の持ち主（開発用）」の1人 |
 | `filed-guidance` | `ja` は「担当者が内容を確認し、このページに返信します。返信が届くと「送った問い合わせ」に印がつきます。」。`en` は「The support team will review this and reply on this page. When a reply arrives, a mark appears in “My inquiries”.」 |
 | システム | `system-a`（システムA。機能は `a-1`（機能A-1）、`a-2`（機能A-2））、`system-b`（システムB。機能は `b-1`（機能B-1））、`system-c`（システムC。機能の設定なし） |
 | マスの設定 | 1件。`system-a` の `LOOKS_WRONG` に、質問「いつから起きていますか」（選択肢は、今日から、今週から、もっと前から） |
@@ -626,11 +629,11 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 
 担当者に渡したことのある問い合わせの一覧。クエリ `unreadOnly=true` で未読だけに絞る。
 
-`200` `{ "unreadCount": 2, "items": [{ "id", "filedAt", "language", "type": { "id", "label" } | null, "system": { "id", "label" } | null, "function": { "id", "label" } | null, "urgency", "summary", "sentImmediately", "read": false, "phase", "turn", "awaiting", "ending", "messageCount" }] }`。`filedAt` は、担当者に初めて渡した時刻（`handedOverAt` と同じ）。`summary` は言い直しの文章、なければ本人が書いた文章の先頭80文字、それもなければ置き場所の名前（種類、システム、機能を「・」でつないだもの）。並びは新しい順。ただし緊急度が `BLOCKED` の件を先頭に寄せる。
+`200` `{ "unreadCount": 2, "items": [{ "id", "filedAt", "language", "type": { "id", "label" } | null, "system": { "id", "label" } | null, "function": { "id", "label" } | null, "urgency", "summary", "sentImmediately", "read": false, "phase", "turn", "awaiting", "ending", "messageCount", "consultants" }] }`。`filedAt` は、担当者に初めて渡した時刻（`handedOverAt` と同じ）。`consultants` は、相談している間（`awaiting: CONSULTATION`）の相談先の名前の配列（決定を待っている相談の `to`）。相談していなければ空配列。`summary` は言い直しの文章、なければ本人が書いた文章の先頭80文字、それもなければ置き場所の名前（種類、システム、機能を「・」でつないだもの）。並びは新しい順。ただし緊急度が `BLOCKED` の件を先頭に寄せる。
 
 ### `GET /api/operator/inquiries/{id}`
 
-`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`handoverReason`、`investigation`（「調査の状況と、裏での調査」の節）、`advice`（「AI の案」の節）、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
+`200` 問い合わせの全内容。`id`、`filedAt`、`language`（本人の言語）、`askerId`、`askerName`、`utterance`、`urgency`、`type`、`system`、`function`（それぞれ InquiryView と同じ形。`by` を含む）、`intake`（InquiryView の `intake.entries` と同じ形の配列。本人が何を選び、何に「わからない」と答えたかを、聞いた順に示す）、`structured`、`revisionNotes`、`answer`（InquiryView と同じ形。ただし `citations` は照合に落ちたものも含め、各出典に `verified` を付ける）、`sentImmediately`、`read`、`slackStatus`、`phase`、`turn`、`awaiting`、`ending`、`closedBy`、`declined`、`handoverReason`、`investigation`（「調査の状況と、裏での調査」の節）、`advice`（「AI の案」の節）、`defaultConsultants`・`consultations`・`decisions`（「仕様の持ち主への相談」の節）、`noReply`（「返事がないとき」の節）、`messages`、`history`（「状態の履歴」の節）、`trace`。担当者に渡したことのない問い合わせは `NOT_FOUND`。
 
 `followUps` は廃止し、`intake` に置き換える。入力を終える前に担当者へ送られることがなくなったため、「未回答」の状態は要らなくなった。
 
@@ -652,7 +655,9 @@ API のテストは、業務らしい名前の一覧をテスト用の設定（`
 | `/operator` | ボード。問い合わせは未選択 |
 | `/operator/{id}` | ボードと、その問い合わせの詳細のパネルを開いた状態 |
 
-一覧で問い合わせを選ぶと URL が `/operator/{id}` に変わり、ブラウザの「戻る」で前の選択に戻れる。`{id}` が存在しない、または担当者に渡したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。`/operator` で始まらないパスは本人向けの画面。
+仕様の持ち主の画面は `/owner`（決定を待っている相談の一覧）と `/owner/{id}`（その問い合わせの材料と、決定の入力）。`{id}` が存在しない、または相談したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。
+
+一覧で問い合わせを選ぶと URL が `/operator/{id}` に変わり、ブラウザの「戻る」で前の選択に戻れる。`{id}` が存在しない、または担当者に渡したことがない場合は、一覧を表示したうえで「この問い合わせは見つかりませんでした」と示す。`/operator` でも `/owner` でも始まらないパスは本人向けの画面。
 
 ### `POST /api/operator/inquiries/{id}/read`
 
@@ -813,6 +818,97 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 - 担当者は、見送る場合を除いて、問い合わせを終わらせられない。結果を伝えた後、終わらせるのは本人（7）。
 - 以前の `PUT …/status`（未対応、対応中、完了の切り替え）は廃止した。
 
+### 仕様の持ち主への相談
+
+担当者が自分で決めてよいのは、既にある仕様や先例を当てはめる判断まで。新しい決定が要る件は、仕様の持ち主に相談する（`framework.md` の「段」）。相談している間は、仕様の持ち主の番になる（`turn: OWNER`、`awaiting: CONSULTATION`）。区間は変えない。持ち主が決めると、決定が先例として1つ残り、担当者の番に戻る。本人に伝えるのは担当者（本人から見た窓口を、担当者に一本化する）。
+
+**相談先**は、設定で決める。名前（文字列）の一覧で、認証を加えるまでは、名前だけを持つ。
+
+```yaml
+inquiry:
+  consultants: [仕様の持ち主（開発用）]        # 全体の相談先
+  systems:
+    - id: system-a
+      consultants: [システムAの仕様の持ち主]    # システムの相談先
+  cells:
+    - system: system-a
+      function: a-1
+      consultants: [機能A-1の仕様の持ち主]      # マスの相談先
+```
+
+- 問い合わせの相談先は、置き場所に当てはまるマスの設定（詳しい質問と同じ選び方で選んだ1つ）の `consultants`。なければ、システムの `consultants`。なければ、全体の `consultants`。担当者向けの詳細が `defaultConsultants`（名前の配列。なければ空）として返す。
+- 担当者は、相談するときに相手を替えられる。相談先が複数の人の場合は、その中の誰かが決めれば足りる。
+- 既定の設定は、全体の相談先を「仕様の持ち主（開発用）」の1人にする。
+
+**相談**（`consultations`）は、問い合わせが持つ。担当者向けの詳細が、古い順の配列で返す。
+
+```json
+"consultations": [{
+  "id": "5b0e…(UUID)", "askedAt": "2026-11-22T03:00:00Z", "askedBy": "担当者（開発用）",
+  "to": ["仕様の持ち主（開発用）"], "question": "期限ちょうどの時刻の扱いは、意図した仕様でしょうか。",
+  "status": "OPEN", "closedAt": null, "precedentId": null
+}]
+```
+
+- `status` は `OPEN`（決定を待っている）、`DECIDED`（決まった。`precedentId` に、できた先例の id）、`CANCELED`（取り下げた）。`OPEN` の相談は、同時に1つだけ。
+- 相談には、材料が付く。持ち主は、担当者と同じ内容（本人が書いたこと、言い直し、調べた結果、AI の案、やり取り）を読める（下の持ち主向けの API）。担当者が材料を書き写す必要はない。
+
+**担当者の操作**:
+
+| 操作 | エンドポイント | リクエスト | 実行できるとき | その後 |
+| --- | --- | --- | --- | --- |
+| 相談する | `POST /api/operator/inquiries/{id}/consultations` | `{ "to": ["名前"], "question": "1〜4000文字" }`。`to` は1〜5人（名前は1〜100文字）。省くか空にすると、既定の相談先 | 担当者の番 | 相談を足し、仕様の持ち主の番にする（`awaiting: CONSULTATION`）。区間は変えない。相談先が1人も決まらなければ `VALIDATION` |
+| 相談を取り下げる | `POST /api/operator/inquiries/{id}/consultations/cancel` | 本文なし | `awaiting: CONSULTATION` | 相談を `CANCELED` にし、担当者の番に戻す（`HANDLING`）。`handoverReason` は変えない |
+
+どちらも、応答は担当者向けの詳細。
+
+**持ち主向けの API**（`/api/owner` 配下。担当者向けの API と同じく、認証は後で加える）:
+
+| エンドポイント | 内容 |
+| --- | --- |
+| `GET /api/owner/consultations` | 決定を待っている相談の一覧。`200` `{ "items": [{ "inquiryId", "consultationId", "askedAt", "askedBy", "to", "question", "summary", "type", "system", "function", "urgency", "language" }] }`。古い順（長く待たせている順）。`summary`、`type`、`system`、`function` は、担当者向けの一覧と同じ決まり |
+| `GET /api/owner/inquiries/{id}` | 相談したことのある問い合わせの全内容。担当者向けの詳細と同じ形。相談したことのない問い合わせは `NOT_FOUND`。担当者の側の既読は変えない |
+| `POST /api/owner/inquiries/{id}/decision` | 決める。下のとおり |
+
+決める（`POST /api/owner/inquiries/{id}/decision`）:
+
+```json
+{ "decisionKind": "AS_INTENDED", "decision": "期限ちょうどの時刻から期限切れとして扱うのは、意図した仕様です。",
+  "reason": "締め切りの時刻を過ぎた応募を受け付けないため。", "situation": "掲載期限の時刻ちょうどに、求人が一覧から消える。",
+  "decidedBy": "仕様の持ち主（開発用）" }
+```
+
+- `decisionKind` は、決定の種類。`AS_INTENDED`（意図どおり）、`DEFECT`（不具合）、`ACCEPT`（受ける）、`REJECT`（受けない）、`ADOPT`（採用する）、`DEFER`（見送る）、`OTHER`（その他）のいずれか。
+- `decision`（決定の内容）と `reason`（理由）は1〜4000文字。`decidedBy`（決めた人の名前）は1〜100文字。
+- `situation`（どんな状況についての決定か）は1〜4000文字。省くと、言い直しの文章。なければ、本人が書いた文章の先頭200文字。それもなければ、相談の文章。
+- 実行できるのは `awaiting: CONSULTATION` のとき。それ以外は `INVALID_STATE`。
+- その後: **先例を1つ作る**（下の「先例」）。相談を `DECIDED` にする。担当者の番に戻す（`HANDLING`。`handoverReason: DECIDED`）。担当者の側を未読に戻し、担当者のストリームに `updated` を流す。応答は、担当者向けの詳細と同じ形。
+
+**先例**（precedent）は、仕様の持ち主が下した決定の記録。問い合わせとは別に持ち、問い合わせが終わっても残る。人が下した決定は、ここにしか残らないため。
+
+```json
+{ "id": "9c1d…(UUID)", "inquiryId": "0b9c…", "type": { "id": "LOOKS_WRONG", "label": "おかしいかもしれない" },
+  "system": { "id": "system-a", "label": "システムA" }, "function": null,
+  "situation": "…", "decisionKind": "AS_INTENDED", "decision": "…", "reason": "…",
+  "decidedBy": "仕様の持ち主（開発用）", "recordedBy": "OWNER", "confirmed": true, "language": "ja", "decidedAt": "2026-11-22T04:00:00Z" }
+```
+
+- 先例のマス（`type`、`system`、`function`）は、決めた時点の問い合わせの置き場所。後から問い合わせを置き直しても、先例のマスは変えない。名前（`label`）は、見る人の言語で返す。
+- `situation`、`decision`、`reason` は、書かれた内容。書かれたときのまま持ち、訳さない。`language` は、決めたときの見る人の言語。
+- `recordedBy` は、記録した人（`OWNER`。担当者が代わりに記録する場合は、後の区切りで加える）。`confirmed` は、決めた人が内容を確かめたか（持ち主が自分で記録した先例は、最初から `true`）。
+- 担当者向けの詳細は、その問い合わせから生まれた先例を `decisions`（古い順の配列）として返す。
+- 先例と相談は、担当者と持ち主にだけ返す。本人向けの InquiryView には含めない。本人には、`turn: OWNER`、`awaiting: CONSULTATION` であることだけが見える。
+
+**相談している間の、ほかの操作**:
+
+| 操作 | 扱い |
+| --- | --- |
+| 本人の追記（11） | 番は変えない（持ち主の番のまま）。担当者の側を未読に戻す |
+| 本人の取り下げ（12） | 終わる。`OPEN` の相談は `CANCELED` にする |
+| 担当者が聞き返す、結果を伝える、見送る、区間を変える | 担当者の番ではないので `INVALID_STATE`。先に、相談を取り下げる |
+| 担当者が置き直す、調べ直す、下書き以外の読み取り（訳） | これまでどおり（終わっていなければ、できる） |
+| 返事がないときの決まり | 対象外（本人の返事を待っているのではないため） |
+
 ### 訳
 
 本人の言語と、担当者が見ている言語が違う場合、担当者は訳を頼める（LG-4。スキルの構成は `skill-architecture.md` の「訳のスキル」）。
@@ -888,7 +984,7 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 { "at": "2026-11-22T03:00:00Z", "actor": "OPERATOR", "event": "ASKED_BACK", "phase": "DECIDE", "turn": "ASKER", "awaiting": "ASKER_REPLY", "ending": null }
 ```
 
-- `actor` は、その変化を起こした人。`ASKER`、`AI`、`OPERATOR`、`TIME`（期間が過ぎたことで起きた）のいずれか。
+- `actor` は、その変化を起こした人。`ASKER`、`AI`、`OPERATOR`、`OWNER`（仕様の持ち主）、`TIME`（期間が過ぎたことで起きた）のいずれか。
 - `detail` は、`PLACEMENT_CHANGED` 以外では `null`。
 - `phase`、`turn`、`awaiting`、`ending` は、変化の後の状態。
 - `event` は次のいずれか。
@@ -910,6 +1006,9 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 | `REOPENED` | 本人 | 終わった件を、追記で開き直した |
 | `REMINDED` | 時間 | 返事がないことを、本人に知らせた（状態は変わらない） |
 | `ANSWERED` | 時間 | 返事がないまま期間が過ぎて、終わった |
+| `CONSULTED` | 担当者 | 仕様の持ち主に相談した |
+| `DECIDED` | 仕様の持ち主 | 相談に答えて決めた（先例が1つできた） |
+| `CONSULTATION_CANCELED` | 担当者 | 相談を取り下げた |
 | `PHASE_CHANGED` | 担当者 | 区間を変えた |
 | `PLACEMENT_CHANGED` | 担当者 | 置き直した。この出来事だけ `detail` を持つ: `{ "before": { "type": "おかしいかもしれない", "system": "システムA", "function": null }, "after": { … } }`。値は、既定の言語の名前。決まっていなければ `null` |
 

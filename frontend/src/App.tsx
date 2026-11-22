@@ -17,7 +17,7 @@ import { ErrorNotice } from "./components/ErrorNotice.tsx";
 import { FollowUp } from "./components/Exchange.tsx";
 import { InquiryListPage } from "./components/InquiryListPage.tsx";
 import { MockBar } from "./components/MockBar.tsx";
-import { DevLink, UserHeader } from "./components/Navigation.tsx";
+import { DevLinks, UserHeader } from "./components/Navigation.tsx";
 import {
   Closing,
   FiledNotice,
@@ -36,6 +36,7 @@ import {
   inquiryPathOf,
   parseRoute,
   type Route,
+  OWNER_PATH,
 } from "./path.ts";
 import {
   canAppend,
@@ -636,7 +637,12 @@ export default function App({ subscribe = subscribeAnswerStream }: AppProps) {
         </>
       )}
       {(mock || trace) && (
-        <DevLink to="/operator">{USER_TEXT.devToOperator}</DevLink>
+        <DevLinks
+          links={[
+            { to: "/operator", label: USER_TEXT.devToOperator },
+            { to: OWNER_PATH, label: USER_TEXT.devToOwner },
+          ]}
+        />
       )}
     </div>
   );

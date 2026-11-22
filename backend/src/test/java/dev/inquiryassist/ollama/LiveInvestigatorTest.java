@@ -79,7 +79,8 @@ class LiveInvestigatorTest {
                 new InquiryProperties.Trace(true),
                 new InquiryProperties.Dev("開発用ユーザー", "担当者（開発用）"),
                 java.util.Map.of(),
-                InquiryProperties.Rules.defaults());
+                InquiryProperties.Rules.defaults(),
+                List.of());
         OllamaInvestigatorSkill skill = new OllamaInvestigatorSkill(
                 new OllamaClient("http://localhost:11434", "30m", 42, JSON), JSON, properties, knowledge);
         StructuredInquiry inquiry =

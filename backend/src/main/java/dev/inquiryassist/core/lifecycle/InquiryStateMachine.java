@@ -100,7 +100,8 @@ public final class InquiryStateMachine {
             case RESULT_CONFIRMATION -> !ctx.handedOver();
             case INTAKE_ANSWER -> ctx.intakeComplete();
             case QUESTION_CONFIRMATION -> ctx.revisionsLeft() == 0;
-            case HANDLING, ASKER_REPLY -> false;
+            // 持ち主の決定を待っている間は、すでに担当者に渡している（相談は、担当者が始める）
+            case HANDLING, ASKER_REPLY, CONSULTATION -> false;
         };
     }
 
@@ -260,6 +261,50 @@ public final class InquiryStateMachine {
     }
 
     /**
+     * 担当者が仕様の持ち主に相談する。区間は変えず、持ち主の番にする。
+     *
+     * @param state いまの状態（{@code HANDLING}）
+     * @return 遷移
+     * @throws IllegalTransitionException 担当者の番でない場合
+     */
+    public static Transition consulted(InquiryState state) {
+        require(state, Awaiting.HANDLING);
+        return move(state, new InquiryState(state.phase(), Turn.OWNER, Awaiting.CONSULTATION, null),
+                HistoryEvent.CONSULTED, Actor.OPERATOR);
+    }
+
+    /**
+     * 仕様の持ち主が、相談に答えて決めた。担当者の番に戻し（区間は変えない）、担当者の側を未読に戻す。渡した理由は {@code DECIDED}。
+     *
+     * @param state いまの状態（{@code CONSULTATION}）
+     * @return 遷移
+     * @throws IllegalTransitionException 持ち主の決定を待っている状態でない場合
+     */
+    public static Transition decided(InquiryState state) {
+        require(state, Awaiting.CONSULTATION);
+        return move(state, new InquiryState(state.phase(), Turn.OPERATOR, Awaiting.HANDLING, null),
+                HistoryEvent.DECIDED, Actor.OWNER, HandoverReason.DECIDED);
+    }
+
+    /**
+     * 担当者が相談を取り下げる。担当者の番に戻す（区間は変えない）。渡した理由は変えない（担当者がもともと持っている件に戻るだけで、
+     * 担当者の側の未読にも戻さない）。
+     *
+     * @param state いまの状態（{@code CONSULTATION}）
+     * @return 遷移
+     * @throws IllegalTransitionException 持ち主の決定を待っている状態でない場合
+     */
+    public static Transition consultationCanceled(InquiryState state) {
+        require(state, Awaiting.CONSULTATION);
+        return new Transition(
+                new InquiryState(state.phase(), Turn.OPERATOR, Awaiting.HANDLING, null),
+                HistoryEvent.CONSULTATION_CANCELED,
+                Actor.OPERATOR,
+                false,
+                null);
+    }
+
+    /**
      * 担当者が区間を変える。番は変えない。同じ区間なら、何も変わらない（出来事は {@code null}）。
      *
      * @param state いまの状態（{@code HANDLING}）
@@ -398,6 +443,8 @@ public final class InquiryStateMachine {
         }
         return switch (state.awaiting()) {
             case HANDLING -> new Transition(state, null, Actor.ASKER, false, null);
+            // 持ち主の番のまま。担当者の側の未読に戻すのは、呼び出し側（本人の追記は、どの場合も担当者の側を未読に戻す）
+            case CONSULTATION -> new Transition(state, null, Actor.ASKER, false, null);
             case ASKER_REPLY -> move(state, new InquiryState(state.phase(), Turn.OPERATOR, Awaiting.HANDLING, null),
                     HistoryEvent.REPLIED, Actor.ASKER);
             // 担当者の結果に追記するのは、「解決していない」と答えたのと同じ

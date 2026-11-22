@@ -5,9 +5,13 @@ inquiry:
   # 時間で動く決まりは、定期的には回さない。テストは run(now) を直接呼ぶ
   rules:
     sweep-enabled: false
+  # 仕様の持ち主（相談先）。全体、システム、マスの3段を確かめる。
+  # 求人管理画面の「求人の掲載」×「使い方を知りたい」はマスの設定、求人管理画面のそのほかはシステムの設定、それ以外は全体
+  consultants: [全体の仕様の持ち主]
   systems:
     - id: job-admin
       label: { ja: 求人管理画面, en: Job admin }
+      consultants: [求人の仕様の持ち主]
       functions:
         - id: posting
           label: { ja: 求人の掲載, en: Posting }
@@ -21,6 +25,10 @@ inquiry:
     - id: reports
       label: { ja: レポート, en: Reports }
   cells:
+    - system: job-admin
+      function: posting
+      type: HOW_TO
+      consultants: [掲載の仕様の持ち主, 掲載の副担当]
     - system: job-admin
       type: LOOKS_WRONG
       questions:

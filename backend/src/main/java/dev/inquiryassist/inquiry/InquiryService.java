@@ -411,6 +411,8 @@ public class InquiryService {
         InquiryEntity inquiry = load(id, lang);
         inquiry.language = lang;
         Transition transition = InquiryStateMachine.withdrawn(inquiry.state());
+        // 決定を待っている相談は、取り下げた相談にする（問い合わせが終わるので、持ち主の一覧から消える）
+        inquiry.cancelOpenConsultations(Instant.now());
         return presenter.toView(commit(inquiry, apply(inquiry, transition, false)));
     }
 

@@ -46,7 +46,8 @@ class TimeRuleServiceTest {
                     new InquiryProperties.Trace(true),
                     new InquiryProperties.Dev("利用者", "担当者"),
                     java.util.Map.of(),
-                    InquiryProperties.Rules.defaults()),
+                    InquiryProperties.Rules.defaults(),
+                    java.util.List.of()),
             presenter,
             transaction,
             events);

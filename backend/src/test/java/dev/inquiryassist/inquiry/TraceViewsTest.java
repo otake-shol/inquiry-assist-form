@@ -28,7 +28,8 @@ class TraceViewsTest {
                 new InquiryProperties.Trace(traceEnabled),
                 new InquiryProperties.Dev("利用者", "担当者"),
                 java.util.Map.of(),
-                InquiryProperties.Rules.defaults());
+                InquiryProperties.Rules.defaults(),
+                List.of());
     }
 
     private static SkillImplementations implementations() {

@@ -39,7 +39,8 @@ class InquiryPresenterTest {
                         "job-admin",
                         names("求人管理画面", "Job admin"),
                         List.of(new InquiryProperties.FunctionEntry("posting", names("求人の掲載", "Posting"))),
-                        null)),
+                        null,
+                        List.of())),
                 List.of(),
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
                 null,
@@ -48,7 +49,8 @@ class InquiryPresenterTest {
                 new InquiryProperties.Trace(true),
                 new InquiryProperties.Dev("利用者", "担当者"),
                 Map.of(),
-                InquiryProperties.Rules.defaults());
+                InquiryProperties.Rules.defaults(),
+                List.of());
         return new InquiryPresenter(
                 new IntakeLocales(properties), properties, SkillImplementations.from(new MockEnvironment()));
     }

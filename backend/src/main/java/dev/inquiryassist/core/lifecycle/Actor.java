@@ -9,5 +9,7 @@ public enum Actor {
     /** 担当者。 */
     OPERATOR,
     /** 時間。返事がないまま期間が過ぎたことで起きた。 */
-    TIME
+    TIME,
+    /** 仕様の持ち主。 */
+    OWNER
 }

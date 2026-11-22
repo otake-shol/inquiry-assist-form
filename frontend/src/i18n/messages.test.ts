@@ -115,9 +115,55 @@ describe("英語の言葉の対応表（docs/ux-principles.md）", () => {
     );
   });
 
+  it("仕様の持ち主への相談の言葉が、表に揃っている", () => {
+    expect(en.asker.awaiting.CONSULTATION).toBe(
+      "The support team is checking with the person who decides how this should work",
+    );
+    expect(ja.asker.awaiting.CONSULTATION).toBe(
+      "担当者が、仕様を決める人に確認しています",
+    );
+    expect(en.op.columns.CONSULTING).toBe("In consultation");
+    expect(en.op.actors.OWNER).toBe("Spec owner");
+    expect(en.op.events.CONSULTED).toBe("Consulted the spec owner");
+    expect(en.op.events.DECIDED).toBe("Spec owner decided");
+    expect(en.op.events.CONSULTATION_CANCELED).toBe("Consultation withdrawn");
+    expect(en.op.handoverReasons.DECIDED).toBe("The spec owner decided");
+    expect(en.op.consultSubmit).toBe("Consult the spec owner");
+    expect(en.op.consultCancel).toBe("Withdraw the consultation");
+    expect(en.op.decisionTitle).toBe("Spec owner's decision");
+    expect(en.op.decisionKinds).toEqual({
+      AS_INTENDED: "As intended",
+      DEFECT: "Defect",
+      ACCEPT: "Accept",
+      REJECT: "Do not accept",
+      ADOPT: "Adopt",
+      DEFER: "Not now",
+      OTHER: "Other",
+    });
+    expect(ja.op.decisionKinds).toEqual({
+      AS_INTENDED: "意図どおり",
+      DEFECT: "不具合",
+      ACCEPT: "受ける",
+      REJECT: "受けない",
+      ADOPT: "採用する",
+      DEFER: "見送る",
+      OTHER: "その他",
+    });
+    expect(en.owner.listTitle).toBe("Consultations waiting for a decision");
+    expect(en.owner.refresh).toBe("Refresh");
+    expect(en.owner.submit).toBe("Record the decision");
+    expect(en.owner.recorded).toBe(
+      "The decision was recorded. It is staff's turn again.",
+    );
+    expect(ja.owner.recorded).toBe(
+      "決定を記録しました。担当者の番に戻りました。",
+    );
+  });
+
   it("担当者の画面の主な言葉が、表に揃っている", () => {
     expect(en.op.columns).toEqual({
       OPERATOR: "Staff's turn",
+      CONSULTING: "In consultation",
       ASKER: "Requester's turn",
       CLOSED: "Closed",
     });

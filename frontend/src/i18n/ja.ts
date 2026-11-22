@@ -1,5 +1,6 @@
 import type {
   Awaiting,
+  DecisionKind,
   HandoverReason,
   DeclineReasonKind,
   Ending,
@@ -131,6 +132,7 @@ export const ja = {
     traceSummary: "裏側を見る（開発者向け）",
     devToOperator: "開発用: 担当者の画面へ",
     devToAsker: "開発用: 本人の画面へ",
+    devToOwner: "開発用: 仕様の持ち主の画面へ",
   },
 
   /** エラーの文言。画面は API のエラーの `code` から文言を決める（`message` は開発者向け） */
@@ -172,6 +174,7 @@ export const ja = {
       RESULT_CONFIRMATION: "結果を確かめてください",
       HANDLING: "担当者が確認しています",
       ASKER_REPLY: "担当者から質問が届いています",
+      CONSULTATION: "担当者が、仕様を決める人に確認しています",
     } as Record<Awaiting, string>,
     /** 結果を確かめている件のうち、担当者が結果を伝えたものの言葉 */
     operatorResult: "担当者から結果が届いています",
@@ -302,6 +305,7 @@ export const ja = {
     historyEmpty: "履歴はまだありません。",
     dropSend: "「本人に送る」の入力欄を開きました",
     dropDecline: "「見送る」の入力欄を開きました",
+    dropConsult: "「相談する」の入力欄を開きました",
     exchange: "やり取り",
     noMessages: "やり取りはまだありません。",
     actionFailed:
@@ -312,6 +316,7 @@ export const ja = {
     /** 担当者のボードの列の見出し */
     columns: {
       OPERATOR: "担当者の番",
+      CONSULTING: "相談中",
       ASKER: "本人の番",
       CLOSED: "終わり",
     },
@@ -326,6 +331,7 @@ export const ja = {
       ASKER: "本人の番",
       AI: "AIの番",
       OPERATOR: "担当者の番",
+      OWNER: "仕様の持ち主の番",
     } as Record<Turn, string>,
     awaiting: {
       INTAKE_ANSWER: "入口の質問に答えている",
@@ -334,6 +340,7 @@ export const ja = {
       RESULT_CONFIRMATION: "結果の確かめ待ち",
       HANDLING: "担当者が受けている",
       ASKER_REPLY: "返事待ち",
+      CONSULTATION: "仕様の持ち主の決定待ち",
     } as Record<Awaiting, string>,
     endings: {
       RESOLVED: "解決済み",
@@ -352,6 +359,7 @@ export const ja = {
       ASKER: "本人",
       AI: "AI",
       OPERATOR: "担当者",
+      OWNER: "仕様の持ち主",
       TIME: "期間",
     } as Record<HistoryActor, string>,
     /** 状態の履歴の `event` の呼び名 */
@@ -371,6 +379,9 @@ export const ja = {
       REOPENED: "追記で開き直した",
       REMINDED: "返事がないことを本人に知らせた",
       ANSWERED: "返事がないまま終わった",
+      CONSULTED: "仕様の持ち主に相談した",
+      DECIDED: "仕様の持ち主が決めた",
+      CONSULTATION_CANCELED: "相談を取り下げた",
       PHASE_CHANGED: "区間を変えた",
       PLACEMENT_CHANGED: "置き直した",
     } as Record<string, string>,
@@ -394,6 +405,7 @@ export const ja = {
       NO_ANSWER: "AI が答えられなかった",
       TIMEOUT: "AI の調査が、時間内に終わらなかった",
       REOPENED: "本人が、終わった件に追記した",
+      DECIDED: "仕様の持ち主が決めた",
     } as Record<HandoverReason, string>,
     /** 調査の状況の行（「調べた結果」の見出しのすぐ下） */
     investigationStatus: {
@@ -446,6 +458,67 @@ export const ja = {
     waitingResult: "本人が結果を確かめるのを待っています。",
     waitingAi: "AI の処理を待っています。",
     waitingAsker: "本人の操作を待っています。",
+    /** 仕様の持ち主への相談（「本人に送る」のすぐ下） */
+    consultSummary: "相談する",
+    consultHint:
+      "相談している間は、仕様の持ち主の番になります。調べた結果や AI の案は、相談先にも見えます。",
+    consultTargets: "相談先",
+    consultOther: "ほかの人",
+    consultQuestion: "相談したいこと",
+    consultSubmit: "仕様の持ち主に相談する",
+    /** 相談している間の表示。`names` は相談先の名前 */
+    consultWaiting: (names: string) =>
+      `仕様の持ち主の決定を待っています（相談先: ${names}）`,
+    consultWaitingPlain: "仕様の持ち主の決定を待っています。",
+    consultCancel: "相談を取り下げる",
+    /** 「相談中」の列のカードに添える、相談先 */
+    consultedNote: (names: string) => `相談先: ${names}`,
+    /** 名前を並べる */
+    nameList: (names: string[]) => names.join("、"),
+    /** 仕様の持ち主の決定（「AI の案」のすぐ下の節） */
+    decisionTitle: "仕様の持ち主の決定",
+    decisionContent: "決定の内容",
+    decisionReason: "理由",
+    decisionSituation: "状況",
+    decisionKinds: {
+      AS_INTENDED: "意図どおり",
+      DEFECT: "不具合",
+      ACCEPT: "受ける",
+      REJECT: "受けない",
+      ADOPT: "採用する",
+      DEFER: "見送る",
+      OTHER: "その他",
+    } as Record<DecisionKind, string>,
+  },
+
+  /** 仕様の持ち主の画面の文言 */
+  owner: {
+    title: "仕様の持ち主",
+    tabTitle: "決定を待っている相談",
+    listTitle: "決定を待っている相談",
+    refresh: "更新",
+    empty: "決定を待っている相談は、ありません。",
+    consultTitle: "相談",
+    askedBy: "相談した人",
+    askedAt: "相談した日時",
+    consultedTo: "相談先",
+    question: "相談したこと",
+    materialTitle: "材料",
+    decideTitle: "決める",
+    situation: "状況",
+    situationHint:
+      "どんな状況についての決定かを、後から読む人に分かるように書きます",
+    kind: "決定の種類",
+    choose: "選んでください",
+    decision: "決定の内容",
+    reason: "理由",
+    decidedBy: "決めた人",
+    decidedByOther: "ほかの人",
+    decidedByName: "決めた人の名前",
+    submit: "決定を記録する",
+    note: "決定は先例として残り、次の同じ種類の問い合わせで、担当者と AI が参照します。本人への連絡は、担当者が行います。",
+    recorded: "決定を記録しました。担当者の番に戻りました。",
+    notWaiting: "この相談は、すでに決まったか、取り下げられています。",
   },
 
   /** モックの案内枠（開発者向け） */

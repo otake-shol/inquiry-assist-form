@@ -6,6 +6,7 @@ import dev.inquiryassist.core.lifecycle.Ending;
 import dev.inquiryassist.core.lifecycle.Phase;
 import dev.inquiryassist.core.lifecycle.Turn;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -26,6 +27,7 @@ import java.util.UUID;
  * @param awaiting 待っていること。終わった件は null
  * @param ending 終わり方。終わっていない件は null
  * @param messageCount やり取り（担当者の返信と本人の追記）の件数
+ * @param consultants 相談している間（{@code awaiting: CONSULTATION}）の相談先の名前（決定を待っている相談の {@code to}）。相談していなければ空
  */
 public record OperatorItem(
         UUID id,
@@ -42,7 +44,8 @@ public record OperatorItem(
         Turn turn,
         Awaiting awaiting,
         Ending ending,
-        int messageCount) {
+        int messageCount,
+        List<String> consultants) {
 
     /**
      * 置き場所（種類、システム、機能のどれか）の名前。

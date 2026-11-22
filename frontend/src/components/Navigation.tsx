@@ -97,21 +97,23 @@ export function UserHeader({
 }
 
 /** 開発用のリンクの props。 */
-interface DevLinkProps {
-  to: string;
-  children: ReactNode;
+interface DevLinksProps {
+  /** 行き先の画面ごとのリンク（いまの画面を除く） */
+  links: { to: string; label: string }[];
 }
 
 /**
- * ページの最下部に置く、控えめな開発用のリンク（本人の画面と担当者の画面の行き来）。
- * @param props 遷移先と表示
+ * ページの最下部に置く、控えめな開発用のリンク（本人の画面、担当者の画面、仕様の持ち主の画面の行き来）。
+ * @param props 行き先ごとの遷移先と表示
  */
-export function DevLink({ to, children }: DevLinkProps) {
+export function DevLinks({ links }: DevLinksProps) {
   return (
     <footer className="dev-links">
-      <NavLink to={to} className="dev-link">
-        {children}
-      </NavLink>
+      {links.map((link) => (
+        <NavLink key={link.to} to={link.to} className="dev-link">
+          {link.label}
+        </NavLink>
+      ))}
     </footer>
   );
 }

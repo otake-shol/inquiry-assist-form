@@ -154,7 +154,7 @@ const writes = (calls: RecordedCall[]) =>
   calls.filter((c) => c.method !== "GET");
 
 describe("担当者のボード: 列とカード", () => {
-  it("担当者の番・本人の番・終わりの3列に件数を添え、カードを番の列に入れる。空の列は「ありません」と示す", async () => {
+  it("担当者の番・相談中・本人の番・終わりの4列に件数を添え、カードを番の列に入れる。空の列は「ありません」と示す", async () => {
     installFakeFetch(
       routes({
         "GET /api/operator/inquiries": {
@@ -170,8 +170,9 @@ describe("担当者のボード: 列とカード", () => {
       within(board)
         .getAllByRole("heading", { level: 3 })
         .map((h) => h.textContent),
-    ).toEqual(["担当者の番", "本人の番", "終わり"]);
+    ).toEqual(["担当者の番", "相談中", "本人の番", "終わり"]);
     expect(column("担当者の番")).toHaveAccessibleName("担当者の番 1件");
+    expect(column("相談中")).toHaveAccessibleName("相談中 0件");
     expect(column("本人の番")).toHaveAccessibleName("本人の番 1件");
     expect(column("終わり")).toHaveAccessibleName("終わり 0件");
     expect(

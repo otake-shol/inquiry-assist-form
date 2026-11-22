@@ -37,7 +37,7 @@ class OperatorStreamHubTest {
 
     private static InquiryFiledEvent event() {
         return new InquiryFiledEvent(
-                new OperatorItem(UUID.randomUUID(), Instant.now(), "ja", null, null, null, Urgency.NORMAL, "要約", false, false, Phase.KNOW, Turn.OPERATOR, Awaiting.HANDLING, null, 0), java.util.Map.of());
+                new OperatorItem(UUID.randomUUID(), Instant.now(), "ja", null, null, null, Urgency.NORMAL, "要約", false, false, Phase.KNOW, Turn.OPERATOR, Awaiting.HANDLING, null, 0, java.util.List.of()), java.util.Map.of());
     }
 
     @Test
@@ -111,6 +111,6 @@ class OperatorStreamHubTest {
     }
 
     private static OperatorItem item(String summary) {
-        return new OperatorItem(UUID.randomUUID(), Instant.now(), "ja", null, null, null, Urgency.NORMAL, summary, false, false, Phase.KNOW, Turn.OPERATOR, Awaiting.HANDLING, null, 0);
+        return new OperatorItem(UUID.randomUUID(), Instant.now(), "ja", null, null, null, Urgency.NORMAL, summary, false, false, Phase.KNOW, Turn.OPERATOR, Awaiting.HANDLING, null, 0, java.util.List.of());
     }
 }

@@ -13,5 +13,7 @@ public enum Awaiting {
     /** 担当者が受けている。 */
     HANDLING,
     /** 担当者が聞き返し、本人の返事を待っている。 */
-    ASKER_REPLY
+    ASKER_REPLY,
+    /** 仕様の持ち主が、担当者の相談に答えて決める。 */
+    CONSULTATION
 }

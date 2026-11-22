@@ -36,6 +36,9 @@ public class OperatorController {
     /** 返信の下書きの依頼。{@code note} は任意（長さの検証は、前後の空白を除いてからサービスで行う）。 */
     public record DraftRequest(@NotNull ReplyKind kind, String note) {}
 
+    /** 相談。{@code to} は省くか空にすると、既定の相談先（人数と文章の長さの検証は、サービスで行う）。 */
+    public record ConsultRequest(java.util.List<String> to, @NotNull String question) {}
+
     /** 見送り。理由の長さの検証は、前後の空白を除いてから行うためサービスで行う。 */
     public record DeclineRequest(@NotNull DeclineReason reasonKind, @NotNull String reason) {}
 
@@ -139,6 +142,30 @@ public class OperatorController {
     @PostMapping("/inquiries/{id}/translation")
     public TranslationResult translation(@PathVariable UUID id, @ViewerLang String lang) {
         return translations.translate(id, lang);
+    }
+
+    /**
+     * 担当者が仕様の持ち主に相談する。
+     *
+     * @param id 問い合わせの識別子
+     * @param request 相談先と相談の文章
+     * @return 相談後の全内容
+     */
+    @PostMapping("/inquiries/{id}/consultations")
+    public OperatorDetail consult(
+            @PathVariable UUID id, @Valid @RequestBody ConsultRequest request, @ViewerLang String lang) {
+        return operators.consult(id, request.to(), request.question(), lang);
+    }
+
+    /**
+     * 担当者が相談を取り下げる。
+     *
+     * @param id 問い合わせの識別子
+     * @return 取り下げ後の全内容
+     */
+    @PostMapping("/inquiries/{id}/consultations/cancel")
+    public OperatorDetail cancelConsultation(@PathVariable UUID id, @ViewerLang String lang) {
+        return operators.cancelConsultation(id, lang);
     }
 
     /**

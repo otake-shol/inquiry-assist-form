@@ -946,6 +946,106 @@ test("担当者のパネルに AI の案が出て、下書きを確かめてか�
   expect(pageErrors).toEqual([]);
 });
 
+/**
+ * 新しい決定が要る件は、担当者が仕様の持ち主に相談する。相談している間は持ち主の番で、
+ * 持ち主が材料を読んで決めると、決定が残り、担当者の番に戻る。本人に伝えるのは担当者。
+ */
+test("担当者が仕様の持ち主に相談し、決定が残って担当者の番に戻る", async ({
+  page,
+}) => {
+  const { consoleErrors, pageErrors } = watchErrors(page);
+  const mark = `相談確認 ${Date.now()}`;
+  const ask = `この動きは意図した仕様でしょうか ${Date.now()}`;
+  const decision = `意図した仕様です ${Date.now()}`;
+
+  await fileByText(page, `${mark} システムAの機能A-1の使い方が分かりません。`);
+  const askerUrl = page.url();
+
+  const board = page.getByRole("region", { name: "受付一覧" });
+  const cardIn = (name: RegExp) =>
+    board
+      .getByRole("region", { name })
+      .getByRole("listitem")
+      .filter({ hasText: mark });
+  const detail = page.getByRole("region", { name: "問い合わせの詳細" });
+
+  // 担当者が相談する。既定の相談先が選ばれている
+  await page.goto("/operator");
+  await cardIn(/^担当者の番/)
+    .getByRole("button")
+    .click();
+  await detail.getByText("相談する", { exact: true }).click();
+  await expect(
+    detail.getByRole("checkbox", { name: "仕様の持ち主（開発用）" }),
+  ).toBeChecked();
+  await detail.getByLabel("相談したいこと").fill(ask);
+  await detail.getByRole("button", { name: "仕様の持ち主に相談する" }).click();
+  await expect(cardIn(/^相談中/)).toBeVisible();
+  await expect(cardIn(/^相談中/)).toContainText("仕様の持ち主（開発用）");
+  await expect(
+    detail.getByText(/仕様の持ち主の決定を待っています/),
+  ).toBeVisible();
+  // 相談している間は、担当者は本人に送れない
+  await expect(
+    detail.getByRole("button", { name: "結果を伝える" }),
+  ).toHaveCount(0);
+
+  // 本人には、なぜ待っているかだけが見える（相談の中身は見せない）
+  await page.goto(askerUrl);
+  await expect(
+    page.getByText("担当者が、仕様を決める人に確認しています"),
+  ).toBeVisible();
+  await expect(page.getByText(ask)).toHaveCount(0);
+
+  // 仕様の持ち主が、材料を読んで決める
+  await page.goto("/owner");
+  await expect(
+    page.getByRole("heading", { name: "決定を待っている相談" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: new RegExp(ask) }).click();
+  await expect(page).toHaveURL(/\/owner\/[0-9a-f-]{36}$/);
+  await expect(detail.getByRole("heading", { name: "材料" })).toBeVisible();
+  await expect(detail.getByText("調べた結果")).toBeVisible();
+  // 担当者の操作は、持ち主の画面には出さない
+  await expect(
+    detail.getByRole("button", { name: "結果を伝える" }),
+  ).toHaveCount(0);
+  await detail.getByLabel("決定の種類").selectOption({ label: "意図どおり" });
+  await detail.getByLabel("決定の内容").fill(decision);
+  await detail
+    .getByLabel("理由")
+    .fill("締め切りを過ぎた応募を受け付けないため。");
+  await detail.getByRole("button", { name: "決定を記録する" }).click();
+  await expect(
+    page.getByText("決定を記録しました。担当者の番に戻りました。"),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: new RegExp(ask) })).toHaveCount(
+    0,
+  );
+
+  // 担当者の番に戻り、決定が見える
+  await page.goto("/operator");
+  await cardIn(/^担当者の番/)
+    .getByRole("button")
+    .click();
+  await expect(
+    detail.getByRole("heading", { name: "仕様の持ち主の決定" }),
+  ).toBeVisible();
+  await expect(detail.getByText(decision)).toBeVisible();
+  await expect(
+    detail.getByText(/渡った理由: 仕様の持ち主が決めた/),
+  ).toBeVisible();
+  await expect(detail.getByLabel("本人に送る")).toBeVisible();
+
+  // 決定は、本人のページには出さない（伝えるのは担当者）
+  await page.goto(askerUrl);
+  await expect(page.getByText("担当者が確認しています")).toBeVisible();
+  await expect(page.getByText(decision)).toHaveCount(0);
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
 test("スマホの幅でボードがページの横幅からはみ出さない", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   for (const path of ["/operator", "/inquiries"]) {

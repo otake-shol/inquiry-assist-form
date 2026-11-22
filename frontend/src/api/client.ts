@@ -3,6 +3,7 @@ import type { Language } from "../i18n/language.ts";
 import type {
   AppConfig,
   DeclineReasonKind,
+  DecisionRequest,
   DraftResult,
   ErrorBody,
   InquiryList,
@@ -10,6 +11,7 @@ import type {
   IntakeAnswerRequest,
   OperatorDetail,
   OperatorList,
+  OwnerList,
   Phase,
   Translation,
   Urgency,
@@ -350,6 +352,68 @@ export function createClient(language: Language) {
   }
 
   /**
+   * `POST /api/operator/inquiries/{id}/consultations`。仕様の持ち主に相談する。
+   * 仕様の持ち主の番になる（区間は変えない）。応答は担当者向けの詳細。
+   * @param id 問い合わせ ID
+   * @param to 相談先の名前（1〜5人）
+   * @param question 相談したいこと（1〜4000文字）
+   */
+  function consult(
+    id: string,
+    to: string[],
+    question: string,
+  ): Promise<OperatorDetail> {
+    return request<OperatorDetail>(
+      "POST",
+      `/api/operator/inquiries/${id}/consultations`,
+      { to, question },
+    );
+  }
+
+  /**
+   * `POST /api/operator/inquiries/{id}/consultations/cancel`。相談を取り下げ、担当者の番に戻す。
+   * 本文はない。応答は担当者向けの詳細。
+   * @param id 問い合わせ ID
+   */
+  function cancelConsultation(id: string): Promise<OperatorDetail> {
+    return request<OperatorDetail>(
+      "POST",
+      `/api/operator/inquiries/${id}/consultations/cancel`,
+    );
+  }
+
+  /** `GET /api/owner/consultations`。決定を待っている相談の一覧（長く待たせている順）。 */
+  function getOwnerList(): Promise<OwnerList> {
+    return request<OwnerList>("GET", "/api/owner/consultations");
+  }
+
+  /**
+   * `GET /api/owner/inquiries/{id}`。相談したことのある問い合わせの全内容（担当者向けの詳細と同じ形）。
+   * 担当者の側の既読は変えない。
+   * @param id 問い合わせ ID
+   */
+  function getOwnerDetail(id: string): Promise<OperatorDetail> {
+    return request<OperatorDetail>("GET", `/api/owner/inquiries/${id}`);
+  }
+
+  /**
+   * `POST /api/owner/inquiries/{id}/decision`。決める。先例が1つできて、担当者の番に戻る。
+   * 応答は担当者向けの詳細と同じ形。
+   * @param id 問い合わせ ID
+   * @param decision 決定の内容
+   */
+  function decide(
+    id: string,
+    decision: DecisionRequest,
+  ): Promise<OperatorDetail> {
+    return request<OperatorDetail>(
+      "POST",
+      `/api/owner/inquiries/${id}/decision`,
+      decision,
+    );
+  }
+
+  /**
    * `POST /api/operator/inquiries/{id}/translation`。本人の言語で書かれた文章の訳を見る。
    * 訳す先は見る人の言語（`Accept-Language`）。状態は変えず、原文は置き換えない。
    * @param id 問い合わせ ID
@@ -417,6 +481,11 @@ export function createClient(language: Language) {
     investigate,
     draft,
     translate,
+    consult,
+    cancelConsultation,
+    getOwnerList,
+    getOwnerDetail,
+    decide,
     setPhase,
     setPlacement,
   };

@@ -90,11 +90,49 @@ describe("パスによる画面の切り替え", () => {
     expect(
       await screen.findByRole("heading", { name: "問い合わせ受付" }),
     ).toBeInTheDocument();
-    // 1件もなくても3つの列を出し、どれも「ありません」と示す
-    expect(await screen.findAllByText("ありません")).toHaveLength(3);
+    // 1件もなくても4つの列を出し、どれも「ありません」と示す
+    expect(await screen.findAllByText("ありません")).toHaveLength(4);
     expect(
       screen.queryByRole("group", { name: "何をしたいですか" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("(k) /owner では仕様の持ち主の画面が出て、/owner/{id} では詳細を開く。/ownerx は本人向けの画面", async () => {
+    window.history.pushState({}, "", "/owner");
+    installFakeFetch({
+      "GET /api/owner/consultations": { body: { items: [] } },
+    });
+    const view = render(
+      <Root
+        subscribeAnswers={new FakeStream().subscribe}
+        subscribeOperator={new FakeOperatorStream().subscribe}
+      />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "仕様の持ち主", level: 1 }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("決定を待っている相談は、ありません。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "何をしたいですか" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "問い合わせ受付" }),
+    ).not.toBeInTheDocument();
+    view.unmount();
+
+    window.history.pushState({}, "", "/ownerx");
+    installFakeFetch({});
+    render(
+      <Root
+        subscribeAnswers={new FakeStream().subscribe}
+        subscribeOperator={new FakeOperatorStream().subscribe}
+      />,
+    );
+    expect(
+      await screen.findByRole("group", { name: "何をしたいですか" }),
+    ).toBeInTheDocument();
   });
 
   it("(j) /operator 以外では本人向けの画面が出る", async () => {

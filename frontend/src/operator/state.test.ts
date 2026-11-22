@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ja } from "../i18n/ja.ts";
 import {
   ASKER_REPLY_STATE,
+  CONSULTATION_STATE,
   HANDLING_STATE,
   INVESTIGATION_STATE,
   RESULT_STATE,
@@ -18,6 +19,7 @@ import {
   dropIntentOf,
   initialOperatorState,
   movedMessageOf,
+  OPERATOR_COLUMNS,
   operatorColumnOf,
   mergeFiled,
   operatorReducer,
@@ -91,6 +93,27 @@ describe("担当者のボードの列と並び順", () => {
     }
     // 担当者の一覧には本来出ない AI の番も、本人の番の列に入れる（落とさない）
     expect(operatorColumnOf(INVESTIGATION_STATE)).toBe("ASKER");
+    // 番が仕様の持ち主の件は「相談中」。終わっていれば「終わり」
+    expect(operatorColumnOf(CONSULTATION_STATE)).toBe("CONSULTING");
+    expect(operatorColumnOf({ ...CONSULTATION_STATE, phase: "CLOSED" })).toBe(
+      "CLOSED",
+    );
+  });
+
+  it("列は左から 担当者の番・相談中・本人の番・終わり。相談中の件は相談中の列に振り分ける", () => {
+    expect(OPERATOR_COLUMNS).toEqual([
+      "OPERATOR",
+      "CONSULTING",
+      "ASKER",
+      "CLOSED",
+    ]);
+    const board = arrangeOperatorBoard([
+      makeItem({ id: "h", ...HANDLING_STATE }),
+      makeItem({ id: "c", ...CONSULTATION_STATE }),
+    ]);
+    expect(board.OPERATOR.map((i) => i.id)).toEqual(["h"]);
+    expect(board.CONSULTING.map((i) => i.id)).toEqual(["c"]);
+    expect(board.ASKER).toEqual([]);
   });
 
   it("列ごとに振り分け、列の中は業務が止まっている件、未読の件の順に上へ寄せ、同じ条件なら新しい順にする", () => {
@@ -146,11 +169,18 @@ describe("担当者のボードの列と並び順", () => {
       ["OPERATOR", "ASKER"],
       ["OPERATOR", "CLOSED"],
     ]);
+    // 「相談中」へも、「担当者の番」からだけ落とせる。「相談中」から動かす操作は受け付けない
+    expect(canDropOnColumn("OPERATOR", "CONSULTING")).toBe(true);
+    for (const to of ["OPERATOR", "CONSULTING", "ASKER", "CLOSED"] as const) {
+      expect(canDropOnColumn("CONSULTING", to)).toBe(false);
+    }
+    expect(canDropOnColumn("ASKER", "CONSULTING")).toBe(false);
   });
 
   it("落とした列で始める操作が決まる。「本人の番」は本人に送る、「終わり」は見送る", () => {
     expect(dropIntentOf("ASKER")).toBe("send");
     expect(dropIntentOf("CLOSED")).toBe("decline");
+    expect(dropIntentOf("CONSULTING")).toBe("consult");
     expect(dropIntentOf("OPERATOR")).toBeNull();
   });
 
@@ -162,6 +192,14 @@ describe("担当者のボードの列と並び順", () => {
     expect(cardNoteOf(closedState("ANSWERED"), ja.op)).toBe("回答済み");
     expect(cardNoteOf(closedState("DECLINED"), ja.op)).toBe("見送り");
     expect(cardNoteOf(closedState("WITHDRAWN"), ja.op)).toBe("取り下げ");
+    // 相談中の列では、相談先の名前（一覧が名前を返さないときは添えない）
+    expect(
+      cardNoteOf({ ...CONSULTATION_STATE, consultants: ["A", "B"] }, ja.op),
+    ).toBe("相談先: A、B");
+    expect(cardNoteOf(CONSULTATION_STATE, ja.op)).toBeNull();
+    expect(
+      cardNoteOf({ ...CONSULTATION_STATE, consultants: [] }, ja.op),
+    ).toBeNull();
   });
 
   it("カードの区間は、分かる・決まる・行われるだけを出す", () => {

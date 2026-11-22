@@ -15,5 +15,7 @@ public enum HandoverReason {
     /** 調査が時間内に終わらなかった。 */
     TIMEOUT,
     /** 本人が、終わった件に追記した。 */
-    REOPENED
+    REOPENED,
+    /** 仕様の持ち主が、相談に答えて決めた（担当者の番に戻った）。 */
+    DECIDED
 }

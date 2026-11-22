@@ -5,6 +5,7 @@ import type {
 } from "../api/stream.ts";
 import type {
   AppConfig,
+  Consultation,
   Ending,
   StateFields,
   InquiryListItem,
@@ -14,6 +15,8 @@ import type {
   IntakeQuestion,
   OperatorDetail,
   OperatorItem,
+  OwnerConsultationItem,
+  Precedent,
   TraceEntry,
   TypeOption,
   ZeroAnswer,
@@ -122,6 +125,14 @@ export const HANDLING_STATE: StateFields = {
   phase: "DECIDE",
   turn: "OPERATOR",
   awaiting: "HANDLING",
+  ending: null,
+};
+
+/** 担当者が仕様の持ち主に相談し、決定を待っている状態。 */
+export const CONSULTATION_STATE: StateFields = {
+  phase: "DECIDE",
+  turn: "OWNER",
+  awaiting: "CONSULTATION",
   ending: null,
 };
 
@@ -416,6 +427,9 @@ export function makeDetail(
       unconfirmedQuestion: false,
     },
     advice: { status: "NOT_RUN", judgment: null, procedure: null },
+    defaultConsultants: ["仕様の持ち主（開発用）"],
+    consultations: [],
+    decisions: [],
     noReply: null,
     filedAt: "2026-11-21T05:00:00Z",
     askerId: "local-user",
@@ -509,4 +523,63 @@ export class FakeOperatorStream {
   get latest() {
     return this.subscriptions[this.subscriptions.length - 1];
   }
+}
+
+/** テスト用に、決定を待っている相談を作る。 */
+export function makeConsultation(
+  overrides: Partial<Consultation> = {},
+): Consultation {
+  return {
+    id: "con-1",
+    askedAt: "2026-11-22T03:00:00Z",
+    askedBy: "担当者（開発用）",
+    to: ["仕様の持ち主（開発用）"],
+    question: "期限ちょうどの時刻の扱いは、意図した仕様でしょうか。",
+    status: "OPEN",
+    closedAt: null,
+    precedentId: null,
+    ...overrides,
+  };
+}
+
+/** テスト用に、仕様の持ち主の決定（先例）を作る。 */
+export function makePrecedent(overrides: Partial<Precedent> = {}): Precedent {
+  return {
+    id: "prec-1",
+    inquiryId: "op-1",
+    type: { id: "LOOKS_WRONG", label: "おかしいかもしれない" },
+    system: { id: "job-admin", label: "求人管理画面" },
+    function: null,
+    situation: "掲載期限の時刻ちょうどに、求人が一覧から消える。",
+    decisionKind: "AS_INTENDED",
+    decision: "期限ちょうどから期限切れとして扱うのは、意図した仕様です。",
+    reason: "締め切りの時刻を過ぎた応募を受け付けないため。",
+    decidedBy: "仕様の持ち主（開発用）",
+    recordedBy: "OWNER",
+    confirmed: true,
+    language: "ja",
+    decidedAt: "2026-11-22T04:00:00Z",
+    ...overrides,
+  };
+}
+
+/** テスト用に、仕様の持ち主の画面の、決定を待っている相談の1件を作る。 */
+export function makeOwnerItem(
+  overrides: Partial<OwnerConsultationItem> = {},
+): OwnerConsultationItem {
+  return {
+    inquiryId: "op-1",
+    consultationId: "con-1",
+    askedAt: "2026-11-22T03:00:00Z",
+    askedBy: "担当者（開発用）",
+    to: ["仕様の持ち主（開発用）"],
+    question: "期限ちょうどの時刻の扱いは、意図した仕様でしょうか。",
+    summary: "求人が一覧に出なくなった理由を知りたい。",
+    type: { id: "LOOKS_WRONG", label: "おかしいかもしれない" },
+    system: { id: "job-admin", label: "求人管理画面" },
+    function: null,
+    urgency: "NORMAL",
+    language: "ja",
+    ...overrides,
+  };
 }

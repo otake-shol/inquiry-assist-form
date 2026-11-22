@@ -15,6 +15,9 @@ interface InquiryRepository extends JpaRepository<InquiryEntity, UUID> {
     /** 担当者に渡したことのある問い合わせを、初めて渡した新しい順に返す。 */
     List<InquiryEntity> findByHandedOverAtIsNotNullOrderByHandedOverAtDesc();
 
+    /** 指定した「待っていること」の問い合わせを返す（仕様の持ち主が、決定を待っている相談を引く）。 */
+    List<InquiryEntity> findByAwaiting(dev.inquiryassist.core.lifecycle.Awaiting awaiting);
+
     /** 担当者に渡したことのある問い合わせのうち、担当者の側が未読のものの件数を返す。 */
     long countByHandedOverAtIsNotNullAndReadAtIsNull();
 

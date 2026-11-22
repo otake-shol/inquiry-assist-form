@@ -531,4 +531,99 @@ class InquiryStateMachineTest {
                     .isInstanceOf(IllegalTransitionException.class);
         }
     }
+
+    // ---- 仕様の持ち主への相談 ----
+
+    private static InquiryState consulting(Phase phase) {
+        return new InquiryState(phase, Turn.OWNER, Awaiting.CONSULTATION, null);
+    }
+
+    @Test
+    void 相談すると持ち主の番になり_区間は変えず_担当者の番でなければ例外() {
+        for (Phase phase : List.of(Phase.KNOW, Phase.DECIDE, Phase.ACT)) {
+            Transition t = InquiryStateMachine.consulted(handling(phase));
+
+            assertThat(t.to()).isEqualTo(consulting(phase));
+            assertThat(t.event()).isEqualTo(HistoryEvent.CONSULTED);
+            assertThat(t.actor()).isEqualTo(Actor.OPERATOR);
+            assertThat(t.handsOver()).isFalse();
+            assertThat(t.handoverReason()).isNull();
+        }
+        for (InquiryState other : List.of(
+                INTAKE,
+                CONFIRMING,
+                INVESTIGATING,
+                RESULT,
+                new InquiryState(Phase.DECIDE, Turn.ASKER, Awaiting.ASKER_REPLY, null),
+                consulting(Phase.KNOW),
+                closed(Ending.RESOLVED))) {
+            assertThatThrownBy(() -> InquiryStateMachine.consulted(other)).isInstanceOf(IllegalTransitionException.class);
+        }
+    }
+
+    @Test
+    void 決めると担当者の番に戻り_区間は変えず_担当者の側が未読に戻り_理由はDECIDED() {
+        Transition t = InquiryStateMachine.decided(consulting(Phase.DECIDE));
+
+        assertThat(t.to()).isEqualTo(handling(Phase.DECIDE));
+        assertThat(t.event()).isEqualTo(HistoryEvent.DECIDED);
+        assertThat(t.actor()).isEqualTo(Actor.OWNER);
+        assertThat(t.handsOver()).isTrue();
+        assertThat(t.handoverReason()).isEqualTo(HandoverReason.DECIDED);
+        for (InquiryState other : List.of(INTAKE, INVESTIGATING, RESULT, handling(Phase.KNOW), closed(Ending.DECLINED))) {
+            assertThatThrownBy(() -> InquiryStateMachine.decided(other)).isInstanceOf(IllegalTransitionException.class);
+        }
+    }
+
+    @Test
+    void 相談を取り下げると担当者の番に戻り_理由は変えず_未読にも戻さない() {
+        Transition t = InquiryStateMachine.consultationCanceled(consulting(Phase.ACT));
+
+        assertThat(t.to()).isEqualTo(handling(Phase.ACT));
+        assertThat(t.event()).isEqualTo(HistoryEvent.CONSULTATION_CANCELED);
+        assertThat(t.actor()).isEqualTo(Actor.OPERATOR);
+        assertThat(t.handsOver()).isFalse();
+        assertThat(t.handoverReason()).isNull();
+        for (InquiryState other : List.of(INTAKE, RESULT, handling(Phase.KNOW), closed(Ending.WITHDRAWN))) {
+            assertThatThrownBy(() -> InquiryStateMachine.consultationCanceled(other))
+                    .isInstanceOf(IllegalTransitionException.class);
+        }
+    }
+
+    @Test
+    void 相談している間の本人の追記は状態を変えず_取り下げは終わる() {
+        Transition note = InquiryStateMachine.noted(consulting(Phase.KNOW), handedOver(InquiryType.HOW_TO));
+        assertThat(note.event()).isNull();
+        assertThat(note.to()).isEqualTo(consulting(Phase.KNOW));
+        assertThat(note.handsOver()).isFalse();
+
+        Transition withdrawn = InquiryStateMachine.withdrawn(consulting(Phase.KNOW));
+        assertThat(withdrawn.to()).isEqualTo(closed(Ending.WITHDRAWN));
+        assertThat(withdrawn.event()).isEqualTo(HistoryEvent.WITHDRAWN);
+        assertThat(withdrawn.actor()).isEqualTo(Actor.ASKER);
+    }
+
+    @Test
+    void 担当者の番を求める操作は相談している間は例外() {
+        InquiryState consulting = consulting(Phase.DECIDE);
+
+        assertThatThrownBy(() -> InquiryStateMachine.operatorReplied(consulting, ReplyKind.ASK))
+                .isInstanceOf(IllegalTransitionException.class);
+        assertThatThrownBy(() -> InquiryStateMachine.operatorReplied(consulting, ReplyKind.RESULT))
+                .isInstanceOf(IllegalTransitionException.class);
+        assertThatThrownBy(() -> InquiryStateMachine.declined(consulting)).isInstanceOf(IllegalTransitionException.class);
+        assertThatThrownBy(() -> InquiryStateMachine.phaseChanged(consulting, Phase.ACT))
+                .isInstanceOf(IllegalTransitionException.class);
+        assertThatThrownBy(() -> InquiryStateMachine.sentNow(consulting, handedOver(null)))
+                .isInstanceOf(IllegalTransitionException.class);
+        assertThat(InquiryStateMachine.canSendNow(consulting, handedOver(null))).isFalse();
+        // 置き直しは、番も待っていることも変えずにできる
+        Transition placement = InquiryStateMachine.placementChanged(
+                consulting, handedOver(InquiryType.HOW_TO), Placement.NONE, new Placement(InquiryType.LOOKS_WRONG, null, null));
+        assertThat(placement.to().turn()).isEqualTo(Turn.OWNER);
+        assertThat(placement.to().awaiting()).isEqualTo(Awaiting.CONSULTATION);
+        // 返事がないときの決まりの対象ではない
+        assertThat(InquiryStateMachine.timeEnding(Awaiting.CONSULTATION)).isNull();
+        assertThatThrownBy(() -> InquiryStateMachine.reminded(consulting)).isInstanceOf(IllegalTransitionException.class);
+    }
 }

@@ -9,8 +9,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Root from "./Root.tsx";
 import type { InquiryView } from "./api/types.ts";
+import { LANGUAGE_STORAGE_KEY } from "./i18n/language.ts";
 import {
   ASKER_REPLY_STATE,
+  CONSULTATION_STATE,
   FakeStream,
   RESULT_STATE,
   closedState,
@@ -450,6 +452,72 @@ describe("本人のページ: 終わり方", () => {
 
     const status = await screen.findByText("担当者が確認しています");
     expect(status).toHaveAttribute("aria-live", "polite");
+  });
+});
+
+describe("本人のページ: 担当者が仕様の持ち主に相談している間", () => {
+  it("「いまの状況」を「担当者が、仕様を決める人に確認しています」にし、入力欄は担当者が確認している間と同じ「追加で伝える」。相談の言葉は出さない", async () => {
+    openInquiry(makeFiledView({ ...CONSULTATION_STATE, messages: [] }));
+
+    const status = await screen.findByText(
+      "担当者が、仕様を決める人に確認しています",
+    );
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByLabelText("追加で伝える")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "この問い合わせを取り下げる" }),
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(FORBIDDEN);
+    expect(document.body.textContent).not.toMatch(
+      /CONSULTATION|OWNER|仕様の持ち主|相談/,
+    );
+  });
+
+  it("相談している間も、追記できる（本人の追記は POST …/messages で送る）", async () => {
+    const user = userEvent.setup();
+    const calls = openInquiry(
+      makeFiledView({ ...CONSULTATION_STATE, messages: [] }),
+      {
+        "POST /api/inquiries/inq-1/messages": {
+          body: makeFiledView({
+            ...CONSULTATION_STATE,
+            messages: [
+              makeMessage({
+                id: "m9",
+                from: "ASKER",
+                kind: "NOTE",
+                body: "補足です。",
+              }),
+            ],
+          }),
+        },
+      },
+    );
+
+    await user.type(await screen.findByLabelText("追加で伝える"), "補足です。");
+    await user.click(screen.getByRole("button", { name: "送る" }));
+
+    await waitFor(() =>
+      expect(
+        callsTo(calls, "POST", "/api/inquiries/inq-1/messages")[0].body,
+      ).toEqual({ body: "補足です。" }),
+    );
+    expect(
+      await screen.findByText("担当者が、仕様を決める人に確認しています"),
+    ).toBeInTheDocument();
+  });
+
+  it("英語では「The support team is checking with the person who decides how this should work」と出す", async () => {
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, "en");
+    openInquiry(
+      makeFiledView({ ...CONSULTATION_STATE, language: "en", messages: [] }),
+    );
+
+    expect(
+      await screen.findByText(
+        "The support team is checking with the person who decides how this should work",
+      ),
+    ).toBeInTheDocument();
   });
 });
 

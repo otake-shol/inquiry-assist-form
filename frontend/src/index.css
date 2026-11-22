@@ -1186,7 +1186,9 @@ blockquote {
 .board-columns {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(250px, 1fr);
+  /* 担当者のボードは4列（担当者の番、相談中、本人の番、終わり）。詳細のパネルを開いた状態でも、
+     ノートPCの幅（1280px）で4列が横スクロールなしに収まる幅にする。収まらないと、落とす先の列が隠れる */
+  grid-auto-columns: minmax(176px, 1fr);
   gap: 12px;
   align-items: start;
   overflow-x: auto;
@@ -1739,4 +1741,88 @@ button.small {
 .op-translation-body {
   margin: 0;
   white-space: pre-wrap;
+}
+
+/* 担当者のボードの「相談中」の列、相談する、仕様の持ち主の決定 */
+.op-consult-targets {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.op-consult-target {
+  display: block;
+  margin: 2px 0;
+}
+
+.op-consult-question {
+  margin: 4px 0 8px;
+}
+
+/* 人が下した決定は実線の枠（AI の案の点線の枠と見分ける） */
+.op-decisions {
+  margin: 16px 0;
+}
+
+.op-decision {
+  margin: 8px 0;
+  padding: 10px 14px;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.op-decision h4 {
+  margin: 0 0 6px;
+}
+
+.op-decision-kind {
+  padding: 1px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+/* 仕様の持ち主の画面 */
+.owner-list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.owner-list-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.owner-cards {
+  margin-top: 12px;
+}
+
+.owner-recorded {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+
+.owner-consultation,
+.owner-decide {
+  margin: 16px 0;
+}
+
+.owner-material-title {
+  margin-top: 20px;
+}
+
+.owner-decide-form {
+  display: grid;
+  gap: 6px;
+}
+
+.dev-link + .dev-link {
+  margin-left: 16px;
 }

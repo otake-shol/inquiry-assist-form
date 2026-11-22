@@ -7,5 +7,7 @@ public enum Turn {
     /** AI。 */
     AI,
     /** 担当者。 */
-    OPERATOR
+    OPERATOR,
+    /** 仕様の持ち主。担当者が相談している間だけ。 */
+    OWNER
 }

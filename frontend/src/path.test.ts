@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inquiryPathOf, parseRoute } from "./path.ts";
+import { inquiryPathOf, ownerPathOf, parseRoute } from "./path.ts";
 
 describe("parseRoute", () => {
   it("/ は新しい問い合わせ、/inquiries は一覧", () => {
@@ -38,6 +38,18 @@ describe("parseRoute", () => {
     });
   });
 
+  it("/owner と /owner/{id} は仕様の持ち主の画面。エンコードされた id も復元する", () => {
+    expect(parseRoute("/owner")).toEqual({ kind: "owner", id: null });
+    expect(parseRoute("/owner/")).toEqual({ kind: "owner", id: null });
+    expect(parseRoute("/owner/op-1")).toEqual({ kind: "owner", id: "op-1" });
+    expect(parseRoute(ownerPathOf("a b/c"))).toEqual({
+      kind: "owner",
+      id: "a b/c",
+    });
+    expect(ownerPathOf(null)).toBe("/owner");
+    expect(ownerPathOf("op-1")).toBe("/owner/op-1");
+  });
+
   it("別の単語や深いパスは新しい問い合わせ（本人向けの入力）として扱う", () => {
     for (const path of [
       "/inquiriesx",
@@ -46,6 +58,9 @@ describe("parseRoute", () => {
       "/x/inquiries",
       "/operatorx",
       "/operator/a/b",
+      "/ownerx",
+      "/owner/a/b",
+      "/x/owner",
     ]) {
       expect(parseRoute(path)).toEqual({ kind: "new" });
     }

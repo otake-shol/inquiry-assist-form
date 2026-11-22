@@ -53,7 +53,8 @@ class DraftUsageConflictTest {
                 new InquiryProperties.Trace(true),
                 new InquiryProperties.Dev("利用者", "担当者"),
                 Map.of(),
-                InquiryProperties.Rules.defaults());
+                InquiryProperties.Rules.defaults(),
+                List.of());
         OperatorService service = new OperatorService(
                 repository,
                 properties,
@@ -63,7 +64,8 @@ class DraftUsageConflictTest {
                 mock(ApplicationEventPublisher.class),
                 mock(InvestigationRunner.class),
                 drafter,
-                committer);
+                committer,
+                mock(PrecedentRepository.class));
 
         DraftResult result = service.draft(inquiry.id, ReplyKind.ASK, null);
 

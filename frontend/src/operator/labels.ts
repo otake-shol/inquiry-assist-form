@@ -138,6 +138,8 @@ export function waitingText(
       return op.waitingAskerReply;
     case "RESULT_CONFIRMATION":
       return op.waitingResult;
+    case "CONSULTATION":
+      return op.consultWaitingPlain;
     default:
       return detail.turn === "AI" ? op.waitingAi : op.waitingAsker;
   }

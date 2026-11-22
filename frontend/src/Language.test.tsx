@@ -1543,7 +1543,12 @@ describe("英語の担当者の画面", () => {
       within(board)
         .getAllByRole("heading", { level: 3 })
         .map((h) => h.textContent),
-    ).toEqual(["Staff's turn", "Requester's turn", "Closed"]);
+    ).toEqual([
+      "Staff's turn",
+      "In consultation",
+      "Requester's turn",
+      "Closed",
+    ]);
     const card = (text: string) =>
       screen.getByText(text).closest("button") as HTMLElement;
     expect(card("Mine.")).toHaveTextContent("Stage Decide");

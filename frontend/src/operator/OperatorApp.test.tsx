@@ -254,7 +254,7 @@ describe("オペレータ画面", () => {
 
     const board = screen.getByRole("region", { name: "受付一覧" });
     expect(within(board).queryAllByRole("button")).toHaveLength(0);
-    expect(within(board).getAllByText("ありません")).toHaveLength(3);
+    expect(within(board).getAllByText("ありません")).toHaveLength(4);
   });
 });
 

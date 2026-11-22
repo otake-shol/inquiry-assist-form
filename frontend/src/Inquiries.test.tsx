@@ -25,6 +25,7 @@ import {
   makeView,
   type RecordedCall,
   ASKER_REPLY_STATE,
+  CONSULTATION_STATE,
   HANDLING_STATE,
   INTAKE_STATE,
   INVESTIGATION_STATE,
@@ -282,6 +283,40 @@ describe("送った問い合わせのボード", () => {
     expect(note("調べている件")).toBe("調べています");
     expect(note("解決した件")).toBe("解決済み");
     expect(note("見送られた件")).toBe("見送り");
+  });
+
+  it("担当者が仕様の持ち主に相談している件は、「相手の番」の列に入り、「担当者が、仕様を決める人に確認しています」と添える。相談の中身は出さない", async () => {
+    installFakeFetch({
+      ...config,
+      "GET /api/inquiries": {
+        body: {
+          unreadReplyCount: 0,
+          items: [
+            makeListItem({
+              id: "c",
+              summary: "相談されている件。",
+              ...CONSULTATION_STATE,
+            }),
+          ],
+        },
+      },
+    });
+    open("/inquiries");
+
+    await screen.findByRole("link", { name: /相談されている件/ });
+    const theirs = screen.getByRole("region", { name: "相手の番 1件" });
+    const card = within(theirs).getByRole("listitem");
+    expect(card.querySelector(".board-note")?.textContent).toBe(
+      "担当者が、仕様を決める人に確認しています",
+    );
+    expect(
+      within(
+        screen.getByRole("region", { name: "あなたの番 0件" }),
+      ).queryByRole("listitem"),
+    ).toBeNull();
+    expect(document.body.textContent).not.toMatch(
+      /CONSULTATION|OWNER|仕様の持ち主/,
+    );
   });
 
   it("列の中は、未読の返信を上に寄せ、同じ条件なら新しい順に並ぶ", async () => {

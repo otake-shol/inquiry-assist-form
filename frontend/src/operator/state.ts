@@ -7,18 +7,19 @@ import { sortUrgentUnreadNewest, timeOf } from "../flow/board.ts";
 import type { Messages } from "../i18n/messages.ts";
 import { movedText } from "./labels.ts";
 
-/** 担当者のボードの列。誰の番かで分ける。左から並べる順。 */
-export type OperatorColumn = "OPERATOR" | "ASKER" | "CLOSED";
+/** 担当者のボードの列。誰の番かで分ける。左から並べる順。`CONSULTING` は「相談中」（仕様の持ち主の番）。 */
+export type OperatorColumn = "OPERATOR" | "CONSULTING" | "ASKER" | "CLOSED";
 
 /** 担当者のボードの列の並び（左から）。 */
 export const OPERATOR_COLUMNS: OperatorColumn[] = [
   "OPERATOR",
+  "CONSULTING",
   "ASKER",
   "CLOSED",
 ];
 
-/** カードを落としたときに始める操作。「本人に送る」の入力欄か、「見送る」の入力欄を開く。 */
-export type DropIntent = "send" | "decline";
+/** カードを落としたときに始める操作。「本人に送る」「相談する」「見送る」のどれかの入力欄を開く。 */
+export type DropIntent = "send" | "consult" | "decline";
 
 /** オペレータ画面の状態。 */
 export interface OperatorState {
@@ -101,14 +102,16 @@ export function visibleItems(
 
 /**
  * 問い合わせが入る担当者のボードの列（docs/ux-principles.md の「列」の表）。
- * 終わっていれば「終わり」、番が担当者なら「担当者の番」、それ以外（本人の番）は「本人の番」。
+ * 終わっていれば「終わり」、番が担当者なら「担当者の番」、番が仕様の持ち主なら「相談中」、
+ * それ以外（本人の番）は「本人の番」。
  * @param item 一覧の1件
  */
 export function operatorColumnOf(
   item: Pick<StateFields, "phase" | "turn">,
 ): OperatorColumn {
   if (item.phase === "CLOSED") return "CLOSED";
-  return item.turn === "OPERATOR" ? "OPERATOR" : "ASKER";
+  if (item.turn === "OPERATOR") return "OPERATOR";
+  return item.turn === "OWNER" ? "CONSULTING" : "ASKER";
 }
 
 /**
@@ -122,6 +125,7 @@ export function arrangeOperatorBoard(
 ): Record<OperatorColumn, OperatorItem[]> {
   const board: Record<OperatorColumn, OperatorItem[]> = {
     OPERATOR: [],
+    CONSULTING: [],
     ASKER: [],
     CLOSED: [],
   };
@@ -138,8 +142,8 @@ export function arrangeOperatorBoard(
 }
 
 /**
- * カードを別の列に落とせるか。落とせるのは「担当者の番」から「本人の番」「終わり」へだけ。
- * 番を戻すのは本人の操作なので、「本人の番」や「終わり」から動かす操作は受け付けない。
+ * カードを別の列に落とせるか。落とせるのは「担当者の番」から「相談中」「本人の番」「終わり」へだけ。
+ * 番を戻すのは本人か仕様の持ち主の操作なので、「相談中」「本人の番」「終わり」から動かす操作は受け付けない。
  * @param from 掴んだカードがある列
  * @param to 落とす先の列
  */
@@ -151,28 +155,36 @@ export function canDropOnColumn(
 }
 
 /**
- * 落とした列に対応する、始める操作。「本人の番」なら「本人に送る」、「終わり」なら「見送る」。
+ * 落とした列に対応する、始める操作。「本人の番」なら「本人に送る」、「相談中」なら「相談する」、
+ * 「終わり」なら「見送る」。
  * @param to 落とす先の列
  */
 export function dropIntentOf(to: OperatorColumn): DropIntent | null {
   if (to === "ASKER") return "send";
+  if (to === "CONSULTING") return "consult";
   if (to === "CLOSED") return "decline";
   return null;
 }
 
 /**
  * カードに添える、待っていることや終わり方。「本人の番」の列では何を待っているか
- * （返事待ち、結果の確かめ待ち）、「終わり」の列では終わり方。「担当者の番」の列には添えない。
+ * （返事待ち、結果の確かめ待ち）、「相談中」の列では相談先の名前（分かるときだけ）、
+ * 「終わり」の列では終わり方。「担当者の番」の列には添えない。
  * @param item 一覧の1件
  * @param op 辞書の、担当者の画面の文言（`messages.op`）
  */
 export function cardNoteOf(
-  item: Pick<StateFields, "phase" | "turn" | "awaiting" | "ending">,
+  item: Pick<StateFields, "phase" | "turn" | "awaiting" | "ending"> &
+    Pick<OperatorItem, "consultants">,
   op: Messages["op"],
 ): string | null {
   const column = operatorColumnOf(item);
   if (column === "CLOSED") {
     return item.ending === null ? null : op.endings[item.ending];
+  }
+  if (column === "CONSULTING") {
+    const names = item.consultants ?? [];
+    return names.length === 0 ? null : op.consultedNote(op.nameList(names));
   }
   if (column === "ASKER") {
     return item.awaiting === null ? null : op.awaiting[item.awaiting];

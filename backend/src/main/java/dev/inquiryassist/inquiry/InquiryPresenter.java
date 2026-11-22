@@ -137,7 +137,8 @@ class InquiryPresenter {
                 e.turn,
                 e.awaiting,
                 e.ending,
-                e.messages.size());
+                e.messages.size(),
+                consultantsOf(e));
     }
 
     /**
@@ -309,6 +310,40 @@ class InquiryPresenter {
                 e.investigationStartedAt,
                 e.investigationFinishedAt,
                 e.investigationUnconfirmedQuestion);
+    }
+
+    /** 相談している間の相談先（決定を待っている相談の {@code to}）。相談していなければ空。 */
+    private static List<String> consultantsOf(InquiryEntity e) {
+        Consultation open = e.awaiting == Awaiting.CONSULTATION ? e.openConsultation() : null;
+        return open == null ? List.of() : open.to();
+    }
+
+    /**
+     * 先例の表現を作る。名前（種類、システム、機能）は、見る人の言語で引く。設定から消えた識別子は、識別子のまま名前にする。
+     *
+     * @param p 先例
+     * @param lang 見る人の言語
+     * @return 先例の表現
+     */
+    PrecedentView precedentOf(PrecedentEntity p, String lang) {
+        IntakeCatalog catalog = locales.catalog(lang);
+        return new PrecedentView(
+                p.id,
+                p.inquiryId,
+                p.type == null ? null : new PrecedentView.Ref(p.type.name(), catalog.typeLabel(p.type)),
+                p.systemId == null ? null : new PrecedentView.Ref(p.systemId, catalog.systemLabel(p.systemId)),
+                p.functionId == null
+                        ? null
+                        : new PrecedentView.Ref(p.functionId, catalog.functionLabel(p.systemId, p.functionId)),
+                p.situation,
+                p.decisionKind,
+                p.decision,
+                p.reason,
+                p.decidedBy,
+                p.recordedBy,
+                p.confirmed,
+                p.language,
+                p.decidedAt);
     }
 
     /**

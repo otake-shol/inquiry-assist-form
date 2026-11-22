@@ -32,6 +32,12 @@ public enum HistoryEvent {
     REMINDED,
     /** 返事がないまま期間が過ぎて、終わった。 */
     ANSWERED,
+    /** 担当者が仕様の持ち主に相談した。 */
+    CONSULTED,
+    /** 仕様の持ち主が、相談に答えて決めた（先例が1つできた）。 */
+    DECIDED,
+    /** 担当者が相談を取り下げた。 */
+    CONSULTATION_CANCELED,
     /** 担当者が区間を変えた。 */
     PHASE_CHANGED,
     /** 担当者が置き直した。 */
