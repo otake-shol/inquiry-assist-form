@@ -86,16 +86,4 @@ class TimeRuleSettingsTest {
         dev.withInitializer(context -> context.getEnvironment().setActiveProfiles("production"))
                 .run(context -> assertThat(context).doesNotHaveBean(dev.inquiryassist.web.DevRulesController.class));
     }
-
-    @Test
-    void 手元のモデルのプロファイルは本人が待つ調査の時間切れを10分にする() {
-        runner.withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
-                .withPropertyValues("spring.profiles.active=local-ai")
-                .run(context -> assertThat(context.getBean(InquiryProperties.class).rules().answerTimeout())
-                        .isEqualTo(Duration.ofMinutes(10)));
-        // プロファイルがなければ、テスト用の設定の値（30分。本体の既定の60秒は、最初のテストが確かめている）
-        runner.withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
-                .run(context -> assertThat(context.getBean(InquiryProperties.class).rules().answerTimeout())
-                        .isEqualTo(Duration.ofMinutes(30)));
-    }
 }

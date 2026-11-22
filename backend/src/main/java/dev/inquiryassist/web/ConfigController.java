@@ -24,7 +24,7 @@ public class ConfigController {
      * @param types 種類（聞く順）
      * @param urgencies 緊急度
      * @param systems システムと、その機能の一覧
-     * @param skills スキルの識別子から、動いている実装の名前（mock または ollama）への対応
+     * @param skills スキルの識別子から、動いている実装の名前への対応（いまは、すべて mock）
      * @param trace スキルの実行記録を見せるか
      * @param user 現在の利用者
      * @param operatorName 担当者の表示名

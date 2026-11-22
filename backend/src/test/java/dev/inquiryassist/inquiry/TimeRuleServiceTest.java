@@ -38,7 +38,6 @@ class TimeRuleServiceTest {
                     new InquiryProperties.Slack(null, java.time.Duration.ofSeconds(5)),
                     null,
                     java.util.Map.of(),
-                    new InquiryProperties.Ollama("http://localhost:11434", "30m", 42),
                     new InquiryProperties.Trace(true),
                     new InquiryProperties.Dev("利用者", "担当者"),
                     java.util.Map.of(),

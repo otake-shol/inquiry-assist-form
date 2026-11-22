@@ -427,7 +427,7 @@ inquiry:
 
 `types` は5つを、聞く順（「用語」の順）で返す。`types`、`urgencies`、`systems`、`filedGuidance` は、見る人の言語で返す（「言語」の節）。`languages` は、使える言語の一覧（先頭が既定の言語）。
 
-- `skills` は、スキルの識別子から、動いている実装の名前（`mock` または `ollama`）への対応。`mock` は、スキルか一次情報の検索に、1つでもモックがあれば `true`。画面は、モックの案内枠に、どのスキルがモックかを示す。モックのシナリオのタグは、モックで動いているスキルにだけ効く（受付が実際のモデルなら、`[判定エラー]` を書いても失敗しない）。
+- `skills` は、スキルの識別子から、動いている実装の名前への対応。このリポジトリが持つ実装はモックだけなので、すべて `mock`。`mock` は、スキルか一次情報の検索に、1つでもモックがあれば `true`。画面は、モックの案内枠に、どのスキルがモックかを示す。モックのシナリオのタグは、モックで動いているスキルにだけ効く。
 - `trace` は、スキルの実行記録を返すかどうか（「スキルの実行記録」の節）。
 - `user` と `operatorName` は、画面に出す名前。認証がないので、設定の固定値（`inquiry.dev.*`）。
 
@@ -699,7 +699,7 @@ AI の調査（調査、照合、説明）は、本人が待っている間（`a
 
 | キー | 既定 | 意味 |
 | --- | --- | --- |
-| `inquiry.rules.answer-timeout` | `60s` | 本人が待つ調査を、担当者に引き継ぐまでの時間。プロファイル `local-ai` では `10m`（手元のモデルは、調査に60秒以上かかるのが普通のため） |
+| `inquiry.rules.answer-timeout` | `60s` | 本人が待つ調査を、担当者に引き継ぐまでの時間 |
 
 ### AI の案（advice）
 
@@ -922,11 +922,11 @@ inquiry:
 `trace` は、スキルの呼び出しを実行した順に並べた配列。
 
 ```json
-{ "skill": "investigator", "provider": "ollama", "model": "qwen3.6:35b", "promptVersion": "v1",
-  "inputTokens": 2663, "outputTokens": 197, "durationMillis": 2921, "failed": false }
+{ "skill": "investigator", "provider": "mock", "model": "mock", "promptVersion": "mock",
+  "inputTokens": 0, "outputTokens": 0, "durationMillis": 12, "failed": false }
 ```
 
-- `provider` は、その呼び出しがモックなら `mock`、そうでなければ設定上の実装名（`ollama`）。
+- `provider` は、その呼び出しを行った実装の名前。いまは `mock` だけ。`model`、`promptVersion`、トークン数は、実際のモデルをつないだときのための項目で、モックでは `mock` と 0 が入る。保存済みの古い記録には、以前あった実装の名前（`ollama`）と、そのモデルの名前が残っていることがある。
 - `durationMillis` は、呼び出しにかかった時間。古い記録では `null`。
 - 照合（根拠の実在の確認）は通常のコードで、スキルではないため、記録には現れない。画面は、調査と説明の間に「照合（コード）」を固定で描く。
 - 助言の案を確かめる処理（基づく事実のない案を捨てる）も通常のコードで、記録には現れない。画面は、助言の後に「案の確認（コード）」を固定で描く。

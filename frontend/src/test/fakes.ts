@@ -216,14 +216,14 @@ export function makeListItem(
   };
 }
 
-/** テスト用にスキルの実行記録の1件を作る。省略した項目は手元のモデルの調査。 */
+/** テスト用にスキルの実行記録の1件を作る。省略した項目はモックの調査。 */
 export function makeTraceEntry(
   overrides: Partial<TraceEntry> = {},
 ): TraceEntry {
   return {
     skill: "investigator",
-    provider: "ollama",
-    model: "qwen3.6:35b",
+    provider: "mock",
+    model: null,
     promptVersion: "v1",
     inputTokens: 2663,
     outputTokens: 197,

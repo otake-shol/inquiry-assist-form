@@ -7,7 +7,6 @@ import dev.inquiryassist.core.intake.IntakeCatalog;
 import dev.inquiryassist.core.intake.IntakeQuestion;
 import dev.inquiryassist.core.intake.QuestionKind;
 import dev.inquiryassist.core.lifecycle.NoReplyRule;
-import dev.inquiryassist.core.skill.Skill;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.List;
@@ -25,8 +24,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param cells マスの設定。置き場所ごとの詳しい質問。同じ指定の数なら、書かれた順で先のものを使う
  * @param slack Slack への投稿の設定
  * @param publicBaseUrl 投稿に載せるオペレータ画面へのリンクの基点。未設定ならリンクを載せない
- * @param skills スキルごとの実装の設定（キーはスキルの識別子）。書かれていないスキルは {@code mock}
- * @param ollama 手元のモデル（Ollama）の共通の設定
+ * @param skills スキルごとの実装の設定（キーはスキルの識別子）。書かれていないスキルは {@code mock}。いまは {@code mock} だけが有効
  * @param trace スキルの実行記録の設定
  * @param dev 認証を加えるまでの、利用者と担当者の表示名の仮の設定
  * @param filedGuidance 担当者に渡した後に画面が見せる案内文。言語ごと
@@ -43,7 +41,6 @@ public record InquiryProperties(
         @DefaultValue Slack slack,
         String publicBaseUrl,
         @DefaultValue Map<String, SkillSettings> skills,
-        @DefaultValue Ollama ollama,
         @DefaultValue Trace trace,
         @DefaultValue Dev dev,
         @DefaultValue Map<String, String> filedGuidance,
@@ -109,67 +106,12 @@ public record InquiryProperties(
             @DefaultValue("開発用ユーザー") String userName, @DefaultValue("担当者（開発用）") String operatorName) {}
 
     /**
-     * スキルの設定を返す。書かれていなければ、既定（モック）の設定を返す。
+     * スキルごとの実装の設定。実際のモデルの実装を足すときの、差し込み口（{@code provider}）だけを持つ。モデルの名前や時間切れなど、
+     * 実装ごとの設定は、実装を足すときに、その実装の設定として足す。
      *
-     * @param skill スキル
-     * @return スキルの設定
+     * @param provider 実装の種類。いまは {@code mock} だけが有効で、ほかの値は起動を止める（{@link SkillProviderGuard}）。既定は {@code mock}
      */
-    public SkillSettings skill(Skill skill) {
-        SkillSettings settings = skills.get(skill.id());
-        if (settings == null) {
-            settings = new SkillSettings("mock", null, 0, false, Duration.ofSeconds(60), null);
-        }
-        if (settings.promptVersion() == null || settings.promptVersion().isBlank()) {
-            settings = new SkillSettings(
-                    settings.provider(),
-                    settings.model(),
-                    settings.temperature(),
-                    settings.think(),
-                    settings.timeout(),
-                    defaultPromptVersion(skill));
-        }
-        return settings;
-    }
-
-    /**
-     * スキルのプロンプトの版の既定。入口の作り替えで指示文を新しくした4つのスキルは v2、調査は v1 のまま。
-     *
-     * @param skill スキル
-     * @return 版（{@code skills/<識別子>/system-<版>.md}）
-     */
-    public static String defaultPromptVersion(Skill skill) {
-        return skill == Skill.INVESTIGATOR ? "v1" : "v2";
-    }
-
-    /**
-     * スキルごとの実装の設定。
-     *
-     * @param provider 実装の種類（{@code mock} または {@code ollama}）。既定は {@code mock}
-     * @param model モデルの名前（ollama のとき）
-     * @param temperature 出力のばらつき。0 で毎回同じ出力になる
-     * @param think 考える過程を出力させるか。質は上がるが、応答が遅くなる
-     * @param timeout 1回の呼び出しの時間切れ
-     * @param promptVersion プロンプトの版（{@code skills/<識別子>/system-<版>.md}）。省くと {@link #defaultPromptVersion}
-     */
-    public record SkillSettings(
-            @DefaultValue("mock") String provider,
-            String model,
-            @DefaultValue("0") double temperature,
-            @DefaultValue("false") boolean think,
-            @DefaultValue("60s") Duration timeout,
-            String promptVersion) {}
-
-    /**
-     * Ollama の共通の設定。
-     *
-     * @param baseUrl Ollama の URL
-     * @param keepAlive モデルをメモリに残す時間
-     * @param seed 乱数の種。{@code options.seed} として必ず送り、出力を揃いやすくする（保証はない）
-     */
-    public record Ollama(
-            @DefaultValue("http://localhost:11434") String baseUrl,
-            @DefaultValue("30m") String keepAlive,
-            @DefaultValue("42") int seed) {}
+    public record SkillSettings(@DefaultValue("mock") String provider) {}
 
     /**
      * 問い合わせの投稿先を決める。対象システムに個別の URL があればそれ、なければ既定の URL。

@@ -1768,7 +1768,7 @@ describe("英語の開発者向けの部品", () => {
         body: {
           ...(headers["accept-language"] === "en" ? EN_CONFIG : makeConfig()),
           mock: true,
-          skills: { reception: "ollama", investigator: "mock" },
+          skills: { reception: "bedrock", investigator: "mock" },
         },
       }),
     });
@@ -1829,7 +1829,7 @@ describe("英語の開発者向けの部品", () => {
     expect(restater).toHaveTextContent("AI skill");
     expect(restater).toHaveTextContent("2 calls (total)");
     expect(restater).toHaveTextContent("Failed 1");
-    expect(restater).toHaveTextContent("Local model (qwen3.6:35b)");
+    expect(restater).toHaveTextContent("Mock");
     expect(restater).toHaveTextContent("Input 5,326 / Output 394 tokens");
     const verifier = stages.find((s) =>
       s.textContent?.includes("Verification (code)"),

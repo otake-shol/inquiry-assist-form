@@ -331,7 +331,7 @@ export interface InquiryMessage {
 export interface TraceEntry {
   /** スキルの識別子（`reception` など） */
   skill: string;
-  /** 実装の名前（`mock` / `ollama` など） */
+  /** 実装の名前（`mock`、実際のモデルをつないだ場合はその実装の名前。保存済みの古い記録も、そのまま持つ） */
   provider: string;
   model?: string | null;
   promptVersion?: string | null;
@@ -418,7 +418,7 @@ export interface AppConfig {
   systems?: ConfigSystem[];
   /** 画面に出せる言語 */
   languages?: string[];
-  /** スキルの識別子から、動いている実装（`mock` / `ollama`）への対応。古い API では無い */
+  /** スキルの識別子から、動いている実装（`mock` など）への対応。古い API では無い */
   skills?: Record<string, string>;
   /** 利用者。認証を加えるまでは設定の固定値。古い API では無い */
   user?: { id: string; name: string };

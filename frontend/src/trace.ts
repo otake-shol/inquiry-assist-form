@@ -147,7 +147,8 @@ export function formatDuration(
 }
 
 /**
- * 実装の表示。モックは「モック」、`ollama` は「手元のモデル」とモデルの名前、その他は名前のまま。
+ * 実装の表示。モックは「モック」、それ以外は API が返した実装の名前をそのまま出す（モデルの名前があれば添える）。
+ * 保存済みの古い記録の実装の名前も、そのまま出せる。
  * @param provider 実装の名前
  * @param model モデルの名前
  * @param messages 辞書（`messages`。実行記録の文言と、「A（B）」の形を持つ）
@@ -158,6 +159,5 @@ export function implementationLabel(
   messages: Messages,
 ): string {
   if (provider === "mock") return messages.trace.mock;
-  const base = provider === "ollama" ? messages.trace.local : provider;
-  return model === null ? base : messages.meta.paren(base, model);
+  return model === null ? provider : messages.meta.paren(provider, model);
 }

@@ -18,7 +18,8 @@ interface MockBarProps {
 
 /**
  * 「モック」（一部だけなら「一部モック」）バッジと、シナリオを試せる例文ボタン。
- * 一部が実際のモデルのときは、どのスキルがどちらで動いているかも示す。
+ * すべてのスキルがモックのときは、「すべてのスキルが、見本の実装で動いています」の1行だけを示す。
+ * モック以外が混ざっているときだけ、どのスキルがどちらで動いているかの内訳を示す。
  * 開発者向けの表示なので、例文は折りたたんでおき、本来の画面を押し下げない。
  * @param props 例文選択の受け口
  */
@@ -52,11 +53,11 @@ export function MockBar({ skills, onPick, canPick }: MockBarProps) {
           </span>
           <span className="mock-note">{mock.tryExamples}</span>
         </summary>
-        {mix.partial && (
-          <p className="mock-note mock-help">
-            {skillMixText(mix, messages.skills)}
-          </p>
-        )}
+        <p className="mock-note mock-help">
+          {mix.partial
+            ? skillMixText(mix, messages.skills)
+            : messages.skills.allMock}
+        </p>
         <p className="mock-note mock-help">{mock.pickHelp}</p>
         {renderGroup(mock.situations, typeExampleList(mock))}
         {renderGroup(mock.actions, tagExampleList(mock))}

@@ -1056,7 +1056,7 @@ describe("スキルの実行記録（開発者向け）", () => {
     expect(stages[2]).toHaveTextContent("2回（合計）");
     expect(stages[2]).toHaveTextContent("1.2秒");
     expect(stages[2]).toHaveTextContent("入力 300 / 出力 40 トークン");
-    expect(stages[2]).toHaveTextContent("手元のモデル（qwen3.6:35b）");
+    expect(stages[2]).toHaveTextContent("モック");
     // 照合はコードの段
     expect(stages[4]).toHaveTextContent("通常のコード");
     expect(stages[4]).toHaveClass("idle");

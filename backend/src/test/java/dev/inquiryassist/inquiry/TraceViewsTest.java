@@ -24,7 +24,6 @@ class TraceViewsTest {
                 new InquiryProperties.Slack(null, java.time.Duration.ofSeconds(5)),
                 null,
                 Map.of(),
-                new InquiryProperties.Ollama("http://localhost:11434", "30m", 42),
                 new InquiryProperties.Trace(traceEnabled),
                 new InquiryProperties.Dev("利用者", "担当者"),
                 java.util.Map.of(),
@@ -33,7 +32,7 @@ class TraceViewsTest {
     }
 
     private static SkillImplementations implementations() {
-        return SkillImplementations.from(new MockEnvironment().withProperty("inquiry.skills.investigator.provider", "ollama"));
+        return SkillImplementations.from(new MockEnvironment());
     }
 
     private static InquiryEntity entity() {
@@ -44,7 +43,7 @@ class TraceViewsTest {
     }
 
     @Test
-    void モックの呼び出しはmock_そうでなければ設定上の実装名になり実行した順に並ぶ() {
+    void モックの呼び出しはmock_モックでない保存済みの呼び出しはollamaのまま_モデルの名前もそのまま出て_実行した順に並ぶ() {
         List<TraceEntry> trace = TraceViews.of(entity(), properties(true), implementations(), true);
 
         assertThat(trace).extracting(TraceEntry::skill).containsExactly("reception", "investigator");
@@ -53,12 +52,16 @@ class TraceViewsTest {
     }
 
     @Test
-    void 設定で呼び出しがモックでなくてもUsageがモックならmockになる() {
+    void 設定上の実装が実際のモデルなら_モックでない呼び出しは設定上の実装名になる() {
+        SkillImplementations configured =
+                SkillImplementations.from(new MockEnvironment().withProperty("inquiry.skills.investigator.provider", "bedrock"));
         InquiryEntity e = new InquiryEntity("local-user", Urgency.NORMAL, Instant.now());
-        // 調査は ollama の設定だが、この呼び出しはモックだった（切り替え前の記録など）
-        e.addUsage(Skill.INVESTIGATOR, Usage.ofMock(), 1);
+        e.addUsage(Skill.INVESTIGATOR, new Usage("some-model", "v1", 10, 2, 0, false), 5);
+        e.addUsage(Skill.RECEPTION, Usage.ofMock(), 1);
 
-        assertThat(TraceViews.of(e, properties(true), implementations(), true).get(0).provider()).isEqualTo("mock");
+        assertThat(TraceViews.of(e, properties(true), configured, true))
+                .extracting(TraceEntry::provider)
+                .containsExactly("bedrock", "mock");
     }
 
     @Test

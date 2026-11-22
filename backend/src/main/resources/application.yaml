@@ -11,8 +11,8 @@ spring:
       ddl-auto: none
 
 inquiry:
-  # スキルごとの実装（mock | ollama）。設定を書かなければすべてモックで、外部のAIには接続しない。
-  # 手元のモデルで動かす設定はプロファイル local-ai（application-local-ai.yaml）。
+  # スキルごとの実装。いまは mock だけが有効で、ほかの値を指定すると起動を止める（実際のモデルの実装は、まだない。
+  # 足すときの差し込み口として、スキルごとの provider を残している）。設定を書かなければ、すべてモックで、外部のAIには接続しない。
   # 本番（プロファイル production）では、1つでもモックがあれば起動を止める
   skills:
     reception: { provider: mock }
@@ -20,11 +20,11 @@ inquiry:
     restater: { provider: mock }
     investigator: { provider: mock }
     explainer: { provider: mock }
+    advisor: { provider: mock }
+    drafter: { provider: mock }
+    translator: { provider: mock }
   knowledge:
     provider: mock
-  ollama:
-    base-url: http://localhost:11434
-    keep-alive: 30m
   mock:
     # モックの [遅延] タグで進捗の各段階が待つ時間
     slow-step-delay: 2s

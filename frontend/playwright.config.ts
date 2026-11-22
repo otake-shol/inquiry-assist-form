@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * UI スモークの設定。実際の API（モックプロファイル）と Vite を両方起動する。
+ * UI スモークの設定。実際の API（スキルは、すべてモック）と Vite を両方起動する。
  * API は `../backend` の bootRun、画面は Vite の開発サーバー。
  */
 export default defineConfig({
@@ -26,7 +26,6 @@ export default defineConfig({
       command: "bash ../scripts/gradle.sh bootRun --console=plain",
       url: "http://localhost:8080/api/config",
       env: {
-        SPRING_PROFILES_ACTIVE: "mock",
         // 調査の時間切れ（既定60秒）を、待たずに確かめるため。モックの [遅延] の調査は6秒かかる
         INQUIRY_RULES_ANSWER_TIMEOUT: "3s",
       },

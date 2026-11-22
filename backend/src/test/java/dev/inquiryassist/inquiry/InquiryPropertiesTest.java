@@ -6,7 +6,6 @@ import dev.inquiryassist.core.InquiryType;
 import dev.inquiryassist.core.Urgency;
 import dev.inquiryassist.core.intake.Choice;
 import dev.inquiryassist.core.intake.IntakeCatalog;
-import dev.inquiryassist.core.skill.Skill;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,7 +39,6 @@ class InquiryPropertiesTest {
                 new InquiryProperties.Slack(null, Duration.ofSeconds(5)),
                 null,
                 skills,
-                new InquiryProperties.Ollama("http://localhost:11434", "30m", 42),
                 new InquiryProperties.Trace(true),
                 new InquiryProperties.Dev("利用者", "担当者"),
                 java.util.Map.of(),
@@ -155,31 +153,5 @@ class InquiryPropertiesTest {
         // 名前のない言語は、既定の言語
         assertThat(withCatalog(List.of("ja", "en"), systems, List.of()).catalog("fr").systems().get(0).label())
                 .isEqualTo("システムA");
-    }
-
-    @Test
-    void プロンプトの版の既定は受付_聞き手_言い直し_説明がv2で調査がv1_設定があればそれを使う() {
-        InquiryProperties defaults = withCatalog(List.of("ja"), List.of(), List.of());
-
-        assertThat(defaults.skill(Skill.RECEPTION).promptVersion()).isEqualTo("v2");
-        assertThat(defaults.skill(Skill.INTERVIEWER).promptVersion()).isEqualTo("v2");
-        assertThat(defaults.skill(Skill.RESTATER).promptVersion()).isEqualTo("v2");
-        assertThat(defaults.skill(Skill.EXPLAINER).promptVersion()).isEqualTo("v2");
-        assertThat(defaults.skill(Skill.INVESTIGATOR).promptVersion()).isEqualTo("v1");
-
-        InquiryProperties configured = properties(
-                List.of("ja"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                Map.of(
-                        "reception",
-                        new InquiryProperties.SkillSettings("ollama", "m", 0, false, Duration.ofSeconds(5), null),
-                        "restater",
-                        new InquiryProperties.SkillSettings("ollama", "m", 0, false, Duration.ofSeconds(5), "v3")));
-        assertThat(configured.skill(Skill.RECEPTION).promptVersion()).isEqualTo("v2");
-        assertThat(configured.skill(Skill.RECEPTION).provider()).isEqualTo("ollama");
-        assertThat(configured.skill(Skill.RESTATER).promptVersion()).isEqualTo("v3");
     }
 }

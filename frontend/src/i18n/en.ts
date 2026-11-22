@@ -522,10 +522,10 @@ export const en: Messages = {
       ["drafter", "Drafter"],
       ["translator", "Translator"],
     ],
+    allMock: "All skills are running on sample implementations.",
     mixText: (real, mock) =>
-      `${real.join(", ")} run on the local model, ${mock.join(", ")} run as mocks`,
-    allReal:
-      "All skills run on the local model (the primary-source search is a mock)",
+      `${real.join(", ")} run on real models, ${mock.join(", ")} run as mocks`,
+    allReal: "All skills run on real models",
   },
 
   trace: {
@@ -554,7 +554,6 @@ export const en: Messages = {
     millis: (value) => `${value} ms`,
     seconds: (value) => `${value} s`,
     mock: "Mock",
-    local: "Local model",
     implJoiner: ", ",
   },
 };

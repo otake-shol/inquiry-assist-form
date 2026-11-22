@@ -15,7 +15,7 @@ export interface SkillMix {
 /**
  * `GET /api/config` の `skills` から、どのスキルがモックかを整理する。
  * `skills` が無い（古い API）ときは全スキルがモックとみなす。
- * @param skills スキルの識別子から実装の名前（`mock` / `ollama`）への対応
+ * @param skills スキルの識別子から実装の名前（`mock` など）への対応
  * @param labels 辞書の、スキルの識別子と呼び名（表示順。`messages.skills.labels`）
  */
 export function skillMixOf(
@@ -42,7 +42,7 @@ export function skillMixOf(
 }
 
 /**
- * 構成の内訳を1〜2行の文にする。例: 「受付・聞き手は手元のモデル、調査はモックで動いています」。
+ * 構成の内訳を1〜2行の文にする。例: 「受付・聞き手は実際のモデル、調査はモックで動いています」。
  * @param mix スキルごとの実装の構成
  * @param skills 辞書の、スキルの説明（`messages.skills`）
  */

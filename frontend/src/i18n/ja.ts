@@ -590,11 +590,12 @@ export const ja = {
       ["drafter", "下書き"],
       ["translator", "訳"],
     ] as [id: string, label: string][],
-    /** 内訳の文。例: 「受付・聞き手は手元のモデル、調査はモックで動いています」 */
+    /** すべてのスキルがモックのときの1行 */
+    allMock: "すべてのスキルが、見本の実装で動いています",
+    /** モック以外が混ざるときの内訳の文。例: 「受付・聞き手は実際のモデル、調査はモックで動いています」 */
     mixText: (real: string[], mock: string[]) =>
-      `${real.join("・")}は手元のモデル、${mock.join("・")}はモックで動いています`,
-    allReal:
-      "全スキルが手元のモデルで動いています（一次情報の検索がモックです）",
+      `${real.join("・")}は実際のモデル、${mock.join("・")}はモックで動いています`,
+    allReal: "全スキルが実際のモデルで動いています",
   },
 
   /** スキルの実行記録の表示（開発者向け） */
@@ -627,7 +628,6 @@ export const ja = {
     millis: (value: number) => `${value}ミリ秒`,
     seconds: (value: string) => `${value}秒`,
     mock: "モック",
-    local: "手元のモデル",
     implJoiner: "、",
   },
 };

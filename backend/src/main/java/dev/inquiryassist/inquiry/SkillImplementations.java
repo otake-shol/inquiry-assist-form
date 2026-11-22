@@ -6,7 +6,8 @@ import java.util.Map;
 import org.springframework.core.env.PropertyResolver;
 
 /**
- * スキルと一次情報の検索が、どの実装（{@code mock} または {@code ollama}）で動いているか。
+ * スキルと一次情報の検索が、どの実装で動いているか。いまは、どれも {@code mock} だけ（{@link SkillProviderGuard} が、ほかの値で起動を止める）。
+ * 実際のモデルの実装を足すときの、差し込み口として残す。
  *
  * <p>「モックを含むか」は Spring のプロファイルではなく、スキルごとの設定
  * （{@code inquiry.skills.<識別子>.provider}、{@code inquiry.knowledge.provider}）から判断する。

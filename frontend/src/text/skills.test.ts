@@ -14,11 +14,11 @@ describe("skillMixOf", () => {
   });
 
   const skills = {
-    explainer: "ollama",
+    explainer: "bedrock",
     investigator: "mock",
-    reception: "ollama",
-    interviewer: "ollama",
-    restater: "ollama",
+    reception: "bedrock",
+    interviewer: "bedrock",
+    restater: "bedrock",
   };
 
   it("実際のモデルがあれば、表示順で日本語名に分ける", () => {
@@ -30,7 +30,7 @@ describe("skillMixOf", () => {
       mockIds: ["investigator"],
     });
     expect(skillMixText(mix, ja.skills)).toBe(
-      "受付・聞き手・言い直し・説明は手元のモデル、調査はモックで動いています",
+      "受付・聞き手・言い直し・説明は実際のモデル、調査はモックで動いています",
     );
   });
 
@@ -39,7 +39,7 @@ describe("skillMixOf", () => {
     expect(mix.mock).toEqual(["Investigator"]);
     expect(mix.mockIds).toEqual(["investigator"]);
     expect(skillMixText(mix, en.skills)).toBe(
-      "Reception, Interviewer, Restater, Explainer run on the local model, Investigator run as mocks",
+      "Reception, Interviewer, Restater, Explainer run on real models, Investigator run as mocks",
     );
   });
 
@@ -55,16 +55,16 @@ describe("skillMixOf", () => {
     };
     expect(skillMixOf(seven, ja.skills.labels).partial).toBe(false);
     const mix = skillMixOf(
-      { ...seven, advisor: "ollama", drafter: "ollama" },
+      { ...seven, advisor: "bedrock", drafter: "bedrock" },
       ja.skills.labels,
     );
     expect(mix.real).toEqual(["助言", "下書き"]);
     expect(mix.mock).toHaveLength(5);
     expect(skillMixText(mix, ja.skills)).toBe(
-      "助言・下書きは手元のモデル、受付・聞き手・言い直し・調査・説明はモックで動いています",
+      "助言・下書きは実際のモデル、受付・聞き手・言い直し・調査・説明はモックで動いています",
     );
     const english = skillMixOf(
-      { ...seven, advisor: "ollama" },
+      { ...seven, advisor: "bedrock" },
       en.skills.labels,
     );
     expect(english.real).toEqual(["Advisor"]);

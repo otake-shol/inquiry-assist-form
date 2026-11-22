@@ -6,6 +6,12 @@ import java.util.List;
 /** 保存した利用量から、スキルの実行記録（trace）を作る。本人向けとオペレータ向けで同じ内容を返すため、1か所に置く。 */
 final class TraceViews {
 
+    /**
+     * 手元のモデルの実装を外す前に保存した、モックでない利用量の実装名。そのころ、モックでない呼び出しは、手元のモデルだけだった。
+     * 保存済みの記録を、これまでどおり読むために残す（モデルの名前は、保存した値をそのまま出す）。
+     */
+    static final String LEGACY_PROVIDER = "ollama";
+
     private TraceViews() {}
 
     /**
@@ -41,16 +47,19 @@ final class TraceViews {
         return Skill.ADVISOR.id().equals(step) || Skill.DRAFTER.id().equals(step) || Skill.TRANSLATOR.id().equals(step);
     }
 
-    /** その呼び出しがモックなら mock、そうでなければ設定上の実装名。 */
+    /**
+     * 保存済みの記録には、実装の名前がない。モックの呼び出しは mock。モックでない呼び出しは、設定上の実装名が mock でなければそれ
+     * （実際のモデルの実装を足したとき）。mock なら、設定が変わった後に読む、これまでの記録なので、{@link #LEGACY_PROVIDER}。
+     */
     private static String providerOf(InquiryEntity.StoredUsage usage, SkillImplementations implementations) {
         if (usage.mock()) {
             return SkillImplementations.MOCK;
         }
         for (Skill skill : Skill.values()) {
-            if (skill.id().equals(usage.step())) {
+            if (skill.id().equals(usage.step()) && !implementations.isMock(skill)) {
                 return implementations.providerOf(skill);
             }
         }
-        return "unknown";
+        return LEGACY_PROVIDER;
     }
 }

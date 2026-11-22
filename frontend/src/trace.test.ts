@@ -69,7 +69,7 @@ describe("summarizeTrace", () => {
       failedCalls: 0,
     });
     expect(restater.implementations).toEqual([
-      { provider: "ollama", model: "qwen3.6:35b" },
+      { provider: "mock", model: null },
     ]);
   });
 
@@ -83,7 +83,12 @@ describe("summarizeTrace", () => {
           model: null,
           durationMillis: 40,
         }),
-        makeTraceEntry({ skill: "interviewer", durationMillis: null }),
+        makeTraceEntry({
+          skill: "interviewer",
+          provider: "bedrock",
+          model: "model-x",
+          durationMillis: null,
+        }),
       ],
       ja.trace,
     );
@@ -91,7 +96,7 @@ describe("summarizeTrace", () => {
     expect(stages[1].durationMillis).toBe(40);
     expect(stages[1].implementations.map((i) => i.provider)).toEqual([
       "mock",
-      "ollama",
+      "bedrock",
     ]);
   });
 
@@ -132,20 +137,42 @@ describe("表示用の整形", () => {
     expect(formatDuration(null, ja.trace)).toBe("記録なし");
   });
 
-  it("実装はモック、手元のモデルとモデルの名前で示す", () => {
+  it("実装はモックなら「モック」、それ以外は API が返した名前（とモデルの名前）をそのまま示す", () => {
     expect(implementationLabel("mock", null, ja)).toBe("モック");
-    expect(implementationLabel("ollama", "qwen3.6:35b", ja)).toBe(
-      "手元のモデル（qwen3.6:35b）",
+    expect(implementationLabel("bedrock", "model-x", ja)).toBe(
+      "bedrock（model-x）",
     );
-    expect(implementationLabel("ollama", null, ja)).toBe("手元のモデル");
+    expect(implementationLabel("bedrock", null, ja)).toBe("bedrock");
+  });
+
+  it("保存済みの古い記録（手元のモデルで動いたもの）も、保存された名前のまま示せる", () => {
+    expect(implementationLabel("ollama", "qwen3.6:35b", ja)).toBe(
+      "ollama（qwen3.6:35b）",
+    );
+    expect(implementationLabel("ollama", "qwen3.6:35b", en)).toBe(
+      "ollama (qwen3.6:35b)",
+    );
+    const stages = summarizeTrace(
+      [
+        makeTraceEntry({
+          skill: "restater",
+          provider: "ollama",
+          model: "qwen3.6:35b",
+        }),
+      ],
+      ja.trace,
+    );
+    expect(stages.find((s) => s.key === "restater")!.implementations).toEqual([
+      { provider: "ollama", model: "qwen3.6:35b" },
+    ]);
   });
 
   it("英語では、英語の文言と英語の括弧で示す", () => {
     expect(formatDuration(420, en.trace)).toBe("420 ms");
     expect(formatDuration(2921, en.trace)).toBe("2.9 s");
     expect(formatDuration(null, en.trace)).toBe("No record");
-    expect(implementationLabel("ollama", "qwen3.6:35b", en)).toBe(
-      "Local model (qwen3.6:35b)",
+    expect(implementationLabel("bedrock", "model-x", en)).toBe(
+      "bedrock (model-x)",
     );
     const stages = summarizeTrace([], en.trace);
     expect(stages.map((s) => s.label)).toEqual([
